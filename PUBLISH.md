@@ -1,50 +1,59 @@
 # Publish checklist (Marketplace)
 
-Do this once the publisher account and PAT are ready.
+Publisher **`clawagents`** · source https://github.com/x1jiang/clawagents-vscode · version **0.5.2**
 
-## Prerequisites
+## Done already
 
-1. Create publisher **`clawagents`** at https://marketplace.visualstudio.com/manage  
-   (must match `package.json` → `"publisher"`)
-2. Azure DevOps PAT with **Marketplace → Manage**
-3. Push this extension source to https://github.com/x1jiang/clawagents  
-   (or update `repository` / `bugs` / `homepage` in `package.json` to the real repo)
-4. Confirm PyPI `clawagents>=6.10.0` still installs cleanly for end users
+- [x] Publisher created on Marketplace
+- [x] GitHub repo pushed: https://github.com/x1jiang/clawagents-vscode
+- [x] `package.json` repository / bugs / homepage point at that repo
+- [x] VSIX built: `clawagents-0.5.2.vsix`
+
+## You still need: Azure DevOps PAT (once)
+
+1. Open https://dev.azure.com → sign in with the **same Microsoft account** used for the Marketplace publisher
+2. User settings (top right) → **Personal access tokens** → **New Token**
+3. Settings:
+   - Organization: **All accessible organizations**
+   - Expiration: 90 days (or custom)
+   - Scopes: **Custom** → **Marketplace** → check **Manage**
+4. Create → **copy the token** (shown once)
 
 ## Publish to VS Code Marketplace
 
-```bash
-cd clawagents_vscode
-npx @vscode/vsce login clawagents   # paste PAT
-npm run package                     # builds clawagents-0.5.0.vsix
-npm run publish                     # uploads current version
-```
-
-Or publish an existing VSIX:
+From `clawagents_vscode`:
 
 ```bash
-npx @vscode/vsce publish --packagePath ./clawagents-0.5.0.vsix
+# Option A — env var (no interactive login store)
+VSCE_PAT='paste-token-here' npx @vscode/vsce publish --packagePath ./clawagents-0.5.2.vsix
+
+# Option B — login once, then publish
+npx @vscode/vsce login clawagents   # paste PAT when prompted
+npm run publish
 ```
 
-Listing URL (after indexing):  
+Listing (after indexing, often a few minutes):  
 https://marketplace.visualstudio.com/items?itemName=clawagents.clawagents
 
-## Publish to Open VSX (Cursor / others)
+## Optional: Open VSX (Cursor / others)
+
+1. Create account + token at https://open-vsx.org
+2. Namespace must match publisher id (`clawagents`) or claim it
+3. Publish:
 
 ```bash
-# Create token at https://open-vsx.org
-npx ovsx publish ./clawagents-0.5.0.vsix -p "$OVSX_PAT"
+npx ovsx publish ./clawagents-0.5.2.vsix -p "$OVSX_PAT"
 ```
 
 ## After publish
 
 - [ ] Install from Marketplace in a clean VS Code profile
 - [ ] Confirm first-run Python deps prompt + sidecar start
-- [ ] Smoke-test OpenAI / Gemini / Anthropic with Auto-approve off
-- [ ] Bump version for every subsequent release (Marketplace rejects duplicates)
+- [ ] Smoke-test with Auto-approve off
+- [ ] Bump `package.json` version for every subsequent release
 
 ## Notes
 
 - Never commit PATs
-- Each Marketplace version is immutable — bump `package.json` version for fixes
-- Users still need `pip install clawagents…` into `clawagents.pythonPath`
+- Marketplace versions are immutable
+- Users still need `pip install 'clawagents[gemini,anthropic,mcp]' fastapi uvicorn pydantic`
