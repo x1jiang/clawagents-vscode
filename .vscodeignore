@@ -17,5 +17,6 @@ python/**/__pycache__/**
 .gitignore
 *.vsix
 PUBLISH.md
+media/icon.svg
 **/.git/**
 **/__pycache__/**

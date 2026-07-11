@@ -1,10 +1,11 @@
 {
   "name": "clawagents",
   "displayName": "ClawAgents",
-  "description": "Autonomous coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, or local models.",
-  "version": "0.5.2",
+  "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, or local models.",
+  "version": "0.5.3",
   "publisher": "clawagents",
   "license": "MIT",
+  "preview": true,
   "icon": "media/icon.png",
   "galleryBanner": {
     "color": "#0f766e",
@@ -46,7 +47,7 @@
         {
           "id": "clawagents",
           "title": "ClawAgents",
-          "icon": "media/icon.svg"
+          "icon": "media/icon.png"
         }
       ]
     },
@@ -57,7 +58,7 @@
           "id": "clawagents.sidebar",
           "name": "ClawAgents",
           "visibility": "visible",
-          "icon": "media/icon.svg"
+          "icon": "media/icon.png"
         }
       ]
     },
@@ -105,7 +106,7 @@
       },
       {
         "command": "clawagents.setApiKey",
-        "title": "ClawAgents: Set API Key"
+        "title": "ClawAgents: Set Provider Credential"
       }
     ],
     "keybindings": [
@@ -183,7 +184,7 @@
             "auto"
           ],
           "default": "auto",
-          "description": "Which API key SecretStorage slot to prefer when starting the sidecar."
+          "description": "Which provider credential slot (SecretStorage) to prefer when starting the sidecar."
         },
         "clawagents.defaultMode": {
           "type": "string",

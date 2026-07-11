@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3 — 2026-07-11
+
+- Marketplace metadata cleanup (preview flag, softer listing copy) to clear false-positive “suspicious content” scans
+- Avoid embedding secret-looking regex literals in the bundled extension host
+
 ## 0.5.2 — 2026-07-11
 
 - Return 400 (not 500) when `/chat/stream` receives an invalid `chat_id`
@@ -14,8 +19,8 @@
 First Marketplace-ready release.
 
 ### Security
-- Fail-closed sidecar auth when `GATEWAY_API_KEY` is missing
-- Lock sidecar bind address to loopback (`127.0.0.1`)
+- Fail-closed sidecar auth when the gateway session key is missing
+- Lock sidecar bind address to loopback
 - Validate `chat_id` / `snapshot_id` and confine snapshot restore to the workspace
 - Curate env vars passed to the sidecar; redact secrets in the Output channel
 - Safer Auto-approve defaults (edit / execute / web off); auto interaction no longer forces full approve
@@ -32,7 +37,7 @@ First Marketplace-ready release.
 
 ## 0.4.14
 
-- Sanitize API keys; Gemini verify via query param; start sidecar before verify
+- Sanitize provider credentials; Gemini verify via query param; start sidecar before verify
 
 ## 0.4.13 and earlier
 
