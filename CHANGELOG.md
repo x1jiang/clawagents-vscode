@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.17 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.10.7** (peer harness pack)
+- Sidecar: `GET /checkpoints`, `POST /checkpoints/restore` for shadow-git undo
+
 ## 0.5.16 — 2026-07-11
 
 - Require / auto-upgrade to **clawagents ≥ 6.10.6** (context headroom: crushers, tiered read, cache-stable prompts, failure→AGENTS.md)

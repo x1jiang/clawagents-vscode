@@ -94,3 +94,22 @@ def latest_snapshot_for(rel_or_abs: str) -> dict[str, Any] | None:
         if match:
             return {"snapshot_id": snap["id"], "rel": match, "path": snap["path"]}
     return None
+
+
+def list_shadow_checkpoints(limit: int = 30) -> list[dict[str, Any]]:
+    """List Cline-style shadow-git checkpoints (requires clawagents with shadow_checkpoint)."""
+    try:
+        from clawagents.memory.shadow_checkpoint import list_checkpoints
+
+        return list_checkpoints(workspace=str(WORKSPACE), limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        return [{"error": str(exc)}]
+
+
+def restore_shadow_checkpoint(sha: str) -> dict[str, Any]:
+    try:
+        from clawagents.memory.shadow_checkpoint import restore_checkpoint
+
+        return restore_checkpoint(sha, workspace=str(WORKSPACE))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}

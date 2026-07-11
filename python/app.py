@@ -34,7 +34,13 @@ from paths import GATEWAY_API_KEY, MODEL, WORKSPACE, ensure_dirs, safe_id
 from providers import build_provider_catalog, verify_api_key
 from settings_store import load_settings, save_settings
 from skills_catalog import preview_skills
-from snapshots import latest_snapshot_for, list_snapshots, restore_file
+from snapshots import (
+    latest_snapshot_for,
+    list_shadow_checkpoints,
+    list_snapshots,
+    restore_file,
+    restore_shadow_checkpoint,
+)
 from stats import get_stats, record_turn
 
 Decision = Literal["allow_once", "allow_always", "deny"]
@@ -406,6 +412,10 @@ class RestoreBody(BaseModel):
     dest_rel: str | None = None
 
 
+class CheckpointRestoreBody(BaseModel):
+    sha: str
+
+
 class VerifyBody(BaseModel):
     provider: str
 
@@ -645,6 +655,20 @@ def create_app() -> FastAPI:
             return Response(status_code=404, content=json.dumps({"error": str(exc)}))
         except ValueError as exc:
             return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+
+    @app.get("/checkpoints")
+    async def checkpoints_list(request: Request, limit: int = 30):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return list_shadow_checkpoints(limit=limit)
+
+    @app.post("/checkpoints/restore")
+    async def checkpoints_restore(body: CheckpointRestoreBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return restore_shadow_checkpoint(body.sha)
 
     @app.get("/chats")
     async def chats_list(request: Request, q: str | None = None):

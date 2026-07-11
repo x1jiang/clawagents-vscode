@@ -4,7 +4,7 @@ import { curatedProcessEnv } from "./envCurate";
 
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
-  "clawagents[gemini,anthropic,mcp]>=6.10.6",
+  "clawagents[gemini,anthropic,mcp]>=6.10.7",
   "fastapi",
   "uvicorn",
   "pydantic",
@@ -12,7 +12,7 @@ export const SIDECAR_PIP_PACKAGES = [
 ] as const;
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 10, 6];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 10, 7];
 
 export type DepProbe = {
   ok: boolean;
