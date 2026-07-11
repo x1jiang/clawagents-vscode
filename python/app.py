@@ -46,38 +46,70 @@ from stats import get_stats, record_turn
 Decision = Literal["allow_once", "allow_always", "deny"]
 Mode = Literal["ask", "read_only", "auto", "full_access"]
 
-_cancel = threading.Event()
 _permission_lock = threading.Lock()
 _permission_events: dict[str, threading.Event] = {}
 _permission_results: dict[str, Decision] = {}
 _permission_meta: dict[str, dict[str, Any]] = {}
 
-# Currently running agent turn, so /cancel can actually stop it (the agent
-# loop converts CancelledError into a clean "[cancelled]" state).
+# Active agent turns, keyed by run id. Each run owns a *per-run* cancel
+# event (a global flag would let a new turn un-cancel — or inherit the
+# cancellation of — a concurrent one) plus a canceller that cancels the
+# asyncio task, which the agent loop converts into a clean "[cancelled]"
+# state.
 _run_lock = threading.Lock()
-_current_run: dict[str, Any] = {}
+_active_runs: dict[str, dict[str, Any]] = {}
 
 
-def _register_run(canceller: Callable[[], None]) -> str:
+def _register_run(cancel_ev: threading.Event) -> str:
     run_id = uuid.uuid4().hex
     with _run_lock:
-        _current_run[run_id] = canceller
+        _active_runs[run_id] = {"ev": cancel_ev, "cancel": None}
     return run_id
+
+
+def _set_run_canceller(run_id: str, canceller: Callable[[], None]) -> None:
+    fire = False
+    with _run_lock:
+        run = _active_runs.get(run_id)
+        if run is not None:
+            run["cancel"] = canceller
+            # /cancel may have raced registration: apply it now (outside the lock).
+            fire = run["ev"].is_set()
+    if fire:
+        _fire_canceller(canceller)
 
 
 def _unregister_run(run_id: str) -> None:
     with _run_lock:
-        _current_run.pop(run_id, None)
+        _active_runs.pop(run_id, None)
+
+
+def _fire_canceller(cancel_fn: Callable[[], None] | None) -> None:
+    if cancel_fn is None:
+        return
+    try:
+        cancel_fn()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _cancel_run(run_id: str) -> None:
+    with _run_lock:
+        run = _active_runs.get(run_id)
+        if run is None:
+            return
+        run["ev"].set()
+        cancel_fn = run["cancel"]
+    _fire_canceller(cancel_fn)
 
 
 def _cancel_all_runs() -> None:
     with _run_lock:
-        cancellers = list(_current_run.values())
-    for cancel_fn in cancellers:
-        try:
-            cancel_fn()
-        except Exception:  # noqa: BLE001
-            pass
+        runs = list(_active_runs.values())
+        for run in runs:
+            run["ev"].set()
+    for run in runs:
+        _fire_canceller(run["cancel"])
 
 
 class PermissionWaiter:
@@ -425,6 +457,7 @@ def _make_before_tool(
     grants: GrantStore,
     sse_fn,
     auto_approve: AutoApprove | None = None,
+    cancel_check: Callable[[], bool] = lambda: False,
 ):
     from clawagents import HookResult
     from clawagents.permissions.mode import WRITE_CLASS_TOOLS
@@ -476,7 +509,7 @@ def _make_before_tool(
             return False
 
     def before_tool(name: str, args: dict[str, Any]):
-        if _cancel.is_set():
+        if cancel_check():
             return HookResult(allowed=False, reason="Cancelled by user")
 
         # Known read/search tools never need a prompt. Unknown names (MCP,
@@ -755,12 +788,16 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        _cancel.set()
+        _cancel_all_runs()
         with _permission_lock:
             ids = list(_permission_events.keys())
         for rid in ids:
             _waiter.resolve(rid, "deny")
-        _cancel_all_runs()
+        # Unblock any agent turn waiting on an ask_user prompt.
+        with _ask_lock:
+            ask_ids = list(_ask_events.keys())
+        for rid in ask_ids:
+            _ask_waiter.resolve(rid, None)
         return {"ok": True}
 
     @app.post("/chat/stream")
@@ -771,7 +808,11 @@ def create_app() -> FastAPI:
 
         event_queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
-        _cancel.clear()
+        # Per-run cancellation token: registered before any work starts so
+        # POST /cancel can reach this turn even during setup, and isolated so
+        # cancelling (or starting) one turn never affects another.
+        cancel_ev = threading.Event()
+        run_id = _register_run(cancel_ev)
 
         chat_id = body.chat_id or body.session_id
         if not chat_id:
@@ -851,7 +892,13 @@ def create_app() -> FastAPI:
             # Respect the client's Auto-approve toggles even in "auto" interaction.
             # (Auto interaction only stubs ask_user — it must not silently enable
             # shell/network without the user opting in via Auto-approve.)
-            return _make_before_tool(mode, grants, sse, auto_approve=body.auto_approve)
+            return _make_before_tool(
+                mode,
+                grants,
+                sse,
+                auto_approve=body.auto_approve,
+                cancel_check=cancel_ev.is_set,
+            )
 
         def run_agent() -> dict[str, Any]:
             """Run the agent turn on a private event loop in this worker thread.
@@ -877,18 +924,17 @@ def create_app() -> FastAPI:
                         model=body.model,
                         on_event=on_event,
                         before_tool_factory=before_tool_factory,
-                        cancel_check=_cancel.is_set,
+                        cancel_check=cancel_ev.is_set,
                         ask_user_factory=ask_factory,
                         caveman=bool(body.caveman),
                     )
                 )
-                run_id = _register_run(
-                    lambda: worker_loop.call_soon_threadsafe(task.cancel)
+                # Attach the task canceller to the pre-registered run. If
+                # /cancel already fired during setup, it is applied here.
+                _set_run_canceller(
+                    run_id, lambda: worker_loop.call_soon_threadsafe(task.cancel)
                 )
-                try:
-                    return worker_loop.run_until_complete(task)
-                finally:
-                    _unregister_run(run_id)
+                return worker_loop.run_until_complete(task)
             finally:
                 try:
                     worker_loop.run_until_complete(worker_loop.shutdown_asyncgens())
@@ -902,7 +948,7 @@ def create_app() -> FastAPI:
             sse("started", {"lane": body.lane, "chat_id": chat_id, "mode": effective_mode})
             try:
                 result = await asyncio.to_thread(run_agent)
-                if _cancel.is_set():
+                if cancel_ev.is_set():
                     sse("error", {"error": "cancelled"})
                     record_turn(error=True)
                 else:
@@ -926,11 +972,12 @@ def create_app() -> FastAPI:
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 record_turn(error=True)
-                if _cancel.is_set() or "cancelled" in str(exc).lower():
+                if cancel_ev.is_set() or "cancelled" in str(exc).lower():
                     sse("error", {"error": "cancelled"})
                 else:
                     sse("error", {"error": str(exc)})
             finally:
+                _unregister_run(run_id)
                 close_stream()
 
         run_task = asyncio.create_task(_run())
@@ -943,11 +990,11 @@ def create_app() -> FastAPI:
                         break
                     yield msg
             finally:
-                # Client disconnected mid-run: stop the agent instead of
-                # letting it burn tokens into a closed pipe.
+                # Client disconnected mid-run: stop *this* agent turn instead
+                # of letting it burn tokens into a closed pipe. Other turns
+                # are unaffected.
                 if not run_task.done():
-                    _cancel.set()
-                    _cancel_all_runs()
+                    _cancel_run(run_id)
 
         return StreamingResponse(
             _stream(),

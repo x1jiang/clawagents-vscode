@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.18 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.10.8** (compaction budget escalation + message-identity fix)
+- Per-run cancellation tokens (cancel no longer races concurrent turns; disconnect cancels only that run)
+- `/cancel` unblocks pending `ask_user` prompts
+- Capture previous cwd inside the turn lock (fixes chdir restore race)
+- Configurable MCP `mcp.json` server timeout (default 60s, was SDK 5s)
+- Gemini array-schema shim self-disables when upstream already fixed
+- Release builds minify the extension bundle
+
 ## 0.5.17 — 2026-07-11
 
 - Require / auto-upgrade to **clawagents ≥ 6.10.7** (peer harness pack)

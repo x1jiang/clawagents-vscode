@@ -166,6 +166,14 @@ def load_mcp_servers(*, trust_workspace: bool = False) -> list[Any]:
     for name, spec in config.items():
         if not isinstance(spec, dict) or spec.get("disabled"):
             continue
+        # Session read timeout: long-running tools (code execution, big
+        # fetches) legitimately exceed the SDK's 5s default. Configurable per
+        # server via a "timeout" key (seconds), clamped to sane bounds.
+        try:
+            timeout = float(spec.get("timeout", 60.0))
+        except (TypeError, ValueError):
+            timeout = 60.0
+        timeout = min(max(timeout, 5.0), 600.0)
         try:
             if "command" in spec:
                 command = str(spec["command"])
@@ -178,16 +186,32 @@ def load_mcp_servers(*, trust_workspace: bool = False) -> list[Any]:
                 env = _sanitize_mcp_env(spec.get("env"))
                 if env:
                     params["env"] = env
-                out.append(MCPServerStdio(params, name=name))
+                out.append(
+                    MCPServerStdio(
+                        params, name=name, client_session_timeout_seconds=timeout
+                    )
+                )
             elif spec.get("url"):
                 url = str(spec["url"])
                 if not _url_allowed(url):
                     continue
                 transport = str(spec.get("transport") or "sse").lower()
                 if transport == "sse":
-                    out.append(MCPServerSse({"url": url}, name=name))
+                    out.append(
+                        MCPServerSse(
+                            {"url": url},
+                            name=name,
+                            client_session_timeout_seconds=timeout,
+                        )
+                    )
                 else:
-                    out.append(MCPServerStreamableHttp({"url": url}, name=name))
+                    out.append(
+                        MCPServerStreamableHttp(
+                            {"url": url},
+                            name=name,
+                            client_session_timeout_seconds=timeout,
+                        )
+                    )
         except Exception:  # noqa: BLE001
             continue
     return out

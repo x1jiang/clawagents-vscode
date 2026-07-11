@@ -58,13 +58,31 @@ def _check_dependencies() -> None:
 def _patch_gemini_array_schemas() -> None:
     """Gemini rejects ARRAY tool params without ``items`` (MCP schemas often omit it).
 
-    Patches the installed clawagents converters so VS Code users get the fix
-    without waiting on a pip release.
+    Back-compat shim for pip-installed clawagents releases that predate the
+    upstream fix. Self-disables when the installed converters already handle
+    ``items`` so it can never mask newer upstream behavior.
     """
+    import inspect
+
     try:
         from clawagents.providers import llm as llm_mod
     except Exception:  # noqa: BLE001
         return
+
+    def _already_fixed(fn) -> bool:  # type: ignore[no-untyped-def]
+        try:
+            return '"items"' in inspect.getsource(fn)
+        except (OSError, TypeError):
+            return False
+
+    if _already_fixed(getattr(llm_mod, "_to_gemini_tools", None)):
+        try:
+            from clawagents.mcp import tool_bridge as bridge_mod
+
+            if _already_fixed(getattr(bridge_mod, "_normalize_input_schema", None)):
+                return  # upstream carries both fixes — nothing to patch
+        except Exception:  # noqa: BLE001
+            return
 
     def _to_gemini_tools(schemas):  # type: ignore[no-untyped-def]
         declarations = []

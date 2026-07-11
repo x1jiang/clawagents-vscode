@@ -489,8 +489,11 @@ async def run_chat_turn(
         if kind in ("warn", "error", "tool_skipped"):
             on_event(kind, data or {})
 
-    prev = os.getcwd()
     with _turn_lock:
+        # Capture cwd *inside* the lock: with concurrent turns, capturing it
+        # outside could snapshot another turn's WORKSPACE chdir and "restore"
+        # to the wrong directory afterwards.
+        prev = os.getcwd()
         try:
             os.chdir(WORKSPACE)
             # Drop kwargs unsupported by the installed clawagents version
