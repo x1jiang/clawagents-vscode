@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, or local models.",
-  "version": "0.5.3",
+  "version": "0.5.6",
   "publisher": "clawagents",
   "license": "MIT",
   "preview": true,
@@ -107,6 +107,10 @@
       {
         "command": "clawagents.setApiKey",
         "title": "ClawAgents: Set Provider Credential"
+      },
+      {
+        "command": "clawagents.installPythonDeps",
+        "title": "ClawAgents: Install/Upgrade Python Dependencies"
       }
     ],
     "keybindings": [

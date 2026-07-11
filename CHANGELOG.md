@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.6 — 2026-07-11
+
+- Auto-install/upgrade Python deps (`clawagents[gemini,anthropic,mcp]`, fastapi, uvicorn, pydantic) on remote/local when missing or too old
+- New command: **ClawAgents: Install/Upgrade Python Dependencies**
+
+## 0.5.5 — 2026-07-11
+
+- Fix crash on older PyPI clawagents: only pass `skills_exclude` / kwargs that `create_claw_agent` supports
+
+## 0.5.4 — 2026-07-11
+
+- Remote/SSH: probe Python before spawn, longer health timeout, surface real sidecar errors in UI
+- Forward conda/pyenv env into sidecar; offline provider fallback when catalog is empty
+
 ## 0.5.3 — 2026-07-11
 
 - Marketplace metadata cleanup (preview flag, softer listing copy) to clear false-positive “suspicious content” scans

@@ -237,11 +237,28 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       await this.sidecar.ensureStarted();
       this.post({ type: "sidecar", state: "running" });
     } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
       this.post({
         type: "sidecar",
         state: "error",
-        detail: err instanceof Error ? err.message : String(err),
+        detail,
       });
+      void vscode.window
+        .showErrorMessage(
+          `ClawAgents sidecar failed: ${detail.split("\n")[0]}`,
+          "Show Sidecar Log",
+          "Open Settings",
+        )
+        .then((choice) => {
+          if (choice === "Show Sidecar Log") {
+            void vscode.commands.executeCommand("workbench.action.output.toggleOutput");
+          } else if (choice === "Open Settings") {
+            void vscode.commands.executeCommand(
+              "workbench.action.openSettings",
+              "clawagents.pythonPath",
+            );
+          }
+        });
     }
     await this.pushReady();
     if (!this.chatId) {

@@ -1,7 +1,9 @@
-# ClawAgents sidecar dependencies (install into clawagents.pythonPath)
+# ClawAgents sidecar dependencies (auto-installed into clawagents.pythonPath)
 #
-#   python3 -m pip install -r requirements.txt
-#   python3 -m pip install 'clawagents[gemini,anthropic,mcp]'   # recommended extras
+# On first start / Restart Sidecar, the extension runs:
+#   python -m pip install -U 'clawagents[gemini,anthropic,mcp]' fastapi uvicorn pydantic python-dotenv
+#
+# Or Command Palette → ClawAgents: Install/Upgrade Python Dependencies
 #
 clawagents>=6.10.0
 fastapi>=0.100.0

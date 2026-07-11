@@ -1,5 +1,3 @@
-import { spawn } from "child_process";
-import * as path from "path";
 import * as vscode from "vscode";
 import {
   buildProblemsContext,
@@ -8,71 +6,12 @@ import {
   wrapCurrentFileRef,
   wrapSelectionBlock,
 } from "./config";
+import { ensureSidecarDeps, SIDECAR_PIP_PACKAGES } from "./pythonDeps";
 import { SidecarManager } from "./sidecar";
 import { ClawAgentsWebviewProvider } from "./webviewProvider";
 
 let sidecar: SidecarManager | undefined;
 let provider: ClawAgentsWebviewProvider | undefined;
-
-async function checkPythonDeps(
-  context: vscode.ExtensionContext,
-  pythonPath: string,
-): Promise<void> {
-  const stateKey = "clawagents.depsPrompted.v1";
-  if (context.globalState.get(stateKey)) {
-    return;
-  }
-
-  const ok = await new Promise<boolean>((resolve) => {
-    const child = spawn(
-      pythonPath,
-      ["-c", "import clawagents, fastapi, uvicorn, pydantic"],
-      { stdio: ["ignore", "ignore", "ignore"] },
-    );
-    const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        /* ignore */
-      }
-      resolve(false);
-    }, 8000);
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolve(false);
-    });
-    child.on("exit", (code) => {
-      clearTimeout(timer);
-      resolve(code === 0);
-    });
-  });
-
-  if (ok) {
-    await context.globalState.update(stateKey, true);
-    return;
-  }
-
-  const req = path.join(context.extensionPath, "python", "requirements.txt");
-  const choice = await vscode.window.showWarningMessage(
-    "ClawAgents needs Python packages (clawagents, fastapi, uvicorn). Install them into the interpreter from setting clawagents.pythonPath.",
-    "Copy install command",
-    "Open settings",
-    "Don't show again",
-  );
-  if (choice === "Copy install command") {
-    await vscode.env.clipboard.writeText(
-      `${pythonPath} -m pip install -r "${req}" && ${pythonPath} -m pip install 'clawagents[gemini,anthropic,mcp]'`,
-    );
-    void vscode.window.showInformationMessage("Install command copied to clipboard.");
-  } else if (choice === "Open settings") {
-    await vscode.commands.executeCommand(
-      "workbench.action.openSettings",
-      "clawagents.pythonPath",
-    );
-  } else if (choice === "Don't show again") {
-    await context.globalState.update(stateKey, true);
-  }
-}
 
 export function activate(context: vscode.ExtensionContext): void {
   const config = new ExtensionConfig(context.secrets);
@@ -81,7 +20,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   trackEditorFocus(context.subscriptions);
 
-  void checkPythonDeps(context, config.pythonPath);
+  // First activation: ensure remote/local Python has clawagents + extras.
+  // Also runs again from sidecar ensureStarted when imports fail.
+  void (async () => {
+    const out = vscode.window.createOutputChannel("ClawAgents Sidecar");
+    try {
+      await ensureSidecarDeps(config.pythonPath, out);
+    } catch (err) {
+      out.appendLine(err instanceof Error ? err.message : String(err));
+    }
+  })();
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ClawAgentsWebviewProvider.viewType, provider, {
@@ -136,6 +84,21 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("clawagents.restartSidecar", async () => {
       await provider?.restartSidecar();
     }),
+    vscode.commands.registerCommand("clawagents.installPythonDeps", async () => {
+      const out = vscode.window.createOutputChannel("ClawAgents Sidecar");
+      out.show(true);
+      const python = config.pythonPath;
+      out.appendLine(`Installing into ${python}: ${SIDECAR_PIP_PACKAGES.join(" ")}`);
+      const probe = await ensureSidecarDeps(python, out);
+      if (probe.ok) {
+        void vscode.window.showInformationMessage(
+          `ClawAgents deps OK (${probe.version || "ok"}). Restarting sidecar…`,
+        );
+        await provider?.restartSidecar();
+      } else {
+        void vscode.window.showErrorMessage(probe.detail.split("\n")[0] || "Install failed");
+      }
+    }),
     vscode.commands.registerCommand("clawagents.setApiKey", async () => {
       const saved = await config.promptSetApiKey();
       if (saved) {
@@ -145,8 +108,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  // Apply relevant VS Code setting changes by restarting the sidecar (its
-  // environment is fixed at spawn). Skipped while a task is streaming.
   const sidecarSettings = [
     "clawagents.pythonPath",
     "clawagents.model",
@@ -159,7 +120,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       if (!sidecar?.current) {
-        return; // not started yet — next start picks the new values up
+        return;
       }
       if (provider?.busy) {
         void vscode.window.showInformationMessage(

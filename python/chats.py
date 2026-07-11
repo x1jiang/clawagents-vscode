@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import os
 import re
 import threading
@@ -388,7 +389,18 @@ async def run_chat_turn(
         exclude.discard("openviking")
     else:
         exclude.add("openviking")
-    kwargs["skills_exclude"] = sorted(exclude)
+    # skills_exclude requires a newer clawagents; older installs ignore excludes
+    # rather than crashing the whole turn.
+    _agent_params = inspect.signature(create_claw_agent).parameters
+    if "skills_exclude" in _agent_params:
+        kwargs["skills_exclude"] = sorted(exclude)
+    elif exclude:
+        # Best-effort: drop excluded skill folder names from the skills path list.
+        kwargs["skills"] = [
+            p
+            for p in (kwargs.get("skills") or [])
+            if Path(p).name not in exclude
+        ]
 
     # MCP (user-configured servers from mcp.json + built-in Context Mode)
     mcp_servers: list[Any] = []
@@ -499,7 +511,10 @@ async def run_chat_turn(
     with _turn_lock:
         try:
             os.chdir(WORKSPACE)
-            agent = create_claw_agent(**kwargs)
+            # Drop kwargs unsupported by the installed clawagents version
+            # (PyPI lag vs extension features).
+            allowed = set(inspect.signature(create_claw_agent).parameters)
+            agent = create_claw_agent(**{k: v for k, v in kwargs.items() if k in allowed})
             agent.before_tool = before_tool_factory(mode=mode, grants=GrantStore())
             if ask_user_factory is not None:
                 # Sidecar has no stdin — replace CLI ask_user with webview HITL.

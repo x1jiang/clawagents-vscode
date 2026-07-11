@@ -70,6 +70,39 @@ type Provider = {
   base_url?: string;
 };
 
+/** Shown when the sidecar has not returned a catalog yet (e.g. remote Python missing deps). */
+const FALLBACK_PROVIDERS: Provider[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    models: [
+      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+      { id: "gpt-4o", label: "GPT-4o" },
+    ],
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    models: [
+      { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+      { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
+    ],
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    models: [
+      { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    ],
+  },
+  {
+    id: "ollama",
+    name: "Ollama (local)",
+    models: [{ id: "llama3.1", label: "Llama 3.1" }],
+  },
+];
+
 type SkillsPreview = {
   folders: Array<{ path: string; origin: string }>;
   skills: Array<{
@@ -671,13 +704,14 @@ export function App() {
   };
 
   const selectedProvider = String(settings.provider || "auto");
+  const providerCatalog = providers.length ? providers : FALLBACK_PROVIDERS;
   const allModels = useMemo(() => {
     const seen = new Set<string>();
     const rows: NonNullable<Provider["models"]> = [];
     const lists =
       selectedProvider === "auto"
-        ? providers.map((p) => p.models || [])
-        : [providers.find((p) => p.id === selectedProvider)?.models || []];
+        ? providerCatalog.map((p) => p.models || [])
+        : [providerCatalog.find((p) => p.id === selectedProvider)?.models || []];
     for (const list of lists) {
       for (const m of list) {
         if (!m?.id || seen.has(m.id)) {
@@ -688,9 +722,9 @@ export function App() {
       }
     }
     return rows;
-  }, [providers, selectedProvider]);
+  }, [providerCatalog, selectedProvider]);
   const providerModels =
-    providers.find((p) => p.id === selectedProvider)?.models || allModels;
+    providerCatalog.find((p) => p.id === selectedProvider)?.models || allModels;
 
   const activeModelId =
     (typeof settings.model === "string" && settings.model) ||
@@ -832,7 +866,22 @@ export function App() {
         </nav>
         {!hasApiKey && panel === "chat" && (
           <div className="banner warn">
-            No API key. Open <strong>settings</strong> or run Set API Key.
+            No provider credential. Open <strong>settings</strong> or run Set Provider Credential.
+          </div>
+        )}
+        {sidecar === "error" && (
+          <div className="banner error-banner" role="alert">
+            <strong>Sidecar failed to start</strong>
+            {sidecarDetail ? <> — {sidecarDetail}</> : null}
+            <div className="banner-actions">
+              On a remote SSH host, install packages into the <em>remote</em> Python (
+              <code>clawagents.pythonPath</code>), then Restart Sidecar:
+              <pre>
+                python3 -m pip install &apos;clawagents[gemini,anthropic,mcp]&apos; fastapi uvicorn
+                pydantic
+              </pre>
+              Details: Output panel → <em>ClawAgents Sidecar</em>
+            </div>
           </div>
         )}
       </header>
@@ -894,7 +943,7 @@ export function App() {
                 onChange={(e) => setSettings((s) => ({ ...s, provider: e.target.value }))}
               >
                 <option value="auto">auto</option>
-                {providers.map((p) => (
+                {providerCatalog.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
                     {p.available === false ? " (no key)" : ""}

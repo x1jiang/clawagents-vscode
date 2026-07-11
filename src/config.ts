@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
@@ -32,14 +33,62 @@ export function sanitizeApiKey(raw: string): string {
 export type ProviderKind = keyof typeof SECRET_KEYS | "auto";
 export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
 
+/**
+ * Resolve a usable Python executable. Remote hosts often have a stale
+ * clawagents.pythonPath (e.g. /usr/local/bin/python3) that does not exist;
+ * fall back to common locations before spawn fails obscurely.
+ */
+export function resolvePythonExecutable(configured: string): string {
+  const candidates: string[] = [];
+  const push = (p?: string) => {
+    const t = (p || "").trim();
+    if (t && !candidates.includes(t)) {
+      candidates.push(t);
+    }
+  };
+  push(configured);
+  if (process.platform !== "win32") {
+    push("python3");
+    push("/usr/bin/python3");
+    push("/bin/python3");
+  } else {
+    push("python");
+    push("py");
+  }
+
+  for (const candidate of candidates) {
+    if (path.isAbsolute(candidate)) {
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+      continue;
+    }
+    // Bare command name — prefer PATH resolution via `which` / `where`.
+    try {
+      const finder = process.platform === "win32" ? "where" : "which";
+      const result = spawnSync(finder, [candidate], { encoding: "utf8" });
+      const resolved = (result.stdout || "")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find((l) => l && fs.existsSync(l));
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return configured.trim() || candidates[0] || "python3";
+}
+
 export class ExtensionConfig {
   constructor(private readonly secrets: vscode.SecretStorage) {}
 
   get pythonPath(): string {
-    return (
+    const configured =
       vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
-      (process.platform === "win32" ? "python" : "python3")
-    );
+      (process.platform === "win32" ? "python" : "python3");
+    return resolvePythonExecutable(configured);
   }
 
   get model(): string {

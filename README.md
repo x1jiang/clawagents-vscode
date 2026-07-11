@@ -11,13 +11,13 @@ Coding agent for VS Code and Cursor. Chat in the **right sidebar**, edit your wo
 ## Quick start
 
 1. Install this extension from the Marketplace (or a `.vsix`).
-2. Install the Python runtime into your interpreter:
+2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into `clawagents.pythonPath`:
 
-```bash
-python3 -m pip install 'clawagents[gemini,anthropic,mcp]' fastapi uvicorn pydantic
+```text
+clawagents[gemini,anthropic,mcp]  fastapi  uvicorn  pydantic  python-dotenv
 ```
 
-(Alternatively install from the extension’s bundled `python/requirements.txt`.)
+You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
 
 3. Add credentials: Command Palette → **ClawAgents: Set Provider Credential**, or put provider variables in a workspace env file (see [clawagents docs](https://github.com/x1jiang/clawagents_py)).
 

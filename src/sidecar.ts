@@ -5,6 +5,7 @@ import * as net from "net";
 import * as path from "path";
 import * as vscode from "vscode";
 import { ExtensionConfig, workspaceRoot } from "./config";
+import { ensureSidecarDeps } from "./pythonDeps";
 
 export interface SidecarHandle {
   port: number;
@@ -30,6 +31,15 @@ const SAFE_ENV_KEYS = new Set([
   "VIRTUAL_ENV",
   "PYTHONPATH",
   "PYTHONHOME",
+  "PYTHONUSERBASE",
+  "CONDA_PREFIX",
+  "CONDA_DEFAULT_ENV",
+  "CONDA_PYTHON_EXE",
+  "CONDA_EXE",
+  "PYENV_ROOT",
+  "PYENV_VERSION",
+  "LD_LIBRARY_PATH",
+  "DYLD_LIBRARY_PATH",
   "SSL_CERT_FILE",
   "REQUESTS_CA_BUNDLE",
   "CURL_CA_BUNDLE",
@@ -47,7 +57,12 @@ function curatedProcessEnv(): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (v == null) continue;
-    if (SAFE_ENV_KEYS.has(k) || k.startsWith("LC_")) {
+    if (
+      SAFE_ENV_KEYS.has(k) ||
+      k.startsWith("LC_") ||
+      k.startsWith("CONDA_") ||
+      k.startsWith("PYENV_")
+    ) {
       out[k] = v;
     }
   }
@@ -122,6 +137,7 @@ export class SidecarManager {
   private handle: SidecarHandle | undefined;
   private child: ChildProcess | undefined;
   private output: vscode.OutputChannel;
+  private lastLog = "";
 
   constructor(
     private readonly extensionPath: string,
@@ -140,20 +156,24 @@ export class SidecarManager {
     }
     await this.stop();
 
+    const python = this.config.pythonPath;
+    const bridge = path.join(this.extensionPath, "python", "bridge.py");
+    const probe = await ensureSidecarDeps(python, this.output, curatedProcessEnv());
+    this.output.appendLine(`Python probe (${python}): ${probe.ok ? "ok" : "FAILED"}`);
+    this.output.appendLine(`Using interpreter: ${python}`);
+    this.output.appendLine(probe.detail || "(no detail)");
+    if (!probe.ok) {
+      throw new Error(probe.detail);
+    }
+
     const port = await findFreePort();
     const token = crypto.randomBytes(32).toString("hex");
-    const bridge = path.join(this.extensionPath, "python", "bridge.py");
-    const python = this.config.pythonPath;
     const cwd = workspaceRoot() || this.extensionPath;
     const apiEnv = await this.config.getApiKeyEnv();
     const dotenvEnv = this.config.loadWorkspaceDotenv();
     const model = this.config.model;
 
     // Spawn precedence: curated process.env < workspace .env < SecretStorage keys.
-    // Caveat: the clawagents runtime also loads the workspace .env itself
-    // (override=true), so for variables present in BOTH the workspace .env
-    // and SecretStorage, the .env value wins at runtime. Remove the key
-    // from .env to let the SecretStorage key take effect.
     const keySources: Record<string, string> = {};
     const keyVars: Record<string, string[]> = {
       openai: ["OPENAI_API_KEY"],
@@ -170,7 +190,6 @@ export class SidecarManager {
       }
     }
 
-    // Allow shell-exported provider keys (curatedProcessEnv strips them on purpose).
     const shellKeys: NodeJS.ProcessEnv = {};
     for (const vars of Object.values(keyVars)) {
       for (const v of vars) {
@@ -189,28 +208,35 @@ export class SidecarManager {
       CLAW_WORKSPACE: cwd,
       PYTHONUNBUFFERED: "1",
       CLAW_KEY_SOURCES: JSON.stringify(keySources),
-      // Default for the sidecar's context_mode setting; the sidebar Settings
-      // checkbox (persisted per workspace) overrides it.
       CLAW_CONTEXT_MODE: this.config.contextMode ? "1" : "0",
     };
     if (model) {
       env.CLAW_MODEL = model;
     }
 
+    this.lastLog = "";
     this.output.appendLine(`Starting sidecar: ${python} ${bridge} --port ${port}`);
+    this.output.appendLine(`cwd=${cwd}`);
     this.child = spawn(python, [bridge, "--port", String(port), "--host", "127.0.0.1"], {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    this.child.stdout?.on("data", (buf: Buffer) => {
-      this.output.append(redactSecrets(buf.toString()));
-    });
-    this.child.stderr?.on("data", (buf: Buffer) => {
-      this.output.append(redactSecrets(buf.toString()));
+    const appendLog = (chunk: string) => {
+      const text = redactSecrets(chunk);
+      this.lastLog = (this.lastLog + text).slice(-4000);
+      this.output.append(text);
+    };
+    this.child.stdout?.on("data", (buf: Buffer) => appendLog(buf.toString()));
+    this.child.stderr?.on("data", (buf: Buffer) => appendLog(buf.toString()));
+
+    let exitCode: number | null = null;
+    this.child.on("error", (err) => {
+      appendLog(`\nspawn error: ${err.message}\n`);
     });
     this.child.on("exit", (code, signal) => {
+      exitCode = code;
       this.output.appendLine(`Sidecar exited code=${code} signal=${signal}`);
       this.handle = undefined;
       this.child = undefined;
@@ -218,10 +244,17 @@ export class SidecarManager {
 
     const baseUrl = `http://127.0.0.1:${port}`;
     try {
-      await waitForHealth(baseUrl, token, 12_000);
+      // Remote hosts can be slow on first import; allow more time.
+      await waitForHealth(baseUrl, token, 30_000);
     } catch (err) {
+      const tail = this.lastLog.trim().split("\n").slice(-12).join("\n");
       this.stop();
-      throw err;
+      const base = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        exitCode != null
+          ? `${base} (sidecar exited ${exitCode})\n${tail || probe.detail}`
+          : `${base}\n${tail || "No sidecar output. Check Output → ClawAgents Sidecar."}`,
+      );
     }
 
     this.handle = {
