@@ -101,20 +101,33 @@ class PermissionWaiter:
         return self._pop(request_id)
 
     def resolve(self, request_id: str, decision: Decision) -> None:
+        """Apply a permission decision. Orphan/stale IDs are ignored (no grants)."""
+        try:
+            safe_id(request_id, kind="request_id")
+        except ValueError:
+            return
         with _permission_lock:
-            meta = _permission_meta.get(request_id) or {}
-            _permission_results[request_id] = decision
             event = _permission_events.get(request_id)
-        if decision == "allow_always":
-            tool = str(meta.get("tool") or "*")
+            meta = _permission_meta.get(request_id)
+            if event is None:
+                # Timed-out, already resolved, or forged id — never persist grants.
+                return
+            _permission_results[request_id] = decision
+        if decision == "allow_always" and isinstance(meta, dict):
+            tool = str(meta.get("tool") or "").strip()
             path = meta.get("file_path")
-            GrantStore().add(
-                path_pattern=str(path) if path else "*",
-                scope="write",
-                tool=tool,
-            )
-        if event is not None:
-            event.set()
+            # Never default tool/path to "*" (that would disable all future prompts).
+            if tool and tool != "*":
+                if isinstance(path, str) and path.strip():
+                    GrantStore().add(
+                        path_pattern=path.strip(),
+                        scope="write",
+                        tool=tool,
+                    )
+                else:
+                    # Tool-only grant (execute / web) — empty path, specific tool.
+                    GrantStore().add(path_pattern="", scope="write", tool=tool)
+        event.set()
 
 
 _waiter = PermissionWaiter()
@@ -157,19 +170,51 @@ class AskUserWaiter:
 _ask_waiter = AskUserWaiter()
 
 
+def _build_ask_user_tool(ask_fn):
+    """Construct AskUserTool with ask_fn, compatible with clawagents <6.10.1."""
+    from clawagents.tools.interactive import AskUserTool
+
+    try:
+        return AskUserTool(ask_fn=ask_fn)
+    except TypeError:
+        # Pre-6.10.1: AskUserTool() took no args (stdin only). Patch execute.
+        tool = AskUserTool()
+
+        async def execute(args):  # type: ignore[no-untyped-def]
+            from clawagents.tools.registry import ToolResult
+            import asyncio
+
+            question = str(args.get("question", ""))
+            if not question:
+                return ToolResult(success=False, output="", error="No question provided")
+            loop = asyncio.get_running_loop()
+            try:
+                answer = await loop.run_in_executor(None, ask_fn, question)
+            except Exception as exc:  # noqa: BLE001
+                return ToolResult(success=False, output="", error=f"ask_user failed: {exc}")
+            if answer is None:
+                return ToolResult(
+                    success=False,
+                    output="",
+                    error="User skipped the question (or timed out).",
+                )
+            return ToolResult(success=True, output=f"User response: {answer}")
+
+        tool.execute = execute  # type: ignore[method-assign]
+        return tool
+
+
 def make_ask_user_tool(sse_fn):
     """Replace the default stdin ask_user with a webview-backed one."""
-    from clawagents.tools.interactive import AskUserTool
 
     def ask_fn(question: str) -> str | None:
         return _ask_waiter.ask(question, sse_fn)
 
-    return AskUserTool(ask_fn=ask_fn)
+    return _build_ask_user_tool(ask_fn)
 
 
 def make_auto_ask_user_tool():
     """Auto interaction: never block on the user — agent decides itself."""
-    from clawagents.tools.interactive import AskUserTool
 
     def ask_fn(question: str) -> str | None:
         return (
@@ -177,7 +222,7 @@ def make_auto_ask_user_tool():
             f"Decide yourself based on the task. Original question: {question}"
         )
 
-    return AskUserTool(ask_fn=ask_fn)
+    return _build_ask_user_tool(ask_fn)
 
 
 def _bad_request(message: str) -> Response:
@@ -242,9 +287,6 @@ class ChatBody(BaseModel):
     interaction: InteractionStyle = "interactive"
     # Terse caveman-style replies (juliusbrussee/caveman).
     caveman: bool = False
-    # Opt-in knowledge skills (default off — enable from Auto-approve panel).
-    byterover: bool = False
-    openviking: bool = False
 
 
 # File-writing tools (the "Edit" auto-approve category); everything else in
@@ -275,6 +317,26 @@ _WEB_TOOLS = frozenset({
     "browser_forward",
     "browser_evaluate",
     "browser_close",
+})
+
+# Built-in tools that are safe to run without a permission prompt.
+# Anything else (including MCP tools) is gated like execute — otherwise Plan
+# mode and approval can be bypassed by a hostile MCP server.
+_KNOWN_READONLY_TOOLS = frozenset({
+    "read_file",
+    "list_dir",
+    "glob",
+    "search_files",
+    "grep",
+    "ask_user",
+    "ask_user_question",
+    "clarify",
+    "confirm",
+    "approve_action",
+    "ctx_search",
+    "ctx_status",
+    "ctx_list",
+    "ctx_info",
 })
 
 
@@ -316,12 +378,16 @@ class SettingsBody(BaseModel):
     learn: bool | None = None
     browser_tools: bool | None = None
     mcp_enabled: bool | None = None
+    mcp_trust_workspace: bool | None = None
     context_mode: bool | None = None
     workspace_system_prompt: str | None = None
     skill_dirs: list[str] | None = None
     skill_auto_discover: bool | None = None
     skill_ignore_dirs: list[str] | None = None
     skill_exclude: list[str] | None = None
+    allow_full_access: bool | None = None
+    allow_external_skill_dirs: bool | None = None
+    trust_custom_base_url: bool | None = None
 
 
 class CreateChatBody(BaseModel):
@@ -402,8 +468,16 @@ def _make_before_tool(
     def before_tool(name: str, args: dict[str, Any]):
         if _cancel.is_set():
             return HookResult(allowed=False, reason="Cancelled by user")
+
+        # Known read/search tools never need a prompt. Unknown names (MCP,
+        # future builtins) are gated as execute — do not auto-allow.
         if name not in gated_tools:
-            return True  # read/search/etc. are never gated
+            if name in _KNOWN_READONLY_TOOLS:
+                return True
+            category = "execute"
+        else:
+            category = _tool_category(name)
+
         file_path = args.get("path") or args.get("file_path") or args.get("target_path")
         file_path = file_path if isinstance(file_path, str) else None
         command = args.get("command") if isinstance(args.get("command"), str) else None
@@ -411,7 +485,6 @@ def _make_before_tool(
             command = args["code"]  # ctx_execute-style tools: show the code being run
         if command is None and isinstance(args.get("url"), str):
             command = args["url"]  # web_fetch / browser_navigate: show the URL
-        category = _tool_category(name)
 
         # Plan / read-only: mutating tools are hard-blocked so the agent reasons
         # and proposes instead of acting. Read-only shell is still allowed so
@@ -533,7 +606,9 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return list_mcp_config()
+        return list_mcp_config(
+            trust_workspace=bool(load_settings().get("mcp_trust_workspace", False)),
+        )
 
     @app.get("/stats")
     async def stats(request: Request):
@@ -635,6 +710,10 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
+        try:
+            safe_id(request_id, kind="request_id")
+        except ValueError:
+            return _bad_request("invalid request_id")
         _waiter.resolve(request_id, body.decision)
         return {"ok": True, "request_id": request_id, "decision": body.decision}
 
@@ -683,9 +762,14 @@ def create_app() -> FastAPI:
                 except ValueError:
                     return _bad_request("invalid chat_id")
 
+        # Cap full_access unless the user explicitly opted in via Settings.
+        effective_mode = body.mode
+        if effective_mode == "full_access" and not load_settings().get("allow_full_access"):
+            effective_mode = "auto"
+
         # Plan is always interactive — the point of planning is to ask/clarify.
         effective_interaction: InteractionStyle = (
-            "interactive" if body.mode == "read_only" else body.interaction
+            "interactive" if effective_mode == "read_only" else body.interaction
         )
 
         def sse(event: str, data: Any) -> None:
@@ -765,15 +849,13 @@ def create_app() -> FastAPI:
                     run_chat_turn(
                         chat_id=chat_id,
                         content=body.task,
-                        mode=body.mode,
+                        mode=effective_mode,
                         model=body.model,
                         on_event=on_event,
                         before_tool_factory=before_tool_factory,
                         cancel_check=_cancel.is_set,
                         ask_user_factory=ask_factory,
                         caveman=bool(body.caveman),
-                        byterover=bool(body.byterover),
-                        openviking=bool(body.openviking),
                     )
                 )
                 run_id = _register_run(
@@ -793,7 +875,7 @@ def create_app() -> FastAPI:
 
         async def _run() -> None:
             sse("queued", {"lane": body.lane, "chat_id": chat_id})
-            sse("started", {"lane": body.lane, "chat_id": chat_id, "mode": body.mode})
+            sse("started", {"lane": body.lane, "chat_id": chat_id, "mode": effective_mode})
             try:
                 result = await asyncio.to_thread(run_agent)
                 if _cancel.is_set():

@@ -5,10 +5,10 @@ from __future__ import annotations
 import fnmatch
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from pathlib import PurePath
+from pathlib import Path
 from typing import Literal
 
-from paths import GRANTS_FILE, atomic_write_json, read_json
+from paths import GRANTS_FILE, WORKSPACE, atomic_write_json, read_json, workspace_rel
 
 Scope = Literal["read", "write"]
 
@@ -25,6 +25,34 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _norm_pattern(pattern: str) -> str:
+    """Normalize a grant pattern to a workspace-relative POSIX path when possible."""
+    text = (pattern or "").strip().replace("\\", "/")
+    if not text:
+        return ""  # tool-only grant
+    if text == "*":
+        return "*"
+    # Glob patterns stay as-is (matched against full relative paths only).
+    if any(ch in text for ch in "*?[]"):
+        return text
+    return workspace_rel(text) or text
+
+
+def _candidate_paths(file_path: str) -> set[str]:
+    """Full-path candidates for matching — never basename alone."""
+    out: set[str] = {file_path.replace("\\", "/")}
+    rel = workspace_rel(file_path)
+    if rel:
+        out.add(rel)
+    try:
+        p = Path(file_path)
+        resolved = p.resolve() if p.is_absolute() else (WORKSPACE / p).resolve()
+        out.add(str(resolved).replace("\\", "/"))
+    except OSError:
+        pass
+    return out
+
+
 class GrantStore:
     def list(self) -> list[PermissionGrant]:
         raw = read_json(GRANTS_FILE, [])
@@ -32,12 +60,17 @@ class GrantStore:
         if not isinstance(raw, list):
             return out
         for r in raw:
-            if isinstance(r, dict) and r.get("path_pattern"):
+            if isinstance(r, dict) and r.get("path_pattern") is not None:
+                pat = str(r.get("path_pattern") or "")
+                tool = str(r.get("tool") or "*")
+                # Refuse supply-chain wildcards (committed path=* tool=* grants).
+                if pat.strip() == "*" and tool.strip() in ("*", ""):
+                    continue
                 out.append(
                     PermissionGrant(
-                        path_pattern=str(r["path_pattern"]),
+                        path_pattern=pat,
                         scope=str(r.get("scope") or "write"),
-                        tool=str(r.get("tool") or "*"),
+                        tool=tool,
                         granted_at=str(r.get("granted_at") or ""),
                     )
                 )
@@ -47,10 +80,14 @@ class GrantStore:
         atomic_write_json(GRANTS_FILE, [asdict(g) for g in grants])
 
     def add(self, *, path_pattern: str, scope: str = "write", tool: str = "*") -> PermissionGrant:
+        pat = _norm_pattern(path_pattern) if path_pattern else ""
+        tool_name = (tool or "").strip() or "*"
+        if pat == "*" and tool_name == "*":
+            raise ValueError("refusing open-ended path=* tool=* grant")
         g = PermissionGrant(
-            path_pattern=path_pattern,
+            path_pattern=pat,
             scope=scope,
-            tool=tool,
+            tool=tool_name,
             granted_at=_now(),
         )
         grants = self.list()
@@ -60,23 +97,29 @@ class GrantStore:
 
     def match(self, file_path: str | None, *, tool: str, scope: str = "write") -> bool:
         if not file_path:
-            # tool-only grants
+            # tool-only grants (empty path or explicit tool sentinel)
             for g in self.list():
                 if g.scope != scope:
                     continue
-                if g.tool in ("*", tool) and g.path_pattern in ("*", tool, ""):
+                if g.tool not in ("*", tool):
+                    continue
+                if g.path_pattern in ("", tool):
                     return True
             return False
+        candidates = _candidate_paths(file_path)
         for g in self.list():
             if g.scope != scope:
                 continue
             if g.tool not in ("*", tool):
                 continue
-            if g.path_pattern == "*" or fnmatch.fnmatch(file_path, g.path_pattern):
-                return True
-            # also match basename patterns (PurePath handles Windows separators)
-            if fnmatch.fnmatch(PurePath(file_path).name, g.path_pattern):
-                return True
+            pat = _norm_pattern(g.path_pattern) if g.path_pattern else ""
+            if not pat or pat == "*":
+                # path=* is too broad — never auto-match (use tool-only grants instead)
+                continue
+            # Full path match only — never basename-only (config.json ≠ every config.json).
+            for cand in candidates:
+                if cand == pat or fnmatch.fnmatch(cand, pat):
+                    return True
         return False
 
     def clear(self) -> None:

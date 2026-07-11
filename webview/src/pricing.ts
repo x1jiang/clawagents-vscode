@@ -41,12 +41,18 @@ function lookup(modelId: string, fromModel?: ModelPrice): { input: number; outpu
   if (PRICES[key]) {
     return PRICES[key];
   }
+  // Longest prefix wins (gpt-5.5-pro-… must not match gpt-5.5).
+  let best: { input: number; output: number } | null = null;
+  let bestLen = -1;
   for (const [prefix, rates] of Object.entries(PRICES)) {
     if (key.startsWith(`${prefix}-`) || key.startsWith(`${prefix}_`)) {
-      return rates;
+      if (prefix.length > bestLen) {
+        best = rates;
+        bestLen = prefix.length;
+      }
     }
   }
-  return null;
+  return best;
 }
 
 export function estimateCostUsd(

@@ -5,6 +5,7 @@ import * as net from "net";
 import * as path from "path";
 import * as vscode from "vscode";
 import { ExtensionConfig, workspaceRoot } from "./config";
+import { curatedProcessEnv } from "./envCurate";
 import { ensureSidecarDeps } from "./pythonDeps";
 
 export interface SidecarHandle {
@@ -12,61 +13,6 @@ export interface SidecarHandle {
   token: string;
   baseUrl: string;
   stop(): void;
-}
-
-/** Env vars safe to forward into the sidecar (avoid leaking unrelated secrets). */
-const SAFE_ENV_KEYS = new Set([
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TERM",
-  "VIRTUAL_ENV",
-  "PYTHONPATH",
-  "PYTHONHOME",
-  "PYTHONUSERBASE",
-  "CONDA_PREFIX",
-  "CONDA_DEFAULT_ENV",
-  "CONDA_PYTHON_EXE",
-  "CONDA_EXE",
-  "PYENV_ROOT",
-  "PYENV_VERSION",
-  "LD_LIBRARY_PATH",
-  "DYLD_LIBRARY_PATH",
-  "SSL_CERT_FILE",
-  "REQUESTS_CA_BUNDLE",
-  "CURL_CA_BUNDLE",
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "no_proxy",
-  "ALL_PROXY",
-  "all_proxy",
-]);
-
-function curatedProcessEnv(): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v == null) continue;
-    if (
-      SAFE_ENV_KEYS.has(k) ||
-      k.startsWith("LC_") ||
-      k.startsWith("CONDA_") ||
-      k.startsWith("PYENV_")
-    ) {
-      out[k] = v;
-    }
-  }
-  return out;
 }
 
 function redactSecrets(text: string): string {

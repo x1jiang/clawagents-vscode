@@ -138,8 +138,6 @@ export function App() {
     web: false,
   });
   const [caveman, setCaveman] = useState(false);
-  const [byterover, setByterover] = useState(false);
-  const [openviking, setOpenviking] = useState(false);
   const [autoApproveOpen, setAutoApproveOpen] = useState(false);
   const [includeContext, setIncludeContext] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -237,12 +235,6 @@ export function App() {
           if (typeof msg.caveman === "boolean") {
             setCaveman(msg.caveman);
           }
-          if (typeof msg.byterover === "boolean") {
-            setByterover(msg.byterover);
-          }
-          if (typeof msg.openviking === "boolean") {
-            setOpenviking(msg.openviking);
-          }
           setHasApiKey(msg.hasApiKey);
           setSidecar(msg.sidecar);
           setChatId(msg.chatId);
@@ -329,12 +321,6 @@ export function App() {
           }
           if (typeof msg.caveman === "boolean") {
             setCaveman(msg.caveman);
-          }
-          if (typeof msg.byterover === "boolean") {
-            setByterover(msg.byterover);
-          }
-          if (typeof msg.openviking === "boolean") {
-            setOpenviking(msg.openviking);
           }
           if (msg.chatId) {
             setChatId(msg.chatId);
@@ -574,10 +560,10 @@ export function App() {
   useEffect(() => {
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
-      post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman, byterover, openviking });
+      post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman });
     }, 400);
     return () => window.clearTimeout(persistTimer.current);
-  }, [items, draft, mode, chatId, autoApprove, interaction, caveman, byterover, openviking]);
+  }, [items, draft, mode, chatId, autoApprove, interaction, caveman]);
 
   useEffect(() => {
     if (panel !== "history") {
@@ -774,8 +760,6 @@ export function App() {
       model: activeModelId || undefined,
       interaction: effectiveInteraction,
       caveman,
-      byterover,
-      openviking,
     });
   };
 
@@ -1217,10 +1201,49 @@ export function App() {
             <label className="check">
               <input
                 type="checkbox"
-                checked={Boolean(settings.mcp_enabled ?? true)}
+                checked={Boolean(settings.mcp_enabled ?? false)}
                 onChange={(e) => setSettings((s) => ({ ...s, mcp_enabled: e.target.checked }))}
               />
-              Enable MCP from .clawagents/mcp.json
+              Enable MCP (user ~/.clawagents/mcp.json)
+            </label>
+            <label
+              className="check"
+              title="Workspace .clawagents/mcp.json can run local commands from this repo. Off by default."
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(settings.mcp_trust_workspace ?? false)}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, mcp_trust_workspace: e.target.checked }))
+                }
+              />
+              Trust workspace MCP config
+            </label>
+            <label
+              className="check"
+              title="Required before mode=full_access is honored (otherwise demoted to auto)."
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(settings.allow_full_access ?? false)}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, allow_full_access: e.target.checked }))
+                }
+              />
+              Allow Full Access mode
+            </label>
+            <label
+              className="check"
+              title="Load skill folders that resolve outside the workspace."
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(settings.allow_external_skill_dirs ?? false)}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, allow_external_skill_dirs: e.target.checked }))
+                }
+              />
+              Allow external skill folders
             </label>
             <label
               className="check"
@@ -1599,8 +1622,6 @@ export function App() {
                         .filter(Boolean)
                         .join(", ") || "nothing (asks each time)"}
                   {caveman ? " · Caveman" : ""}
-                  {byterover ? " · ByteRover" : ""}
-                  {openviking ? " · OpenViking" : ""}
                 </strong>
               </button>
               {autoApproveOpen && (
@@ -1647,28 +1668,6 @@ export function App() {
                     />
                     Caveman mode <span className="muted tiny">(terse replies)</span>
                   </label>
-                  <label
-                    className="check"
-                    title="Enable ByteRover skill (brv query/curate) for project decisions and patterns"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={byterover}
-                      onChange={() => setByterover((v) => !v)}
-                    />
-                    ByteRover <span className="muted tiny">(project memory)</span>
-                  </label>
-                  <label
-                    className="check"
-                    title="Enable OpenViking skill (ov find / L0–L2). Needs ov CLI + openviking-server."
-                  >
-                    <input
-                      type="checkbox"
-                      checked={openviking}
-                      onChange={() => setOpenviking((v) => !v)}
-                    />
-                    OpenViking <span className="muted tiny">(tiered context)</span>
-                  </label>
                   <div className="muted tiny">
                     In <strong>Plan</strong>, only read-only shell (ls/echo/pwd) runs — and
                     interaction is always Interactive.
@@ -1676,7 +1675,6 @@ export function App() {
                     In <strong>Act + Auto</strong>, ask_user is skipped and Edit/Execute/Web are
                     approved for that turn.
                     <strong> Caveman</strong> makes the agent reply ultra-brief.
-                    <strong> ByteRover</strong> / <strong>OpenViking</strong> opt in those skills for the turn.
                     Enable Browser tools under Settings for browser_* tools.
                   </div>
                 </div>

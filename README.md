@@ -51,16 +51,18 @@ Sidebar **Settings** also cover provider, model, base URL, skills, MCP, browser 
 
 - Sidecar binds to loopback only; every HTTP endpoint requires a session bearer token
 - Provider credentials stay in VS Code SecretStorage or your workspace env file — not written to disk by the extension
-- File restore and chat IDs are confined under the workspace / `.clawagents/`
+- Workspace `.env` only forwards API key / model vars (no `PYTHONPATH` / base-URL redirection)
+- File restore, snapshots, and chat IDs are confined under the workspace / `.clawagents/`
 - Mutating tools are gated by mode + Auto-approve toggles (defaults: **off**)
-- MCP configs can run arbitrary local commands — treat `.clawagents/mcp.json` as trusted input
+- MCP is **off** by default; workspace `mcp.json` requires an explicit trust toggle; only allowlisted launchers (`npx`, `uvx`, …) and loopback URLs
+- `full_access` mode requires Settings → Allow Full Access; stale permission IDs cannot create wildcard grants
 
 ## Troubleshooting
 
 - **Sidecar health check timed out** — open *ClawAgents Sidecar* output. Usually missing pip packages or a bad `clawagents.pythonPath`.
 - **provider_auth** — invalid credential; workspace env overrides SecretStorage when both are set.
 - **Gemini** — set the Gemini/Google provider credential; `pip install 'clawagents[gemini]'`.
-- **MCP** — `pip install 'clawagents[mcp]'` and check `.clawagents/mcp.json`.
+- **MCP** — enable MCP in Settings, optionally trust workspace config, and check `~/.clawagents/mcp.json`.
 - **Restart** — Command Palette → **ClawAgents: Restart Sidecar**.
 
 ## Optional tools

@@ -45,11 +45,16 @@ def price_for(model_id: str) -> tuple[float, float] | None:
     key = model_id.strip().lower()
     if key in PRICES:
         return PRICES[key]
-    # Snapshot ids like gpt-5.5-2026-04-23
+    # Snapshot ids like gpt-5.5-2026-04-23 — longest prefix wins so
+    # gpt-5.5-pro-… does not match gpt-5.5 first.
+    best: tuple[float, float] | None = None
+    best_len = -1
     for prefix, rates in PRICES.items():
         if key.startswith(prefix + "-") or key.startswith(prefix + "_"):
-            return rates
-    return None
+            if len(prefix) > best_len:
+                best = rates
+                best_len = len(prefix)
+    return best
 
 
 def estimate_usd(

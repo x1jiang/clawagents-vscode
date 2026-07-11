@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, or local models.",
-  "version": "0.5.6",
+  "version": "0.5.16",
   "publisher": "clawagents",
   "license": "MIT",
   "preview": true,
@@ -172,7 +172,8 @@
         "clawagents.pythonPath": {
           "type": "string",
           "default": "python3",
-          "description": "Path to the Python interpreter used to run the clawagents sidecar."
+          "scope": "machine-overridable",
+          "description": "Python interpreter for the ClawAgents sidecar. Prefer User or Remote (Machine) settings. Workspace absolute paths are ignored for security; bare names python/python3/py are allowed."
         },
         "clawagents.model": {
           "type": "string",

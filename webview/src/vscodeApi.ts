@@ -25,8 +25,6 @@ export type HostToWebview =
       mode: AgentMode;
       interaction?: InteractionStyle;
       caveman?: boolean;
-      byterover?: boolean;
-      openviking?: boolean;
       hasApiKey: boolean;
       sidecar: "stopped" | "running";
       chatId?: string;
@@ -94,8 +92,6 @@ export type HostToWebview =
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;
-      byterover?: boolean;
-      openviking?: boolean;
       sessionCostUsd?: number;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
@@ -132,8 +128,6 @@ export type WebviewToHost =
       model?: string;
       interaction?: InteractionStyle;
       caveman?: boolean;
-      byterover?: boolean;
-      openviking?: boolean;
     }
   | { type: "cancel" }
   | {
@@ -176,8 +170,6 @@ export type WebviewToHost =
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;
-      byterover?: boolean;
-      openviking?: boolean;
     }
   | { type: "queue_send"; text: string };
 

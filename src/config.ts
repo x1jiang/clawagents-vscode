@@ -81,14 +81,96 @@ export function resolvePythonExecutable(configured: string): string {
   return configured.trim() || candidates[0] || "python3";
 }
 
+/** Bare interpreter names safe even from workspace settings. */
+const SAFE_PYTHON_NAMES = new Set(["python", "python3", "py"]);
+
+/**
+ * Prefer User / Remote (global) pythonPath. Workspace may only set bare
+ * python/python3/py — absolute paths from .vscode/settings.json are ignored
+ * (malicious repos can point at a fake interpreter).
+ */
+export function trustedPythonPathSetting(): string {
+  const inspected = vscode.workspace
+    .getConfiguration("clawagents")
+    .inspect<string>("pythonPath");
+  const fallback = process.platform === "win32" ? "python" : "python3";
+  const global = (inspected?.globalValue || "").trim();
+  if (global) {
+    return global;
+  }
+  const workspace =
+    (inspected?.workspaceValue || inspected?.workspaceFolderValue || "").trim();
+  if (workspace) {
+    if (SAFE_PYTHON_NAMES.has(workspace)) {
+      return workspace;
+    }
+    void vscode.window.showWarningMessage(
+      `Ignored workspace clawagents.pythonPath ("${workspace}"). ` +
+        "Set an absolute interpreter path in User or Remote settings instead.",
+    );
+  }
+  return (inspected?.defaultValue || "").trim() || fallback;
+}
+
+/**
+ * Keys allowed from workspace `.env` into the sidecar. Anything else
+ * (PYTHONSTARTUP, PYTHONPATH, LD_PRELOAD, …) is dropped — a malicious repo
+ * `.env` must not run code or rewrite the interpreter search path on start.
+ */
+export const DOTENV_ALLOWLIST = new Set([
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GOOGLE_GENAI_API_KEY",
+  // Intentionally omit OPENAI_BASE_URL / ANTHROPIC_BASE_URL / etc. — those
+  // redirect API keys. Set base_url in ClawAgents Settings (with trust prompt).
+  "CLAW_MODEL",
+]);
+
+const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export function isSafeId(value: string): boolean {
+  return SAFE_ID_RE.test(value) && !value.includes("..");
+}
+
+/** Join parts under root; return null if the result escapes root (symlink-aware). */
+export function pathUnderRoot(root: string, ...parts: string[]): string | null {
+  const base = path.resolve(root);
+  const target = path.resolve(base, ...parts);
+  if (target === base || target.startsWith(base + path.sep)) {
+    return target;
+  }
+  return null;
+}
+
+/** Empty / loopback / unix-socket-style base URLs are trusted for API keys. */
+export function isTrustedBaseUrl(raw: string): boolean {
+  const text = (raw || "").trim();
+  if (!text) {
+    return true;
+  }
+  try {
+    const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ? text : `http://${text}`;
+    const u = new URL(withScheme);
+    const host = (u.hostname || "").toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      host === "0.0.0.0"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export class ExtensionConfig {
   constructor(private readonly secrets: vscode.SecretStorage) {}
 
   get pythonPath(): string {
-    const configured =
-      vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
-      (process.platform === "win32" ? "python" : "python3");
-    return resolvePythonExecutable(configured);
+    return resolvePythonExecutable(trustedPythonPathSetting());
   }
 
   get model(): string {
@@ -145,7 +227,10 @@ export class ExtensionConfig {
     return env;
   }
 
-  /** Load workspace `.env` with override so file wins over stale shell keys. */
+  /**
+   * Load workspace `.env` (allowlisted keys only) so API keys in the file
+   * can override stale shell keys — without forwarding injection vectors.
+   */
   loadWorkspaceDotenv(): Record<string, string> {
     const root = workspaceRoot();
     if (!root) {
@@ -170,6 +255,9 @@ export class ExtensionConfig {
         continue;
       }
       const key = line.slice(0, eq).trim();
+      if (!DOTENV_ALLOWLIST.has(key)) {
+        continue;
+      }
       let val = line.slice(eq + 1).trim();
       if (
         (val.startsWith('"') && val.endsWith('"')) ||

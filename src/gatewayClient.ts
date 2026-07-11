@@ -311,8 +311,6 @@ export class GatewayClient {
     autoApprove?: AutoApprove,
     interaction?: InteractionStyle,
     caveman?: boolean,
-    byterover?: boolean,
-    openviking?: boolean,
   ): Promise<string | undefined> {
     const handle = this.requireHandle();
     const body = JSON.stringify({
@@ -325,8 +323,6 @@ export class GatewayClient {
       auto_approve: autoApprove,
       interaction: interaction || "interactive",
       caveman: Boolean(caveman),
-      byterover: Boolean(byterover),
-      openviking: Boolean(openviking),
     });
 
     let resolvedChatId = chatId;

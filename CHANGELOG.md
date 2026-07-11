@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.5.16 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.10.6** (context headroom: crushers, tiered read, cache-stable prompts, failure→AGENTS.md)
+
+## 0.5.15 — 2026-07-11
+
+- Remove **OpenViking** toggle/skill (default cloud embeddings not allowed); selection box is Edit/Execute/Web/Caveman only
+
+## 0.5.14 — 2026-07-11
+
+- Remove **ByteRover** toggle/skill (cloud LLM provider not allowed); OpenViking remains opt-in
+
+## 0.5.13 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.10.5** (Gemini history 400 recovery + signature fidelity)
+
+## 0.5.12 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.10.4** (Gemini 3 `function_call.id` + `thought_signature` replay — fixes remaining FR/FC 400s)
+
+## 0.5.11 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.10.3** (Gemini `function_response` turn purity — fixes follow-on 400s after 6.10.2)
+- Sidecar probe fails closed until the remote Python package meets the floor
+
+## 0.5.10 — 2026-07-11
+
+- Require clawagents ≥ **6.10.2** (Gemini turn-hygiene fix for function-call 400s)
+
+## 0.5.9 — 2026-07-11
+
+- Fix `AskUserTool() takes no arguments` when sidecar still has clawagents &lt; 6.10.1
+- Require / auto-upgrade to `clawagents>=6.10.1` (webview `ask_fn` HITL)
+
+## 0.5.8 — 2026-07-11
+
+### Security (second harden pass)
+- Orphan/stale `allow_always` can no longer create `path=* tool=*` grants; refuse open-ended grants
+- Confine `diff_snapshot` / `openPath` under the workspace; validate snapshot ids
+- Drop provider base-URL keys from workspace `.env` allowlist (Settings + trust flag only)
+- MCP: workspace `mcp.json` opt-in; allowlisted launchers; loopback URLs only; sanitize child env
+- Ignore committed wildcard permission grants; demote `full_access` unless Settings opt-in
+- Drop `HTTP_PROXY` / `LD_LIBRARY_PATH` from sidecar env; pip uses curated env
+- External skill dirs require opt-in; server-side base_url trust check
+
+## 0.5.7 — 2026-07-11
+
+### Security
+- Allowlist workspace `.env` keys (no `PYTHONSTARTUP` / `PYTHONPATH` injection into sidecar)
+- Ignore absolute `clawagents.pythonPath` from workspace settings; prefer User/Remote
+- Gate unknown/MCP tools in Plan and approval (no longer auto-allowed)
+- “Allow always” grants match full relative paths only (not basename)
+- Harden `atomic_write_json` against tmp symlink TOCTOU; confine instruction/skill/snapshot resolves
+- Warn on non-localhost `base_url` (save + load); MCP defaults to off
+
+### Other
+- Pricing estimates use longest-prefix match (`gpt-5.5-pro` ≠ `gpt-5.5`)
+- Light dependency upper pins; grant/path unit tests
+
 ## 0.5.6 — 2026-07-11
 
 - Auto-install/upgrade Python deps (`clawagents[gemini,anthropic,mcp]`, fastapi, uvicorn, pydantic) on remote/local when missing or too old

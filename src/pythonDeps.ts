@@ -1,14 +1,18 @@
 import { spawn, spawnSync } from "child_process";
 import * as vscode from "vscode";
+import { curatedProcessEnv } from "./envCurate";
 
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
-  "clawagents[gemini,anthropic,mcp]",
+  "clawagents[gemini,anthropic,mcp]>=6.10.6",
   "fastapi",
   "uvicorn",
   "pydantic",
   "python-dotenv",
 ] as const;
+
+/** Minimum clawagents version required by this extension host. */
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 10, 6];
 
 export type DepProbe = {
   ok: boolean;
@@ -17,6 +21,30 @@ export type DepProbe = {
   supportsSkillsExclude?: boolean;
   detail: string;
 };
+
+export function versionAtLeast(
+  version: string | undefined,
+  min: [number, number, number],
+): boolean {
+  if (!version || version === "?") {
+    return false;
+  }
+  const parts = version
+    .split(/[.+-]/)
+    .map((p) => parseInt(p, 10))
+    .filter((n) => !Number.isNaN(n));
+  for (let i = 0; i < 3; i++) {
+    const a = parts[i] ?? 0;
+    const b = min[i];
+    if (a > b) {
+      return true;
+    }
+    if (a < b) {
+      return false;
+    }
+  }
+  return true;
+}
 
 export function probeSidecarDepsSync(
   python: string,
@@ -74,7 +102,11 @@ export function probeSidecarDepsSync(
 }
 
 export function needsPipInstall(probe: DepProbe): boolean {
-  return !probe.ok || probe.supportsSkillsExclude === false;
+  return (
+    !probe.ok ||
+    probe.supportsSkillsExclude === false ||
+    !versionAtLeast(probe.version, MIN_CLAWAGENTS_VERSION)
+  );
 }
 
 export async function installSidecarDeps(
@@ -100,7 +132,15 @@ export async function installSidecarDeps(
       return await new Promise<{ ok: boolean; detail: string }>((resolve) => {
         const child = spawn(python, args, {
           stdio: ["ignore", "pipe", "pipe"],
-          env: process.env,
+          env: {
+            ...curatedProcessEnv(),
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            USERPROFILE: process.env.USERPROFILE,
+            TMPDIR: process.env.TMPDIR,
+            TMP: process.env.TMP,
+            TEMP: process.env.TEMP,
+          },
         });
         let log = "";
         const onData = (buf: Buffer) => {

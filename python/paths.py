@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,27 @@ def path_under(root: Path, *parts: str) -> Path | None:
     return target
 
 
+def under_workspace(path: Path | str) -> bool:
+    """True if ``path`` resolves to a location inside the workspace root."""
+    try:
+        resolved = Path(path).resolve()
+        resolved.relative_to(WORKSPACE.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def workspace_rel(path: str | Path) -> str | None:
+    """Return a POSIX-relative path under WORKSPACE, or None if it escapes."""
+    try:
+        p = Path(path)
+        resolved = p.resolve() if p.is_absolute() else (WORKSPACE / p).resolve()
+        rel = resolved.relative_to(WORKSPACE.resolve())
+        return rel.as_posix()
+    except (OSError, ValueError):
+        return None
+
+
 def ensure_dirs() -> None:
     for d in (SESSIONS_MEMORY_DIR, CHATS_DIR, SNAPSHOTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
@@ -55,21 +77,41 @@ def ensure_dirs() -> None:
 def read_project_instructions() -> str | None:
     for rel in INSTRUCTION_FILES:
         candidate = WORKSPACE / rel
-        if candidate.is_file():
-            try:
-                text = candidate.read_text(encoding="utf-8").strip()
-                if text:
-                    return text
-            except OSError:
+        try:
+            resolved = candidate.resolve()
+            if not under_workspace(resolved):
                 continue
+            if not resolved.is_file():
+                continue
+            text = resolved.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+        except OSError:
+            continue
     return None
 
 
 def atomic_write_json(path: Path, data: Any) -> None:
+    """Write JSON atomically without following a pre-planted tmp symlink."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-    tmp.replace(path)
+    payload = json.dumps(data, indent=2, default=str)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def read_json(path: Path, default: Any) -> Any:

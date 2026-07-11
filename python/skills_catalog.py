@@ -6,13 +6,13 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from paths import WORKSPACE
+from paths import WORKSPACE, under_workspace
 from settings_store import load_settings
 
 _AUTO_NAMES = ("skills", ".skills", "skill", ".skill", "Skills")
 
 
-def _norm(raw: str) -> Path | None:
+def _norm(raw: str, *, require_under_workspace: bool = False) -> Path | None:
     text = (raw or "").strip()
     if not text:
         return None
@@ -21,7 +21,12 @@ def _norm(raw: str) -> Path | None:
         path = (WORKSPACE / path).resolve()
     else:
         path = path.resolve()
-    return path if path.is_dir() else None
+    if not path.is_dir():
+        return None
+    # Auto-discovered roots must stay under the workspace after symlink resolve.
+    if require_under_workspace and not under_workspace(path):
+        return None
+    return path
 
 
 def _ignore_set(settings: dict[str, Any]) -> set[str]:
@@ -39,12 +44,15 @@ def resolve_skill_dirs(settings: dict[str, Any] | None = None) -> list[dict[str,
     """Return skill roots with origin metadata (registered | auto)."""
     settings = settings if settings is not None else load_settings()
     ignore = _ignore_set(settings)
+    allow_external = bool(settings.get("allow_external_skill_dirs", False))
     seen: set[str] = set()
     entries: list[dict[str, Any]] = []
 
-    def _add(raw: str, origin: str) -> None:
-        path = _norm(raw)
+    def _add(raw: str, origin: str, *, require_under_workspace: bool = False) -> None:
+        path = _norm(raw, require_under_workspace=require_under_workspace)
         if path is None:
+            return
+        if origin == "registered" and not allow_external and not under_workspace(path):
             return
         key = str(path)
         if key in seen or key in ignore:
@@ -54,11 +62,13 @@ def resolve_skill_dirs(settings: dict[str, Any] | None = None) -> list[dict[str,
 
     for raw in settings.get("skill_dirs") or []:
         if isinstance(raw, str):
+            # User-registered folders may live outside the workspace only when
+            # allow_external_skill_dirs is on.
             _add(raw, "registered")
 
     if settings.get("skill_auto_discover", True):
         for name in _AUTO_NAMES:
-            _add(str(WORKSPACE / name), "auto")
+            _add(str(WORKSPACE / name), "auto", require_under_workspace=True)
 
     return entries
 

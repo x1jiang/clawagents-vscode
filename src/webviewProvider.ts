@@ -10,6 +10,9 @@ import {
   buildTerminalContext,
   ExtensionConfig,
   formatFileRef,
+  isSafeId,
+  isTrustedBaseUrl,
+  pathUnderRoot,
   workspaceRoot,
   wrapCurrentFileRef,
   wrapSelectionBlock,
@@ -30,6 +33,23 @@ const STATE_KEY = "clawagents.chatState.v2";
 
 const DEFAULT_AUTO_APPROVE: AutoApprove = { edit: false, execute: false, web: false };
 
+/** Warn once per session about a non-local base_url from workspace settings. */
+let warnedUntrustedBaseUrl = false;
+
+async function warnUntrustedBaseUrl(settings: Record<string, unknown>): Promise<void> {
+  if (warnedUntrustedBaseUrl) {
+    return;
+  }
+  const baseUrl = typeof settings.base_url === "string" ? settings.base_url.trim() : "";
+  if (!baseUrl || isTrustedBaseUrl(baseUrl)) {
+    return;
+  }
+  warnedUntrustedBaseUrl = true;
+  void vscode.window.showWarningMessage(
+    `ClawAgents base URL "${baseUrl}" is not localhost — API keys will be sent there. Clear it in Settings if you did not set this.`,
+  );
+}
+
 type PersistedState = {
   draft: string;
   mode: AgentMode;
@@ -37,8 +57,6 @@ type PersistedState = {
   autoApprove?: AutoApprove;
   interaction?: InteractionStyle;
   caveman?: boolean;
-  byterover?: boolean;
-  openviking?: boolean;
 };
 
 
@@ -57,8 +75,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private mode: AgentMode;
   private interaction: InteractionStyle = "interactive";
   private caveman = false;
-  private byterover = false;
-  private openviking = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
   private queue: string[] = [];
   private readonly gateway: GatewayClient;
@@ -85,12 +101,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (typeof saved.caveman === "boolean") {
         this.caveman = saved.caveman;
       }
-      if (typeof saved.byterover === "boolean") {
-        this.byterover = saved.byterover;
-      }
-      if (typeof saved.openviking === "boolean") {
-        this.openviking = saved.openviking;
-      }
     }
     // Plan is always interactive.
     if (this.mode === "read_only") {
@@ -106,8 +116,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       autoApprove: this.autoApprove,
       interaction: this.interaction,
       caveman: this.caveman,
-      byterover: this.byterover,
-      openviking: this.openviking,
     };
   }
 
@@ -179,8 +187,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         autoApprove: this.autoApprove,
         interaction: this.interaction,
         caveman: this.caveman,
-        byterover: this.byterover,
-        openviking: this.openviking,
         sessionCostUsd: 0,
       });
       await this.persistLocal(this.persistState());
@@ -277,8 +283,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         autoApprove: this.autoApprove,
         interaction: this.interaction,
         caveman: this.caveman,
-        byterover: this.byterover,
-        openviking: this.openviking,
         sessionCostUsd: sessionCostFromChat(chat),
       });
     } catch {
@@ -306,6 +310,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       diagnostics = await this.gateway.getDiagnostics();
       stats = await this.gateway.getStats();
       mcp = await this.gateway.getMcp();
+      await warnUntrustedBaseUrl(settings);
     } catch {
       /* partial — sidecar may still be starting or down */
     }
@@ -316,8 +321,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       mode: this.mode,
       interaction: this.interaction,
       caveman: this.caveman,
-      byterover: this.byterover,
-      openviking: this.openviking,
       hasApiKey: await this.config.hasAnyApiKey(),
       sidecar: this.sidecar.current ? "running" : "stopped",
       chatId: this.chatId,
@@ -348,12 +351,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         if (typeof msg.caveman === "boolean") {
           this.caveman = msg.caveman;
-        }
-        if (typeof msg.byterover === "boolean") {
-          this.byterover = msg.byterover;
-        }
-        if (typeof msg.openviking === "boolean") {
-          this.openviking = msg.openviking;
         }
         if (this.mode === "read_only") {
           this.interaction = "interactive";
@@ -409,8 +406,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             autoApprove: this.autoApprove,
             interaction: this.interaction,
             caveman: this.caveman,
-            byterover: this.byterover,
-            openviking: this.openviking,
             sessionCostUsd: sessionCostFromChat(chat),
           });
         } catch (err) {
@@ -433,8 +428,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               autoApprove: this.autoApprove,
               interaction: this.interaction,
               caveman: this.caveman,
-              byterover: this.byterover,
-              openviking: this.openviking,
               sessionCostUsd: 0,
             });
           }
@@ -493,8 +486,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             autoApprove: this.autoApprove,
             interaction: this.interaction,
             caveman: this.caveman,
-            byterover: this.byterover,
-            openviking: this.openviking,
             sessionCostUsd: sessionCostFromChat(chat),
           });
           await this.runTask(res.task, false, this.chatId);
@@ -574,7 +565,36 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "save_settings":
         try {
-          const settings = await this.gateway.putSettings(msg.settings);
+          const incoming = { ...(msg.settings || {}) } as Record<string, unknown>;
+          const baseUrl =
+            typeof incoming.base_url === "string" ? incoming.base_url.trim() : "";
+          if (baseUrl && !isTrustedBaseUrl(baseUrl)) {
+            const choice = await vscode.window.showWarningMessage(
+              `Custom base URL "${baseUrl}" will receive provider API keys. Only continue if you trust this endpoint.`,
+              { modal: true },
+              "Trust and save",
+              "Cancel",
+            );
+            if (choice !== "Trust and save") {
+              this.post({ type: "status", message: "Settings save cancelled" });
+              break;
+            }
+            incoming.trust_custom_base_url = true;
+          } else if (!baseUrl) {
+            incoming.trust_custom_base_url = false;
+          }
+          if (incoming.mcp_trust_workspace === true) {
+            const choice = await vscode.window.showWarningMessage(
+              "Trust workspace .clawagents/mcp.json? It can run local commands from this repo.",
+              { modal: true },
+              "Trust workspace MCP",
+              "Cancel",
+            );
+            if (choice !== "Trust workspace MCP") {
+              incoming.mcp_trust_workspace = false;
+            }
+          }
+          const settings = await this.gateway.putSettings(incoming);
           this.post({ type: "settings", settings });
           this.post({ type: "status", message: "Settings saved" });
           try {
@@ -729,12 +749,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         if (typeof msg.caveman === "boolean") {
           this.caveman = msg.caveman;
         }
-        if (typeof msg.byterover === "boolean") {
-          this.byterover = msg.byterover;
-        }
-        if (typeof msg.openviking === "boolean") {
-          this.openviking = msg.openviking;
-        }
         if (this.mode === "read_only") {
           this.interaction = "interactive";
         }
@@ -865,6 +879,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   private async openPath(filePath: string, line?: number): Promise<void> {
     try {
+      const folders = vscode.workspace.workspaceFolders ?? [];
+      if (!folders.length) {
+        this.post({
+          type: "error",
+          message: "Open a workspace folder before opening paths from chat.",
+        });
+        return;
+      }
       let uri: vscode.Uri;
       if (path.isAbsolute(filePath)) {
         uri = vscode.Uri.file(filePath);
@@ -873,14 +895,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         uri = vscode.Uri.file(root ? path.join(root, filePath) : filePath);
       }
       const resolved = path.resolve(uri.fsPath);
-      const folders = vscode.workspace.workspaceFolders ?? [];
-      const inWorkspace =
-        folders.length === 0
-          ? true
-          : folders.some((f) => {
-              const root = path.resolve(f.uri.fsPath);
-              return resolved === root || resolved.startsWith(root + path.sep);
-            });
+      const inWorkspace = folders.some((f) => {
+        const root = path.resolve(f.uri.fsPath);
+        return resolved === root || resolved.startsWith(root + path.sep);
+      });
       if (!inWorkspace) {
         this.post({
           type: "error",
@@ -920,15 +938,27 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (!root) {
         throw new Error("No workspace");
       }
-      const left = path.join(root, ".clawagents", "snapshots", snapId!, rel!);
+      if (!snapId || !isSafeId(snapId)) {
+        throw new Error("Invalid snapshot id");
+      }
+      if (!rel || rel.includes("..") || path.isAbsolute(rel)) {
+        throw new Error("Invalid snapshot path");
+      }
+      const left = pathUnderRoot(root, ".clawagents", "snapshots", snapId, rel);
+      if (!left) {
+        throw new Error("Snapshot path escapes workspace");
+      }
       const right = path.isAbsolute(filePath)
-        ? filePath
-        : path.join(root, filePath);
+        ? path.resolve(filePath)
+        : path.resolve(root, filePath);
+      if (right !== root && !right.startsWith(root + path.sep)) {
+        throw new Error("Refusing to diff a file outside the workspace");
+      }
       if (!fs.existsSync(left)) {
         throw new Error(`Snapshot missing: ${left}`);
       }
       // Copy snapshot to temp for VS Code diff title clarity
-      const tmp = path.join(os.tmpdir(), `claw-snap-${snapId}-${path.basename(rel!)}`);
+      const tmp = path.join(os.tmpdir(), `claw-snap-${snapId}-${path.basename(rel)}`);
       fs.copyFileSync(left, tmp);
       await vscode.commands.executeCommand(
         "vscode.diff",
@@ -1014,8 +1044,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.autoApprove,
         this.mode === "read_only" ? "interactive" : this.interaction,
         this.caveman,
-        this.byterover,
-        this.openviking,
       );
       if (newId) {
         this.chatId = newId;

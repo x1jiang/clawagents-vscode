@@ -20,7 +20,17 @@ def list_snapshots(limit: int = 50) -> list[dict[str, Any]]:
     )
     out: list[dict[str, Any]] = []
     for d in dirs[:limit]:
-        files = [str(f.relative_to(d)) for f in d.rglob("*") if f.is_file()]
+        base = d.resolve()
+        files: list[str] = []
+        for f in d.rglob("*"):
+            if not f.is_file():
+                continue
+            try:
+                # Skip symlink escapes that resolve outside the snapshot dir.
+                f.resolve().relative_to(base)
+            except (OSError, ValueError):
+                continue
+            files.append(str(f.relative_to(d)))
         out.append(
             {
                 "id": d.name,

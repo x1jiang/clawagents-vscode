@@ -283,7 +283,11 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         kwargs["model"] = effective_model
     base_url = (settings.get("base_url") or "").strip() or None
     if base_url:
-        kwargs["base_url"] = base_url
+        from url_trust import is_trusted_base_url
+
+        if is_trusted_base_url(base_url) or settings.get("trust_custom_base_url"):
+            kwargs["base_url"] = base_url
+        # else: drop untrusted URL (do not send API keys to attacker host)
     provider = str(settings.get("provider") or "auto")
     if provider.startswith("profile:"):
         kwargs["profile"] = provider.split(":", 1)[1]
@@ -301,20 +305,6 @@ Fragments OK. Short synonyms. Technical terms exact. Code blocks unchanged. Erro
 Pattern: [thing] [action] [reason]. [next step].
 """
 
-BYTEROVER_INSTRUCTION = """\
-ByteRover is ON. Use the byterover skill / `brv` CLI for project memory:
-- Before non-trivial work: `brv query` for existing patterns and decisions.
-- After implementing: `brv curate` to save new decisions.
-Do not invent project history — query first when unsure.
-"""
-
-OPENVIKING_INSTRUCTION = """\
-OpenViking is ON. Use the openviking skill / `ov` CLI for tiered context retrieval:
-- Prefer `ov find`, then L0 abstract → L1 overview → L2 read only when needed.
-- Use `ov add-resource` when ingesting new docs or repos.
-If `ov` / the server is unavailable, say so briefly and fall back to normal tools.
-"""
-
 
 async def run_chat_turn(
     *,
@@ -327,8 +317,6 @@ async def run_chat_turn(
     cancel_check: Callable[[], bool],
     ask_user_factory: Callable[[], Any] | None = None,
     caveman: bool = False,
-    byterover: bool = False,
-    openviking: bool = False,
 ) -> dict[str, Any]:
     """Run one multi-turn-aware agent invoke. Called from a worker thread's event loop."""
     from clawagents.agent import create_claw_agent
@@ -360,10 +348,6 @@ async def run_chat_turn(
         )
     if caveman:
         instructions.append(CAVEMAN_INSTRUCTION)
-    if byterover:
-        instructions.append(BYTEROVER_INSTRUCTION)
-    if openviking:
-        instructions.append(OPENVIKING_INSTRUCTION)
     if settings.get("trajectory"):
         kwargs["trajectory"] = True
     if settings.get("learn"):
@@ -380,15 +364,9 @@ async def run_chat_turn(
         for n in (settings.get("skill_exclude") or [])
         if isinstance(n, str) and n.strip()
     }
-    # Opt-in knowledge skills: excluded unless the Auto-approve toggle is on.
-    if byterover:
-        exclude.discard("byterover")
-    else:
-        exclude.add("byterover")
-    if openviking:
-        exclude.discard("openviking")
-    else:
-        exclude.add("openviking")
+    # ByteRover / OpenViking use cloud providers — always exclude.
+    exclude.add("byterover")
+    exclude.add("openviking")
     # skills_exclude requires a newer clawagents; older installs ignore excludes
     # rather than crashing the whole turn.
     _agent_params = inspect.signature(create_claw_agent).parameters
@@ -404,11 +382,15 @@ async def run_chat_turn(
 
     # MCP (user-configured servers from mcp.json + built-in Context Mode)
     mcp_servers: list[Any] = []
-    if settings.get("mcp_enabled", True):
+    if settings.get("mcp_enabled", False):
         try:
             from mcp_loader import load_mcp_servers
 
-            mcp_servers.extend(load_mcp_servers())
+            mcp_servers.extend(
+                load_mcp_servers(
+                    trust_workspace=bool(settings.get("mcp_trust_workspace", False)),
+                )
+            )
         except Exception:  # noqa: BLE001
             pass
     if settings.get("context_mode", True):
