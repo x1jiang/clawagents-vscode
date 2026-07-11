@@ -1,0 +1,164 @@
+"""Skill folder resolution + preview for the Settings UI."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Any
+
+from paths import WORKSPACE
+from settings_store import load_settings
+
+_AUTO_NAMES = ("skills", ".skills", "skill", ".skill", "Skills")
+
+
+def _norm(raw: str) -> Path | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    if not path.is_absolute():
+        path = (WORKSPACE / path).resolve()
+    else:
+        path = path.resolve()
+    return path if path.is_dir() else None
+
+
+def _ignore_set(settings: dict[str, Any]) -> set[str]:
+    out: set[str] = set()
+    for raw in settings.get("skill_ignore_dirs") or []:
+        if not isinstance(raw, str):
+            continue
+        p = _norm(raw)
+        if p is not None:
+            out.add(str(p))
+    return out
+
+
+def resolve_skill_dirs(settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Return skill roots with origin metadata (registered | auto)."""
+    settings = settings if settings is not None else load_settings()
+    ignore = _ignore_set(settings)
+    seen: set[str] = set()
+    entries: list[dict[str, Any]] = []
+
+    def _add(raw: str, origin: str) -> None:
+        path = _norm(raw)
+        if path is None:
+            return
+        key = str(path)
+        if key in seen or key in ignore:
+            return
+        seen.add(key)
+        entries.append({"path": key, "origin": origin})
+
+    for raw in settings.get("skill_dirs") or []:
+        if isinstance(raw, str):
+            _add(raw, "registered")
+
+    if settings.get("skill_auto_discover", True):
+        for name in _AUTO_NAMES:
+            _add(str(WORKSPACE / name), "auto")
+
+    return entries
+
+
+def resolve_skill_dir_paths(settings: dict[str, Any] | None = None) -> list[str]:
+    return [e["path"] for e in resolve_skill_dirs(settings)]
+
+
+def _scan_skills(dirs: list[str]) -> list[dict[str, Any]]:
+    """Load skills from dirs via SkillStore (same rules as the agent)."""
+    if not dirs:
+        return []
+    try:
+        from clawagents.tools.skills import SkillStore
+    except Exception:  # noqa: BLE001
+        return []
+
+    store = SkillStore()
+    for d in dirs:
+        store.add_directory(d)
+
+    try:
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                pool.submit(asyncio.run, store.load_all()).result()
+        except RuntimeError:
+            asyncio.run(store.load_all())
+    except Exception:  # noqa: BLE001
+        return []
+
+    # Map skill path → owning root dir for UI badges
+    root_paths = [Path(d).resolve() for d in dirs]
+    out: list[dict[str, Any]] = []
+    for skill in store.list():
+        skill_path = str(getattr(skill, "path", "") or "")
+        source_dir = ""
+        try:
+            sp = Path(skill_path).resolve()
+            for root in root_paths:
+                try:
+                    sp.relative_to(root)
+                    source_dir = str(root)
+                    break
+                except ValueError:
+                    continue
+            if not source_dir and sp.parent.is_dir():
+                source_dir = str(sp.parent)
+        except OSError:
+            source_dir = ""
+        out.append(
+            {
+                "name": skill.name,
+                "description": (skill.description or "").strip(),
+                "path": skill_path,
+                "source_dir": source_dir,
+            }
+        )
+    out.sort(key=lambda s: s["name"].lower())
+    return out
+
+
+def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Full Settings preview: folders, detected skills, excludes/ignores."""
+    settings = settings if settings is not None else load_settings()
+    folders = resolve_skill_dirs(settings)
+    dir_paths = [f["path"] for f in folders]
+
+    # Include bundled skills in the preview so the list matches runtime.
+    try:
+        from clawagents.agent import _get_bundled_skills_dir
+
+        bundled = _get_bundled_skills_dir()
+        if bundled and Path(bundled).is_dir() and bundled not in dir_paths:
+            folders.append({"path": bundled, "origin": "bundled"})
+            dir_paths.append(bundled)
+    except Exception:  # noqa: BLE001
+        pass
+
+    skills = _scan_skills(dir_paths)
+    exclude = [
+        n for n in (settings.get("skill_exclude") or []) if isinstance(n, str) and n.strip()
+    ]
+    exclude_set = set(exclude)
+    for s in skills:
+        s["excluded"] = s["name"] in exclude_set
+
+    # Ignored auto dirs (for restore UI)
+    ignored: list[str] = []
+    for raw in settings.get("skill_ignore_dirs") or []:
+        if isinstance(raw, str) and raw.strip():
+            p = _norm(raw)
+            ignored.append(str(p) if p else raw.strip())
+
+    return {
+        "folders": folders,
+        "skills": skills,
+        "excluded": exclude,
+        "ignored_dirs": ignored,
+        "auto_discover": bool(settings.get("skill_auto_discover", True)),
+    }

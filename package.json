@@ -1,0 +1,235 @@
+{
+  "name": "clawagents",
+  "displayName": "ClawAgents",
+  "description": "Autonomous coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, or local models.",
+  "version": "0.5.2",
+  "publisher": "clawagents",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0f766e",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/x1jiang/clawagents-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/x1jiang/clawagents-vscode/issues"
+  },
+  "homepage": "https://github.com/x1jiang/clawagents-vscode#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "agent",
+    "ai",
+    "assistant",
+    "openai",
+    "gemini",
+    "anthropic",
+    "clawagents",
+    "coding"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "clawagents",
+          "title": "ClawAgents",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "clawagents": [
+        {
+          "type": "webview",
+          "id": "clawagents.sidebar",
+          "name": "ClawAgents",
+          "visibility": "visible",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "clawagents.openChat",
+        "title": "ClawAgents: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "clawagents.toggleChat",
+        "title": "ClawAgents: Toggle Right Panel",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "clawagents.newChat",
+        "title": "ClawAgents: New Chat",
+        "icon": "$(add)"
+      },
+      {
+        "command": "clawagents.addSelectionToChat",
+        "title": "ClawAgents: Add Selection to Chat"
+      },
+      {
+        "command": "clawagents.addFileToChat",
+        "title": "ClawAgents: Add Current File to Chat"
+      },
+      {
+        "command": "clawagents.explainSelection",
+        "title": "ClawAgents: Explain Selection"
+      },
+      {
+        "command": "clawagents.fixProblems",
+        "title": "ClawAgents: Fix Workspace Problems"
+      },
+      {
+        "command": "clawagents.cancel",
+        "title": "ClawAgents: Cancel Task",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "clawagents.restartSidecar",
+        "title": "ClawAgents: Restart Sidecar",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "clawagents.setApiKey",
+        "title": "ClawAgents: Set API Key"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "clawagents.openChat",
+        "key": "ctrl+shift+'",
+        "mac": "cmd+shift+'"
+      },
+      {
+        "command": "clawagents.toggleChat",
+        "key": "ctrl+shift+;",
+        "mac": "cmd+shift+;"
+      },
+      {
+        "command": "clawagents.addSelectionToChat",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "editorHasSelection"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "clawagents.newChat",
+          "when": "view == clawagents.sidebar",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clawagents.cancel",
+          "when": "view == clawagents.sidebar",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clawagents.restartSidecar",
+          "when": "view == clawagents.sidebar",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "clawagents.addSelectionToChat",
+          "when": "editorHasSelection",
+          "group": "clawagents@1"
+        },
+        {
+          "command": "clawagents.explainSelection",
+          "when": "editorHasSelection",
+          "group": "clawagents@2"
+        },
+        {
+          "command": "clawagents.addFileToChat",
+          "group": "clawagents@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ClawAgents",
+      "properties": {
+        "clawagents.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Path to the Python interpreter used to run the clawagents sidecar."
+        },
+        "clawagents.model": {
+          "type": "string",
+          "default": "",
+          "description": "Optional model override (e.g. gpt-4o, gemini-2.5-flash). Empty uses clawagents defaults."
+        },
+        "clawagents.provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "auto"
+          ],
+          "default": "auto",
+          "description": "Which API key SecretStorage slot to prefer when starting the sidecar."
+        },
+        "clawagents.defaultMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "read_only",
+            "auto",
+            "full_access"
+          ],
+          "default": "auto",
+          "description": "Default permission mode for agent turns."
+        },
+        "clawagents.includeContextByDefault": {
+          "type": "boolean",
+          "default": true,
+          "description": "Attach active editor context to each send."
+        },
+        "clawagents.contextMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools — sandboxed code execution and indexed search. Requires the context-mode binary (npm install -g context-mode); silently skipped when missing. The sidebar Settings checkbox overrides this per workspace."
+        },
+        "clawagents.autoOpenChangedFiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically open files the agent writes or edits."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "npm run typecheck && npm run build:webview && npm run build:ext",
+    "build:ext": "node esbuild.mjs",
+    "build:webview": "npm run build --prefix webview",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p webview",
+    "watch": "node esbuild.mjs --watch",
+    "install:all": "npm install && npm install --prefix webview",
+    "package": "npx --yes @vscode/vsce package",
+    "publish": "npx --yes @vscode/vsce publish",
+    "publish:ovsx": "npx --yes ovsx publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,1896 @@
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  post,
+  type AgentMode,
+  type AutoApprove,
+  type ChatSummary,
+  type HostToWebview,
+  type InteractionStyle,
+} from "./vscodeApi";
+import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
+
+type ChatItem =
+  | { kind: "user"; text: string }
+  | { kind: "assistant"; text: string }
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      args?: unknown;
+      success?: boolean;
+      output?: string;
+      filePath?: string;
+      status: "running" | "done";
+    }
+  | { kind: "status"; text: string }
+  | { kind: "error"; text: string }
+  | {
+      kind: "file";
+      path: string;
+      snapshotId?: string;
+      snapshotRel?: string;
+    }
+  | {
+      kind: "permission";
+      requestId: string;
+      tool: string;
+      filePath?: string;
+      command?: string;
+      reason?: string;
+      resolved?: boolean;
+    }
+  | {
+      kind: "ask";
+      requestId: string;
+      question: string;
+      draft?: string;
+      resolved?: boolean;
+    };
+
+type Provider = {
+  id: string;
+  name: string;
+  available?: boolean;
+  models?: Array<{
+    id: string;
+    label: string;
+    available?: boolean;
+    input_per_mtok?: number;
+    output_per_mtok?: number;
+  }>;
+  base_url?: string;
+};
+
+type SkillsPreview = {
+  folders: Array<{ path: string; origin: string }>;
+  skills: Array<{
+    name: string;
+    description: string;
+    path: string;
+    source_dir: string;
+    excluded?: boolean;
+  }>;
+  excluded: string[];
+  ignored_dirs: string[];
+  auto_discover: boolean;
+};
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string")
+    : [];
+}
+
+type Panel = "chat" | "history" | "settings" | "diagnostics";
+
+export function App() {
+  const [items, setItems] = useState<ChatItem[]>([]);
+  const [draft, setDraft] = useState("");
+  const [workspace, setWorkspace] = useState<string | undefined>();
+  const [model, setModel] = useState("default");
+  const [mode, setMode] = useState<AgentMode>("auto");
+  const [interaction, setInteraction] = useState<InteractionStyle>("interactive");
+  const [autoApprove, setAutoApprove] = useState<AutoApprove>({
+    edit: false,
+    execute: false,
+    web: false,
+  });
+  const [caveman, setCaveman] = useState(false);
+  const [byterover, setByterover] = useState(false);
+  const [openviking, setOpenviking] = useState(false);
+  const [autoApproveOpen, setAutoApproveOpen] = useState(false);
+  const [includeContext, setIncludeContext] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(true);
+  const [sidecar, setSidecar] = useState<"stopped" | "starting" | "running" | "error">(
+    "stopped",
+  );
+  const [sidecarDetail, setSidecarDetail] = useState<string | undefined>();
+  const [chatId, setChatId] = useState<string | undefined>();
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historySearching, setHistorySearching] = useState(false);
+  const [panel, setPanel] = useState<Panel>("chat");
+  const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [skillsPreview, setSkillsPreview] = useState<SkillsPreview | null>(null);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [diagnostics, setDiagnostics] = useState<unknown>();
+  const [stats, setStats] = useState<unknown>();
+  const [usage, setUsage] = useState<{
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  }>({});
+  /** Sum of estimated USD for completed runs in this chat (not including the in-flight run). */
+  const [sessionCostUsd, setSessionCostUsd] = useState(0);
+  const runCommittedRef = useRef(false);
+  const runUsageRef = useRef<{
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  }>({});
+  const modelRef = useRef("");
+  const modelMetaRef = useRef<ModelPrice | undefined>(undefined);
+  const [verifyMsg, setVerifyMsg] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const streamingRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const persistTimer = useRef<number | undefined>();
+  const historySearchTimer = useRef<number | undefined>();
+  const [dragOver, setDragOver] = useState(false);
+  const dragDepth = useRef(0);
+
+  const commitRunCost = (u: {
+    promptTokens?: number;
+    completionTokens?: number;
+  }, serverSession?: number) => {
+    if (runCommittedRef.current) {
+      return;
+    }
+    if (typeof serverSession === "number") {
+      setSessionCostUsd(serverSession);
+      runCommittedRef.current = true;
+      return;
+    }
+    const cost = estimateCostUsd(
+      modelRef.current,
+      u.promptTokens || 0,
+      u.completionTokens || 0,
+      modelMetaRef.current,
+    );
+    if (cost != null && cost > 0) {
+      setSessionCostUsd((s) => s + cost);
+    }
+    runCommittedRef.current = true;
+  };
+
+  const resetSessionCost = (seed = 0) => {
+    setUsage({});
+    runUsageRef.current = {};
+    setSessionCostUsd(seed);
+    runCommittedRef.current = false;
+  };
+
+  const workspaceName = useMemo(
+    () => (workspace ? workspace.split(/[/\\]/).pop() : "No workspace"),
+    [workspace],
+  );
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<HostToWebview>) => {
+      const msg = event.data;
+      if (!msg || typeof msg !== "object" || !("type" in msg)) {
+        return;
+      }
+      switch (msg.type) {
+        case "ready":
+          setWorkspace(msg.workspace);
+          setModel(msg.model || "default");
+          setMode(msg.mode);
+          if (msg.interaction === "interactive" || msg.interaction === "auto") {
+            setInteraction(msg.mode === "read_only" ? "interactive" : msg.interaction);
+          } else if (msg.mode === "read_only") {
+            setInteraction("interactive");
+          }
+          if (typeof msg.caveman === "boolean") {
+            setCaveman(msg.caveman);
+          }
+          if (typeof msg.byterover === "boolean") {
+            setByterover(msg.byterover);
+          }
+          if (typeof msg.openviking === "boolean") {
+            setOpenviking(msg.openviking);
+          }
+          setHasApiKey(msg.hasApiKey);
+          setSidecar(msg.sidecar);
+          setChatId(msg.chatId);
+          setChats(msg.chats || []);
+          if (msg.settings) {
+            setSettings(msg.settings);
+            if (typeof msg.settings.model === "string" && msg.settings.model) {
+              setModel(msg.settings.model);
+            }
+          }
+          if (msg.providers) {
+            setProviders(msg.providers as Provider[]);
+          }
+          if (msg.diagnostics) {
+            setDiagnostics(msg.diagnostics);
+          }
+          if (msg.stats) {
+            setStats(msg.stats);
+          }
+          break;
+        case "sidecar":
+          setSidecar(msg.state);
+          setSidecarDetail(msg.detail);
+          break;
+        case "chats":
+          setChats(msg.chats || []);
+          setHistorySearching(false);
+          if (msg.chatId) {
+            setChatId(msg.chatId);
+          }
+          break;
+        case "settings":
+          setSettings(msg.settings || {});
+          if (typeof msg.settings?.model === "string" && msg.settings.model) {
+            setModel(msg.settings.model);
+          }
+          if (msg.providers) {
+            setProviders(msg.providers as Provider[]);
+          }
+          setVerifyMsg((v) => (v === "Saving…" ? "Saved ✓" : v));
+          break;
+        case "skill_dir_picked": {
+          const path = (msg.path || "").trim();
+          if (!path) break;
+          setSettings((s) => {
+            const cur = asStringList(s.skill_dirs);
+            if (cur.includes(path)) return s;
+            const ignored = asStringList(s.skill_ignore_dirs).filter((d) => d !== path);
+            return { ...s, skill_dirs: [...cur, path], skill_ignore_dirs: ignored };
+          });
+          break;
+        }
+        case "skills_preview":
+          setSkillsPreview({
+            folders: msg.folders || [],
+            skills: msg.skills || [],
+            excluded: msg.excluded || [],
+            ignored_dirs: msg.ignored_dirs || [],
+            auto_discover: Boolean(msg.auto_discover),
+          });
+          break;
+        case "verify_result":
+          setVerifyMsg(
+            `${msg.provider}: ${msg.ok ? "✓" : "✗"} ${msg.detail || (msg.ok ? "ok" : "missing")}`,
+          );
+          break;
+        case "diagnostics":
+          setDiagnostics(msg.data);
+          break;
+        case "stats":
+          setStats(msg.data);
+          break;
+        case "restore":
+          setItems((msg.items as ChatItem[]) || []);
+          setDraft(msg.draft || "");
+          setMode(msg.mode);
+          if (msg.interaction === "interactive" || msg.interaction === "auto") {
+            setInteraction(msg.mode === "read_only" ? "interactive" : msg.interaction);
+          } else if (msg.mode === "read_only") {
+            setInteraction("interactive");
+          }
+          if (msg.autoApprove) {
+            setAutoApprove((prev) => ({ ...prev, ...msg.autoApprove }));
+          }
+          if (typeof msg.caveman === "boolean") {
+            setCaveman(msg.caveman);
+          }
+          if (typeof msg.byterover === "boolean") {
+            setByterover(msg.byterover);
+          }
+          if (typeof msg.openviking === "boolean") {
+            setOpenviking(msg.openviking);
+          }
+          if (msg.chatId) {
+            setChatId(msg.chatId);
+          }
+          // Prefer persisted session total from chat meta (survives reload).
+          resetSessionCost(
+            typeof msg.sessionCostUsd === "number" ? msg.sessionCostUsd : 0,
+          );
+          setBusy(false);
+          streamingRef.current = false;
+          setPanel("chat");
+          break;
+        case "prepend":
+          setDraft((d) => msg.text + d);
+          textareaRef.current?.focus();
+          break;
+        case "user_echo":
+          setItems((prev) => [...prev, { kind: "user", text: msg.text }]);
+          setBusy(true);
+          streamingRef.current = false;
+          setUsage({});
+          runUsageRef.current = {};
+          runCommittedRef.current = false;
+          break;
+        case "status":
+          setItems((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.kind === "status") {
+              next[next.length - 1] = { kind: "status", text: msg.message };
+              return next;
+            }
+            return [...next, { kind: "status", text: msg.message }];
+          });
+          break;
+        case "assistant_delta":
+          setItems((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.kind === "assistant" && streamingRef.current) {
+              next[next.length - 1] = { kind: "assistant", text: last.text + msg.delta };
+              return next;
+            }
+            streamingRef.current = true;
+            return [...next, { kind: "assistant", text: msg.delta }];
+          });
+          break;
+        case "assistant_message": {
+          const wasStreaming = streamingRef.current;
+          streamingRef.current = false;
+          if (!msg.text.trim()) {
+            break;
+          }
+          setItems((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.kind === "assistant") {
+              // The canonical message replaces the delta-accumulated text
+              // (they can differ slightly after sanitization) instead of
+              // duplicating it.
+              if (wasStreaming || last.text === msg.text) {
+                const next = [...prev];
+                next[next.length - 1] = { kind: "assistant", text: msg.text };
+                return next;
+              }
+            }
+            return [...prev, { kind: "assistant", text: msg.text }];
+          });
+          break;
+        }
+        case "tool_started":
+          streamingRef.current = false;
+          setItems((prev) => [
+            ...prev,
+            {
+              kind: "tool",
+              id: msg.id,
+              name: msg.name,
+              args: msg.args,
+              filePath: msg.filePath,
+              status: "running",
+            },
+          ]);
+          break;
+        case "tool_completed":
+          setItems((prev) => {
+            let matched = false;
+            const next = prev.map((it) => {
+              if (
+                it.kind === "tool" &&
+                (it.id === msg.id ||
+                  (!msg.id && it.name === msg.name && it.status === "running"))
+              ) {
+                matched = true;
+                return {
+                  ...it,
+                  status: "done" as const,
+                  success: msg.success,
+                  output: msg.output,
+                  filePath: msg.filePath || it.filePath,
+                };
+              }
+              return it;
+            });
+            // tool_skipped (and similar) may arrive with no prior tool_started
+            if (!matched) {
+              next.push({
+                kind: "tool",
+                id: msg.id || msg.name,
+                name: msg.name,
+                status: "done",
+                success: msg.success,
+                output: msg.output,
+                filePath: msg.filePath,
+              });
+            }
+            return next;
+          });
+          break;
+        case "permission_required":
+          setItems((prev) => [
+            ...prev,
+            {
+              kind: "permission",
+              requestId: msg.requestId,
+              tool: msg.tool,
+              filePath: msg.filePath,
+              command: msg.command,
+              reason: msg.reason,
+            },
+          ]);
+          break;
+        case "ask_user_required":
+          setItems((prev) => [
+            ...prev,
+            {
+              kind: "ask",
+              requestId: msg.requestId,
+              question: msg.question,
+              draft: "",
+            },
+          ]);
+          break;
+        case "file_changed":
+          if (msg.path) {
+            setItems((prev) => [
+              ...prev,
+              {
+                kind: "file",
+                path: msg.path,
+                snapshotId: msg.snapshotId,
+                snapshotRel: msg.snapshotRel,
+              },
+            ]);
+          }
+          break;
+        case "usage": {
+          const next = {
+            promptTokens: msg.promptTokens,
+            completionTokens: msg.completionTokens,
+            totalTokens: msg.totalTokens,
+          };
+          runUsageRef.current = next;
+          setUsage(next);
+          break;
+        }
+        case "done": {
+          setBusy(false);
+          streamingRef.current = false;
+          let finalUsage = runUsageRef.current;
+          let serverSession: number | undefined = msg.sessionCostUsd;
+          let serverRun: number | undefined = msg.runCostUsd;
+          if (msg.usage && typeof msg.usage === "object") {
+            const u = msg.usage as Record<string, number>;
+            finalUsage = {
+              promptTokens: u.prompt_tokens,
+              completionTokens: u.completion_tokens,
+              totalTokens: u.total_tokens,
+            };
+            runUsageRef.current = finalUsage;
+            setUsage(finalUsage);
+            if (typeof u.session_cost_usd === "number") {
+              serverSession = u.session_cost_usd;
+            }
+            if (typeof u.run_cost_usd === "number") {
+              serverRun = u.run_cost_usd;
+            }
+          }
+          commitRunCost(finalUsage, serverSession);
+          const runCost =
+            serverRun ??
+            estimateCostUsd(
+              modelRef.current,
+              finalUsage.promptTokens || 0,
+              finalUsage.completionTokens || 0,
+              modelMetaRef.current,
+            );
+          setItems((prev) => [
+            ...prev.filter((it) => it.kind !== "status"),
+            {
+              kind: "status",
+              text: `Done · ${msg.status}${msg.iterations != null ? ` · ${msg.iterations} iters` : ""}${
+                runCost != null ? ` · run ~${formatUsd(runCost)}` : ""
+              }`,
+            },
+          ]);
+          break;
+        }
+        case "error":
+          setBusy(false);
+          streamingRef.current = false;
+          commitRunCost(runUsageRef.current);
+          if (msg.message === "cancelled") {
+            setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
+          } else {
+            setItems((prev) => [...prev, { kind: "error", text: msg.message }]);
+          }
+          break;
+        case "cancelled":
+          setBusy(false);
+          streamingRef.current = false;
+          commitRunCost(runUsageRef.current);
+          setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener("message", onMessage);
+    post({ type: "ready" });
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [items]);
+
+  useEffect(() => {
+    window.clearTimeout(persistTimer.current);
+    persistTimer.current = window.setTimeout(() => {
+      post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman, byterover, openviking });
+    }, 400);
+    return () => window.clearTimeout(persistTimer.current);
+  }, [items, draft, mode, chatId, autoApprove, interaction, caveman, byterover, openviking]);
+
+  useEffect(() => {
+    if (panel !== "history") {
+      return;
+    }
+    window.clearTimeout(historySearchTimer.current);
+    setHistorySearching(true);
+    historySearchTimer.current = window.setTimeout(() => {
+      post({ type: "search_chats", query: historyQuery });
+      setHistorySearching(false);
+    }, 250);
+    return () => window.clearTimeout(historySearchTimer.current);
+  }, [historyQuery, panel]);
+
+  // Plan / Act is the primary control. Plan = read-only (the agent reasons and
+  // proposes but cannot edit or run); Act = auto, where the granular
+  // auto-approve toggles decide what runs without a prompt.
+  // Interactive / Auto controls whether ask_user waits for you. Plan always
+  // forces Interactive.
+  const planAct: "plan" | "act" = mode === "read_only" ? "plan" : "act";
+  const effectiveInteraction: InteractionStyle =
+    planAct === "plan" ? "interactive" : interaction;
+  const setPlanAct = (next: "plan" | "act") => {
+    const nextMode: AgentMode = next === "plan" ? "read_only" : "auto";
+    setMode(nextMode);
+    post({ type: "set_mode", mode: nextMode });
+    if (next === "plan") {
+      setInteraction("interactive");
+      post({ type: "set_interaction", interaction: "interactive" });
+    }
+  };
+  const setInteractionStyle = (next: InteractionStyle) => {
+    if (planAct === "plan") {
+      return;
+    }
+    setInteraction(next);
+    post({ type: "set_interaction", interaction: next });
+  };
+  const toggleApprove = (key: keyof AutoApprove) =>
+    setAutoApprove((a) => ({ ...a, [key]: !a[key] }));
+
+  const keepSkillFolder = (folderPath: string) => {
+    setSettings((s) => {
+      const dirs = asStringList(s.skill_dirs);
+      const ignored = asStringList(s.skill_ignore_dirs).filter((d) => d !== folderPath);
+      return {
+        ...s,
+        skill_dirs: dirs.includes(folderPath) ? dirs : [...dirs, folderPath],
+        skill_ignore_dirs: ignored,
+      };
+    });
+  };
+
+  const removeSkillFolder = (folderPath: string, origin: string) => {
+    setSettings((s) => {
+      const dirs = asStringList(s.skill_dirs).filter((d) => d !== folderPath);
+      if (origin === "registered") {
+        return { ...s, skill_dirs: dirs };
+      }
+      const ignored = asStringList(s.skill_ignore_dirs);
+      return {
+        ...s,
+        skill_dirs: dirs,
+        skill_ignore_dirs: ignored.includes(folderPath)
+          ? ignored
+          : [...ignored, folderPath],
+      };
+    });
+  };
+
+  const restoreIgnoredFolder = (folderPath: string) => {
+    setSettings((s) => ({
+      ...s,
+      skill_ignore_dirs: asStringList(s.skill_ignore_dirs).filter((d) => d !== folderPath),
+    }));
+  };
+
+  const excludeSkill = (name: string) => {
+    setSettings((s) => {
+      const excluded = asStringList(s.skill_exclude);
+      return {
+        ...s,
+        skill_exclude: excluded.includes(name) ? excluded : [...excluded, name],
+      };
+    });
+    setSkillsPreview((prev) =>
+      prev
+        ? {
+            ...prev,
+            skills: prev.skills.map((sk) =>
+              sk.name === name ? { ...sk, excluded: true } : sk,
+            ),
+            excluded: prev.excluded.includes(name)
+              ? prev.excluded
+              : [...prev.excluded, name],
+          }
+        : prev,
+    );
+  };
+
+  const keepSkill = (name: string, sourceDir?: string) => {
+    setSettings((s) => {
+      const excluded = asStringList(s.skill_exclude).filter((n) => n !== name);
+      const next: Record<string, unknown> = { ...s, skill_exclude: excluded };
+      if (sourceDir) {
+        const dirs = asStringList(s.skill_dirs);
+        const ignored = asStringList(s.skill_ignore_dirs).filter((d) => d !== sourceDir);
+        next.skill_dirs = dirs.includes(sourceDir) ? dirs : [...dirs, sourceDir];
+        next.skill_ignore_dirs = ignored;
+      }
+      return next;
+    });
+    setSkillsPreview((prev) =>
+      prev
+        ? {
+            ...prev,
+            skills: prev.skills.map((sk) =>
+              sk.name === name ? { ...sk, excluded: false } : sk,
+            ),
+            excluded: prev.excluded.filter((n) => n !== name),
+          }
+        : prev,
+    );
+  };
+
+  const selectedProvider = String(settings.provider || "auto");
+  const allModels = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: NonNullable<Provider["models"]> = [];
+    const lists =
+      selectedProvider === "auto"
+        ? providers.map((p) => p.models || [])
+        : [providers.find((p) => p.id === selectedProvider)?.models || []];
+    for (const list of lists) {
+      for (const m of list) {
+        if (!m?.id || seen.has(m.id)) {
+          continue;
+        }
+        seen.add(m.id);
+        rows.push(m);
+      }
+    }
+    return rows;
+  }, [providers, selectedProvider]);
+  const providerModels =
+    providers.find((p) => p.id === selectedProvider)?.models || allModels;
+
+  const activeModelId =
+    (typeof settings.model === "string" && settings.model) ||
+    (model !== "default" ? model : "") ||
+    "";
+  const activeModelMeta = allModels.find((m) => m.id === activeModelId);
+  modelRef.current = activeModelId || model;
+  modelMetaRef.current = activeModelMeta;
+  const promptTok = usage.promptTokens || 0;
+  const completionTok = usage.completionTokens || 0;
+  const totalTok =
+    usage.totalTokens ?? (promptTok || completionTok ? promptTok + completionTok : 0);
+  const runCost = estimateCostUsd(
+    activeModelId || model,
+    promptTok,
+    completionTok,
+    activeModelMeta,
+  );
+  // While a run is in flight, include its live estimate in the session total.
+  const sessionCostShown =
+    sessionCostUsd + (busy && runCost != null ? runCost : 0);
+
+  const selectModel = (next: string) => {
+    setModel(next || "default");
+    const nextSettings = { ...settings, model: next };
+    setSettings(nextSettings);
+    post({ type: "save_settings", settings: nextSettings });
+  };
+
+  const send = () => {
+    const value = draft.trim();
+    if (!value) {
+      return;
+    }
+    setDraft("");
+    if (busy) {
+      post({ type: "queue_send", text: value });
+      return;
+    }
+    post({
+      type: "send",
+      text: value,
+      mode,
+      includeContext,
+      chatId,
+      autoApprove,
+      model: activeModelId || undefined,
+      interaction: effectiveInteraction,
+      caveman,
+      byterover,
+      openviking,
+    });
+  };
+
+  return (
+    <div className="app">
+      <header className="header">
+        <div className="header-top">
+          <div className="brand">ClawAgents</div>
+          <div className={`pill sidecar-${sidecar}`} title={sidecarDetail || sidecar}>
+            <span className="pill-dot" />
+            {sidecar === "running"
+              ? "Ready"
+              : sidecar === "starting"
+                ? "Starting"
+                : sidecar === "error"
+                  ? "Error"
+                  : "Idle"}
+          </div>
+        </div>
+        <div className="meta">
+          <span title={workspace}>{workspaceName}</span>
+          <span className="sep">·</span>
+          <select
+            className="model-select"
+            value={activeModelId}
+            title="Model for the next turn"
+            aria-label="Model"
+            onChange={(e) => selectModel(e.target.value)}
+          >
+            <option value="">default</option>
+            {allModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label || m.id}
+              </option>
+            ))}
+          </select>
+          {totalTok > 0 && (
+            <>
+              <span className="sep">·</span>
+              <span title={`${promptTok} in / ${completionTok} out (this run)`}>
+                {totalTok.toLocaleString()} tok
+              </span>
+            </>
+          )}
+          {runCost != null && totalTok > 0 && (
+            <>
+              <span className="sep">·</span>
+              <span
+                className="cost"
+                title="Estimated API cost for this run (last/current turn). List price, uncached — not a bill."
+              >
+                run ~{formatUsd(runCost)}
+              </span>
+            </>
+          )}
+          {sessionCostShown > 0 && (
+            <>
+              <span className="sep">·</span>
+              <span
+                className="cost session"
+                title="Estimated total for this chat (all runs). Persisted with the chat — survives reload."
+              >
+                session ~{formatUsd(sessionCostShown)}
+              </span>
+            </>
+          )}
+        </div>
+        <nav className="tabs">
+          {(["chat", "history", "settings", "diagnostics"] as Panel[]).map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={panel === p ? "tab active" : "tab"}
+              onClick={() => {
+                setPanel(p);
+                if (p === "settings") {
+                  post({ type: "load_settings" });
+                }
+                if (p === "diagnostics") {
+                  post({ type: "load_diagnostics" });
+                  post({ type: "load_stats" });
+                }
+              }}
+            >
+              {p}
+            </button>
+          ))}
+        </nav>
+        {!hasApiKey && panel === "chat" && (
+          <div className="banner warn">
+            No API key. Open <strong>settings</strong> or run Set API Key.
+          </div>
+        )}
+      </header>
+
+      {panel === "history" && (
+        <div className="panel">
+          <div className="panel-actions history-toolbar">
+            <input
+              className="history-search"
+              type="search"
+              value={historyQuery}
+              placeholder="Search titles & messages…"
+              aria-label="Search chat history"
+              onChange={(e) => setHistoryQuery(e.target.value)}
+            />
+            <button type="button" className="primary" onClick={() => post({ type: "new_chat" })}>
+              New
+            </button>
+          </div>
+          {historySearching && historyQuery.trim() ? (
+            <div className="muted tiny history-hint">Searching…</div>
+          ) : null}
+          <ul className="chat-list">
+            {chats.map((c) => (
+              <li key={c.id} className={c.id === chatId ? "active" : ""}>
+                <button type="button" className="chat-item" onClick={() => post({ type: "select_chat", chatId: c.id })}>
+                  <div className="chat-title">{c.title || c.id}</div>
+                  <div className="muted tiny">
+                    {c.message_count || 0} msgs
+                    {c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="ghost tiny danger"
+                  onClick={() => post({ type: "delete_chat", chatId: c.id })}
+                >
+                  Del
+                </button>
+              </li>
+            ))}
+            {!chats.length && (
+              <div className="muted">
+                {historyQuery.trim() ? "No chats match that search." : "No chats yet."}
+              </div>
+            )}
+          </ul>
+        </div>
+      )}
+
+      {panel === "settings" && (
+        <div className="panel settings">
+          <section className="settings-section">
+            <h3 className="settings-heading">Model</h3>
+            <label>
+              Provider
+              <select
+                value={selectedProvider}
+                onChange={(e) => setSettings((s) => ({ ...s, provider: e.target.value }))}
+              >
+                <option value="auto">auto</option>
+                {providers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.available === false ? " (no key)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Model
+              <select
+                value={String(settings.model || "")}
+                onChange={(e) => selectModel(e.target.value)}
+              >
+                <option value="">default</option>
+                {providerModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label || m.id}
+                    {m.input_per_mtok != null
+                      ? ` · $${m.input_per_mtok}/$${m.output_per_mtok} per 1M`
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Base URL (OpenAI-compatible / Ollama)
+              <input
+                value={String(settings.base_url || "")}
+                onChange={(e) => setSettings((s) => ({ ...s, base_url: e.target.value }))}
+                placeholder="http://localhost:11434/v1"
+              />
+            </label>
+            <label>
+              Default mode
+              <select
+                value={String(settings.default_mode || "auto")}
+                onChange={(e) => setSettings((s) => ({ ...s, default_mode: e.target.value }))}
+              >
+                <option value="ask">ask</option>
+                <option value="read_only">read_only</option>
+                <option value="auto">auto</option>
+                <option value="full_access">full_access</option>
+              </select>
+            </label>
+            <label>
+              Workspace system prompt
+              <textarea
+                rows={3}
+                value={String(settings.workspace_system_prompt || "")}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, workspace_system_prompt: e.target.value }))
+                }
+              />
+            </label>
+          </section>
+
+          <section className="settings-section">
+            <h3 className="settings-heading">Skills</h3>
+            <p className="settings-hint">
+              Register folders that contain skills. A folder with{" "}
+              <code>SKILL.md</code> registers as one skill; a parent folder registers each
+              subfolder (or <code>.md</code> file) separately. Save to apply; detected list
+              refreshes after save.
+            </p>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.skill_auto_discover ?? true)}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, skill_auto_discover: e.target.checked }))
+                }
+              />
+              Auto-discover workspace skills/ folders
+            </label>
+
+            <div className="skill-subheading">Folders</div>
+            <div className="skill-dirs">
+              {(skillsPreview?.folders?.length
+                ? skillsPreview.folders
+                : asStringList(settings.skill_dirs).map((path) => ({
+                    path,
+                    origin: "registered",
+                  }))
+              ).map((folder) => (
+                <div key={`${folder.origin}:${folder.path}`} className="skill-folder-row">
+                  <div className="skill-folder-meta">
+                    <span className={`skill-origin origin-${folder.origin}`}>
+                      {folder.origin}
+                    </span>
+                    <code className="skill-folder-path" title={folder.path}>
+                      {folder.path}
+                    </code>
+                  </div>
+                  <div className="skill-row-actions">
+                    {folder.origin === "auto" && (
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        title="Pin this folder so it stays if auto-discover is off"
+                        onClick={() => keepSkillFolder(folder.path)}
+                      >
+                        Keep
+                      </button>
+                    )}
+                    {folder.origin !== "bundled" && (
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        title={
+                          folder.origin === "auto"
+                            ? "Ignore this auto-discovered folder"
+                            : "Remove registered folder"
+                        }
+                        onClick={() => removeSkillFolder(folder.path, folder.origin)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {!skillsPreview?.folders?.length && !asStringList(settings.skill_dirs).length && (
+                <div className="muted tiny">No skill folders detected yet.</div>
+              )}
+              {asStringList(settings.skill_dirs)
+                .filter((d) => d.trim() && !(skillsPreview?.folders || []).some((f) => f.path === d))
+                .map((dir, idx) => (
+                  <div key={`draft-${dir}-${idx}`} className="skill-dir-row">
+                    <input
+                      className="skill-dir-path"
+                      value={dir}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setSettings((s) => {
+                          const cur = [...asStringList(s.skill_dirs)];
+                          const at = cur.indexOf(dir);
+                          if (at >= 0) cur[at] = next;
+                          return { ...s, skill_dirs: cur };
+                        });
+                      }}
+                      placeholder="/path/to/skills"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="ghost skill-dir-remove"
+                      title="Remove"
+                      onClick={() =>
+                        setSettings((s) => ({
+                          ...s,
+                          skill_dirs: asStringList(s.skill_dirs).filter((d) => d !== dir),
+                        }))
+                      }
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              <div className="skill-dir-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() =>
+                    setSettings((s) => ({
+                      ...s,
+                      skill_dirs: [...asStringList(s.skill_dirs), ""],
+                    }))
+                  }
+                >
+                  Add path
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "pick_skill_dir" })}
+                >
+                  Browse…
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "load_skills" })}
+                >
+                  Refresh list
+                </button>
+              </div>
+            </div>
+
+            {asStringList(settings.skill_ignore_dirs).length > 0 && (
+              <>
+                <div className="skill-subheading">Ignored folders</div>
+                <div className="skill-dirs">
+                  {asStringList(settings.skill_ignore_dirs).map((dir) => (
+                    <div key={`ignored-${dir}`} className="skill-folder-row">
+                      <code className="skill-folder-path muted" title={dir}>
+                        {dir}
+                      </code>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() => restoreIgnoredFolder(dir)}
+                      >
+                        Restore
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="skill-subheading">
+              Detected skills
+              {skillsPreview ? ` (${skillsPreview.skills.length})` : ""}
+            </div>
+            <div className="skill-list">
+              {!skillsPreview && (
+                <div className="muted tiny">Open Settings or click Refresh list to scan.</div>
+              )}
+              {skillsPreview && skillsPreview.skills.length === 0 && (
+                <div className="muted tiny">No skills found in the folders above.</div>
+              )}
+              {(skillsPreview?.skills || []).map((skill) => {
+                const excluded =
+                  skill.excluded || asStringList(settings.skill_exclude).includes(skill.name);
+                return (
+                  <div
+                    key={skill.name}
+                    className={`skill-item${excluded ? " skill-item-excluded" : ""}`}
+                  >
+                    <div className="skill-item-main">
+                      <div className="skill-item-title">
+                        <strong>{skill.name}</strong>
+                        {excluded && <span className="muted tiny"> · removed</span>}
+                      </div>
+                      {skill.description ? (
+                        <div className="skill-item-desc muted tiny">{skill.description}</div>
+                      ) : null}
+                      {skill.source_dir ? (
+                        <code className="skill-item-src muted tiny" title={skill.path}>
+                          {skill.source_dir}
+                        </code>
+                      ) : null}
+                    </div>
+                    <div className="skill-row-actions">
+                      {excluded ? (
+                        <button
+                          type="button"
+                          className="ghost tiny"
+                          onClick={() => keepSkill(skill.name, skill.source_dir)}
+                        >
+                          Keep
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="ghost tiny"
+                          onClick={() => excludeSkill(skill.name)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h3 className="settings-heading">Tools</h3>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.mcp_enabled ?? true)}
+                onChange={(e) => setSettings((s) => ({ ...s, mcp_enabled: e.target.checked }))}
+              />
+              Enable MCP from .clawagents/mcp.json
+            </label>
+            <label
+              className="check"
+              title="Sandboxed code execution + indexed search (ctx_* tools) for token-efficient bulk analysis. Requires: npm install -g context-mode"
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(settings.context_mode ?? true)}
+                onChange={(e) => setSettings((s) => ({ ...s, context_mode: e.target.checked }))}
+              />
+              Context Mode (token-efficient ctx_* tools)
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.browser_tools)}
+                onChange={(e) => setSettings((s) => ({ ...s, browser_tools: e.target.checked }))}
+              />
+              Browser tools
+            </label>
+          </section>
+
+          <section className="settings-section">
+            <h3 className="settings-heading">Advanced</h3>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.telemetry)}
+                onChange={(e) => setSettings((s) => ({ ...s, telemetry: e.target.checked }))}
+              />
+              Local telemetry (opt-in)
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.trajectory)}
+                onChange={(e) => setSettings((s) => ({ ...s, trajectory: e.target.checked }))}
+              />
+              Trajectory logging
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.learn)}
+                onChange={(e) => setSettings((s) => ({ ...s, learn: e.target.checked }))}
+              />
+              Learn (PTRL lessons)
+            </label>
+          </section>
+
+          <div className="panel-actions">
+            <button
+              type="button"
+              className="primary"
+              title="Prompts for a provider + key; stored encrypted in VS Code SecretStorage. A key in the workspace .env overrides it."
+              onClick={() => {
+                setVerifyMsg("Enter the key in the dialog at the top of the window…");
+                post({ type: "set_api_key" });
+              }}
+            >
+              Set API key…
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                post({
+                  type: "verify_key",
+                  provider: selectedProvider === "auto" ? "openai" : selectedProvider,
+                });
+                setVerifyMsg("Checking…");
+              }}
+            >
+              Verify key
+            </button>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                setVerifyMsg("Saving…");
+                const skillDirs = asStringList(settings.skill_dirs)
+                  .map((d) => d.trim())
+                  .filter(Boolean);
+                const skillIgnore = asStringList(settings.skill_ignore_dirs)
+                  .map((d) => d.trim())
+                  .filter(Boolean);
+                const skillExclude = asStringList(settings.skill_exclude)
+                  .map((d) => d.trim())
+                  .filter(Boolean);
+                post({
+                  type: "save_settings",
+                  settings: {
+                    ...settings,
+                    skill_dirs: skillDirs,
+                    skill_ignore_dirs: skillIgnore,
+                    skill_exclude: skillExclude,
+                  },
+                });
+              }}
+            >
+              Save
+            </button>
+          </div>
+          {verifyMsg && <div className="muted">{verifyMsg}</div>}
+        </div>
+      )}
+
+      {panel === "diagnostics" && (
+        <div className="panel">
+          <pre className="tool-body">{safeJson(diagnostics)}</pre>
+          <h4>Local stats</h4>
+          <pre className="tool-body">{safeJson(stats)}</pre>
+          <button type="button" className="ghost" onClick={() => post({ type: "restart_sidecar" })}>
+            Restart sidecar
+          </button>
+        </div>
+      )}
+
+      {panel === "chat" && (
+        <>
+          <main className="messages">
+            {items.length === 0 && (
+              <div className="empty">
+                <p>Multi-turn agent with providers, checkpoints, MCP, and local telemetry.</p>
+                <div className="quick">
+                  {["Explain the active file", "Fix workspace errors", "Summarize git status"].map(
+                    (q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        className="chip"
+                        disabled={busy}
+                        onClick={() => {
+                          setDraft(q);
+                          post({
+                            type: "send",
+                            text: q,
+                            mode,
+                            includeContext,
+                            chatId,
+                            model: activeModelId || undefined,
+                          });
+                        }}
+                      >
+                        {q}
+                      </button>
+                    ),
+                  )}
+                </div>
+              </div>
+            )}
+            {items.map((item, i) => (
+              <div key={i} className={`item item-${item.kind}`}>
+                {item.kind === "user" && (
+                  <>
+                    <div className="label-row">
+                      <div className="label">You</div>
+                      <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
+                        Copy
+                      </button>
+                    </div>
+                    <pre className="user-text">{item.text}</pre>
+                  </>
+                )}
+                {item.kind === "assistant" && (
+                  <>
+                    <div className="label-row">
+                      <div className="label">ClawAgents</div>
+                      <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
+                        Copy
+                      </button>
+                    </div>
+                    <div className="md">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+                      {busy && streamingRef.current && i === items.length - 1 && (
+                        <span className="cursor" />
+                      )}
+                    </div>
+                  </>
+                )}
+                {item.kind === "tool" && (
+                  <details open={item.status === "running" || item.success === false}>
+                    <summary>
+                      <span className={`dot ${item.status}${item.success === false ? " fail-dot" : ""}`} />
+                      <code>{item.name}</code>
+                      {item.status === "done" && (
+                        <span className={item.success ? "ok" : "fail"}>
+                          {item.success ? "ok" : "fail"}
+                        </span>
+                      )}
+                      {item.filePath && (
+                        <button
+                          type="button"
+                          className="linkish"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            post({ type: "open_file", path: item.filePath! });
+                          }}
+                        >
+                          open
+                        </button>
+                      )}
+                    </summary>
+                    {item.args != null && <pre className="tool-body">{safeJson(item.args)}</pre>}
+                    {item.output ? (
+                      <pre className={`tool-body ${looksLikeDiff(item.output) ? "diff" : ""}`}>
+                        {item.output}
+                      </pre>
+                    ) : (
+                      item.status === "done" &&
+                      item.success === false && (
+                        <pre className="tool-body muted">No error details returned.</pre>
+                      )
+                    )}
+                  </details>
+                )}
+                {item.kind === "permission" && (
+                  <div className="permission">
+                    <div className="label">Permission required</div>
+                    <div className="perm-body">
+                      <strong>{item.tool}</strong>
+                      {item.filePath && (
+                        <>
+                          {" · "}
+                          <button
+                            type="button"
+                            className="linkish"
+                            onClick={() => post({ type: "open_file", path: item.filePath! })}
+                          >
+                            {item.filePath}
+                          </button>
+                        </>
+                      )}
+                      {item.command && <pre className="tool-body">{item.command}</pre>}
+                      {item.reason && <div className="muted">{item.reason}</div>}
+                    </div>
+                    {!item.resolved && (
+                      <div className="perm-actions">
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => resolvePerm(item.requestId, "allow_once", setItems)}
+                        >
+                          Allow once
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => resolvePerm(item.requestId, "allow_always", setItems)}
+                        >
+                          Always
+                        </button>
+                        <button
+                          type="button"
+                          className="danger"
+                          onClick={() => resolvePerm(item.requestId, "deny", setItems)}
+                        >
+                          Deny
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {item.kind === "ask" && (
+                  <div className="permission ask-user">
+                    <div className="label">Agent asks</div>
+                    <div className="perm-body">{item.question}</div>
+                    {!item.resolved ? (
+                      <>
+                        <textarea
+                          className="ask-input"
+                          rows={3}
+                          value={item.draft || ""}
+                          placeholder="Type your answer…"
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setItems((prev) =>
+                              prev.map((it) =>
+                                it.kind === "ask" && it.requestId === item.requestId
+                                  ? { ...it, draft: v }
+                                  : it,
+                              ),
+                            );
+                          }}
+                        />
+                        <div className="perm-actions">
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={!item.draft?.trim()}
+                            onClick={() =>
+                              resolveAsk(item.requestId, item.draft || "", false, setItems)
+                            }
+                          >
+                            Reply
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => resolveAsk(item.requestId, "", true, setItems)}
+                          >
+                            Skip
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="muted tiny">Answered</div>
+                    )}
+                  </div>
+                )}
+                {item.kind === "file" && (
+                  <div className="file-row">
+                    <button
+                      type="button"
+                      className="file-chip"
+                      onClick={() => post({ type: "open_file", path: item.path })}
+                    >
+                      Changed · {item.path}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost tiny"
+                      onClick={() =>
+                        post({
+                          type: "diff_snapshot",
+                          path: item.path,
+                          snapshotId: item.snapshotId,
+                          snapshotRel: item.snapshotRel,
+                        })
+                      }
+                    >
+                      Diff
+                    </button>
+                    {item.snapshotId && item.snapshotRel && (
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() =>
+                          post({
+                            type: "restore_snapshot",
+                            snapshotId: item.snapshotId!,
+                            rel: item.snapshotRel!,
+                          })
+                        }
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </div>
+                )}
+                {item.kind === "status" && <div className="status">{item.text}</div>}
+                {item.kind === "error" && <div className="error">{item.text}</div>}
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </main>
+
+          <footer className="composer">
+            <div className="autoapprove">
+              <button
+                type="button"
+                className="aa-summary"
+                onClick={() => setAutoApproveOpen((o) => !o)}
+                title="Actions the agent may take without asking each time"
+              >
+                <span className="aa-caret">{autoApproveOpen ? "▾" : "▸"}</span>
+                Auto-approve:{" "}
+                <strong>
+                  {planAct === "plan"
+                    ? "— (Plan: reads + read-only shell)"
+                    : [
+                        autoApprove.edit && "Edit",
+                        autoApprove.execute && "Execute",
+                        autoApprove.web && "Web",
+                      ]
+                        .filter(Boolean)
+                        .join(", ") || "nothing (asks each time)"}
+                  {caveman ? " · Caveman" : ""}
+                  {byterover ? " · ByteRover" : ""}
+                  {openviking ? " · OpenViking" : ""}
+                </strong>
+              </button>
+              {autoApproveOpen && (
+                <div className="aa-options">
+                  <label className="check" title="Reads and searches are never gated">
+                    <input type="checkbox" checked readOnly disabled />
+                    Read files &amp; search <span className="muted tiny">(always)</span>
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={autoApprove.edit}
+                      onChange={() => toggleApprove("edit")}
+                    />
+                    Edit files in workspace
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={autoApprove.execute}
+                      onChange={() => toggleApprove("execute")}
+                    />
+                    Run commands &amp; ctx_execute
+                  </label>
+                  <label
+                    className="check"
+                    title="web_fetch and browser tools (network egress). Off = ask each time."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={autoApprove.web}
+                      onChange={() => toggleApprove("web")}
+                    />
+                    Web fetch &amp; browser
+                  </label>
+                  <label
+                    className="check"
+                    title="Terse caveman-style replies — fewer tokens, same technical accuracy (juliusbrussee/caveman)"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={caveman}
+                      onChange={() => setCaveman((c) => !c)}
+                    />
+                    Caveman mode <span className="muted tiny">(terse replies)</span>
+                  </label>
+                  <label
+                    className="check"
+                    title="Enable ByteRover skill (brv query/curate) for project decisions and patterns"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={byterover}
+                      onChange={() => setByterover((v) => !v)}
+                    />
+                    ByteRover <span className="muted tiny">(project memory)</span>
+                  </label>
+                  <label
+                    className="check"
+                    title="Enable OpenViking skill (ov find / L0–L2). Needs ov CLI + openviking-server."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={openviking}
+                      onChange={() => setOpenviking((v) => !v)}
+                    />
+                    OpenViking <span className="muted tiny">(tiered context)</span>
+                  </label>
+                  <div className="muted tiny">
+                    In <strong>Plan</strong>, only read-only shell (ls/echo/pwd) runs — and
+                    interaction is always Interactive.
+                    In <strong>Act + Interactive</strong>, unchecked Edit/Execute/Web ask first.
+                    In <strong>Act + Auto</strong>, ask_user is skipped and Edit/Execute/Web are
+                    approved for that turn.
+                    <strong> Caveman</strong> makes the agent reply ultra-brief.
+                    <strong> ByteRover</strong> / <strong>OpenViking</strong> opt in those skills for the turn.
+                    Enable Browser tools under Settings for browser_* tools.
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="toolbar">
+              <div className="toolbar-modes">
+                <div className="planact" role="tablist" aria-label="Plan or Act">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={planAct === "plan"}
+                    className={planAct === "plan" ? "seg active" : "seg"}
+                    onClick={() => setPlanAct("plan")}
+                    disabled={busy}
+                    title="Read & reason only — proposes changes without editing or running"
+                  >
+                    Plan
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={planAct === "act"}
+                    className={planAct === "act" ? "seg active" : "seg"}
+                    onClick={() => setPlanAct("act")}
+                    disabled={busy}
+                    title="Execute — the auto-approve toggles decide what runs without a prompt"
+                  >
+                    Act
+                  </button>
+                </div>
+                <div
+                  className="planact interaction"
+                  role="tablist"
+                  aria-label="Ask or Auto"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={effectiveInteraction === "interactive"}
+                    className={
+                      effectiveInteraction === "interactive" ? "seg active" : "seg"
+                    }
+                    onClick={() => setInteractionStyle("interactive")}
+                    disabled={busy || planAct === "plan"}
+                    title="Interactive: ask you when unclear — Plan always uses this"
+                  >
+                    Ask
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={effectiveInteraction === "auto"}
+                    className={effectiveInteraction === "auto" ? "seg active" : "seg"}
+                    onClick={() => setInteractionStyle("auto")}
+                    disabled={busy || planAct === "plan"}
+                    title="Auto: decide without asking — Act only; also auto-approves Edit/Execute/Web for the turn"
+                  >
+                    Auto
+                  </button>
+                </div>
+              </div>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={includeContext}
+                  onChange={(e) => setIncludeContext(e.target.checked)}
+                />
+                Context
+              </label>
+              {(
+                [
+                  ["file", "+File", "Insert active file path (@path) — agent reads it"],
+                  ["selection", "+Sel", "Insert the current selection into the draft"],
+                ] as const
+              ).map(([kind, label, title]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className="ghost tiny"
+                  title={title}
+                  onClick={() => post({ type: "insert_context", kind })}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="ghost tiny"
+                disabled={busy || !items.length}
+                title="Regenerate the last reply"
+                onClick={() => post({ type: "regenerate" })}
+              >
+                Regen
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
+                disabled={busy}
+                title="Start a new chat"
+                onClick={() => post({ type: "new_chat" })}
+              >
+                New
+              </button>
+            </div>
+            <div
+              className={`compose-row${dragOver ? " drag-over" : ""}`}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragDepth.current += 1;
+                setDragOver(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragDepth.current = Math.max(0, dragDepth.current - 1);
+                if (dragDepth.current === 0) {
+                  setDragOver(false);
+                }
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragDepth.current = 0;
+                setDragOver(false);
+                const uris = collectDropUris(e.dataTransfer);
+                if (uris.length) {
+                  post({ type: "attach_uris", uris });
+                }
+              }}
+            >
+              <textarea
+                ref={textareaRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={`${planAct === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · drop files · ↵ send · ⇧↵ newline · Esc stop`}
+                rows={3}
+                onKeyDown={(e) => {
+                  // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
+                  // Ignore Enter while an IME composition is active.
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.metaKey &&
+                    !e.ctrlKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
+                    e.preventDefault();
+                    send();
+                  } else if (e.key === "Escape" && busy) {
+                    e.preventDefault();
+                    post({ type: "cancel" });
+                  }
+                }}
+              />
+              {busy ? (
+                <button type="button" className="danger send" onClick={() => post({ type: "cancel" })}>
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary send"
+                  onClick={send}
+                  disabled={!draft.trim()}
+                >
+                  Send
+                </button>
+              )}
+            </div>
+          </footer>
+        </>
+      )}
+    </div>
+  );
+}
+
+function resolvePerm(
+  requestId: string,
+  decision: "allow_once" | "allow_always" | "deny",
+  setItems: Dispatch<SetStateAction<ChatItem[]>>,
+) {
+  post({ type: "permission", requestId, decision });
+  setItems((prev) =>
+    prev.map((it) =>
+      it.kind === "permission" && it.requestId === requestId ? { ...it, resolved: true } : it,
+    ),
+  );
+}
+
+function resolveAsk(
+  requestId: string,
+  answer: string,
+  skip: boolean,
+  setItems: Dispatch<SetStateAction<ChatItem[]>>,
+) {
+  post({ type: "ask_user_reply", requestId, answer, skip });
+  setItems((prev) =>
+    prev.map((it) =>
+      it.kind === "ask" && it.requestId === requestId ? { ...it, resolved: true } : it,
+    ),
+  );
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function copyText(text: string) {
+  void navigator.clipboard?.writeText(text);
+}
+
+function looksLikeDiff(text: string): boolean {
+  return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
+}
+
+/** Collect file URIs from a VS Code explorer / OS drag onto the composer. */
+function collectDropUris(dt: DataTransfer): string[] {
+  const found: string[] = [];
+  const push = (raw: string) => {
+    for (const line of raw.split(/\r?\n/)) {
+      const t = line.trim();
+      if (t && !t.startsWith("#")) {
+        found.push(t);
+      }
+    }
+  };
+  for (const type of [
+    "application/vnd.code.uri-list",
+    "text/uri-list",
+    "ResourceURLs",
+    "text/plain",
+  ]) {
+    try {
+      const data = dt.getData(type);
+      if (data) {
+        push(data);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (dt.files?.length) {
+    for (const file of Array.from(dt.files)) {
+      const withPath = file as File & { path?: string };
+      if (withPath.path) {
+        found.push(
+          withPath.path.startsWith("file:")
+            ? withPath.path
+            : `file://${withPath.path}`,
+        );
+      }
+    }
+  }
+  return [...new Set(found)];
+}

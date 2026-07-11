@@ -1,0 +1,10 @@
+# ClawAgents sidecar dependencies (install into clawagents.pythonPath)
+#
+#   python3 -m pip install -r requirements.txt
+#   python3 -m pip install 'clawagents[gemini,anthropic,mcp]'   # recommended extras
+#
+clawagents>=6.10.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0

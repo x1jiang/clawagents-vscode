@@ -1,0 +1,10 @@
+node_modules/
+webview/node_modules/
+dist/
+webview/dist/
+*.vsix
+.DS_Store
+__pycache__/
+*.pyc
+.python-version
+.clawagents/
