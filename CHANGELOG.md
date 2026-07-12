@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0 — 2026-07-11
+
+- Graduate from Marketplace **Preview** (`preview` flag removed)
+- First stable 1.x line; still requires **clawagents ≥ 6.11.1**
+
 ## 0.5.21 — 2026-07-11
 
 - Require / auto-upgrade to **clawagents ≥ 6.11.1** (CodeAct sandbox + checkpoint ref hardening)
