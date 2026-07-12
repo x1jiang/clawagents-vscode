@@ -3,7 +3,13 @@ export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
 /** How the agent talks to you during a turn. */
 export type InteractionStyle = "interactive" | "auto";
 
-export type AutoApprove = { edit: boolean; execute: boolean; web: boolean };
+export type AutoApprove = {
+  edit: boolean;
+  execute: boolean;
+  web: boolean;
+  /** browser_* tools (requires Settings → Browser tools). */
+  browser: boolean;
+};
 
 export type ChatSummary = {
   id: string;
@@ -26,6 +32,7 @@ export type HostToWebview =
       interaction?: InteractionStyle;
       caveman?: boolean;
       hasApiKey: boolean;
+      hasTavilyKey?: boolean;
       sidecar: "stopped" | "running";
       chatId?: string;
       chats?: ChatSummary[];

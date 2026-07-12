@@ -9,6 +9,9 @@ const SECRET_KEYS = {
   gemini: "clawagents.geminiApiKey",
 } as const;
 
+/** Search key — separate from LLM providers so it never appears as a chat provider. */
+const TAVILY_SECRET_KEY = "clawagents.tavilyApiKey";
+
 /** Strip paste junk so keys are safe for HTTP headers (latin-1) and env. */
 export function sanitizeApiKey(raw: string): string {
   let text = (raw || "")
@@ -123,6 +126,7 @@ export const DOTENV_ALLOWLIST = new Set([
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
   "GOOGLE_GENAI_API_KEY",
+  "TAVILY_API_KEY",
   // Intentionally omit OPENAI_BASE_URL / ANTHROPIC_BASE_URL / etc. — those
   // redirect API keys. Set base_url in ClawAgents Settings (with trust prompt).
   "CLAW_MODEL",
@@ -214,6 +218,7 @@ export class ExtensionConfig {
     const openai = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.openai)) || "");
     const anthropic = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.anthropic)) || "");
     const gemini = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.gemini)) || "");
+    const tavily = sanitizeApiKey((await this.secrets.get(TAVILY_SECRET_KEY)) || "");
     if (openai) {
       env.OPENAI_API_KEY = openai;
     }
@@ -224,7 +229,22 @@ export class ExtensionConfig {
       env.GOOGLE_API_KEY = gemini;
       env.GEMINI_API_KEY = gemini;
     }
+    if (tavily) {
+      env.TAVILY_API_KEY = tavily;
+    }
     return env;
+  }
+
+  async hasTavilyKey(): Promise<boolean> {
+    const fromSecret = sanitizeApiKey((await this.secrets.get(TAVILY_SECRET_KEY)) || "");
+    if (fromSecret) {
+      return true;
+    }
+    const dotenv = this.loadWorkspaceDotenv();
+    if (dotenv.TAVILY_API_KEY) {
+      return true;
+    }
+    return Boolean(process.env.TAVILY_API_KEY);
   }
 
   /**
@@ -278,29 +298,61 @@ export class ExtensionConfig {
     await this.secrets.store(SECRET_KEYS[provider], cleaned);
   }
 
-  /** Prompt for a provider + key. Returns the provider label when saved. */
+  async setTavilyApiKey(value: string): Promise<void> {
+    const cleaned = sanitizeApiKey(value);
+    if (!cleaned) {
+      throw new Error("API key is empty after removing whitespace/non-ASCII characters.");
+    }
+    await this.secrets.store(TAVILY_SECRET_KEY, cleaned);
+  }
+
+  /** Prompt for a provider + key (or Tavily for web_search). Returns the label when saved. */
   async promptSetApiKey(): Promise<string | undefined> {
-    const provider = await vscode.window.showQuickPick(
+    type KeyChoice = {
+      label: string;
+      description?: string;
+      id: "openai" | "anthropic" | "gemini" | "tavily";
+      slot: "llm" | "tavily";
+    };
+    const choice = await vscode.window.showQuickPick<KeyChoice>(
       [
-        { label: "OpenAI", id: "openai" as const },
-        { label: "Anthropic", id: "anthropic" as const },
-        { label: "Gemini", id: "gemini" as const },
+        { label: "OpenAI", id: "openai", slot: "llm" },
+        { label: "Anthropic", id: "anthropic", slot: "llm" },
+        { label: "Gemini", id: "gemini", slot: "llm" },
+        {
+          label: "Tavily (web_search)",
+          description: "Enables the built-in web_search tool",
+          id: "tavily",
+          slot: "tavily",
+        },
       ],
-      { title: "Which provider API key?" },
+      { title: "Which API key?" },
     );
-    if (!provider) {
+    if (!choice) {
       return undefined;
     }
     const value = await vscode.window.showInputBox({
-      title: `ClawAgents ${provider.label} API key`,
+      title:
+        choice.slot === "tavily"
+          ? "ClawAgents Tavily API key"
+          : `ClawAgents ${choice.label} API key`,
       password: true,
       ignoreFocusOut: true,
-      prompt: "Stored in VS Code SecretStorage and passed to the Python sidecar.",
+      prompt:
+        choice.slot === "tavily"
+          ? "Stored in VS Code SecretStorage. Get a key at https://tavily.com — enables web_search."
+          : "Stored in VS Code SecretStorage and passed to the Python sidecar.",
+      placeHolder: choice.slot === "tavily" ? "tvly-…" : undefined,
     });
     if (value) {
-      await this.setApiKey(provider.id, value);
-      void vscode.window.showInformationMessage(`${provider.label} API key saved.`);
-      return provider.label;
+      if (choice.slot === "tavily") {
+        await this.setTavilyApiKey(value);
+        void vscode.window.showInformationMessage("Tavily API key saved — web_search enabled.");
+        return "Tavily";
+      }
+      await this.setApiKey(choice.id as keyof typeof SECRET_KEYS, value);
+      void vscode.window.showInformationMessage(`${choice.label} API key saved.`);
+      return choice.label;
     }
     return undefined;
   }

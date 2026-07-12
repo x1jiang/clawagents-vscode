@@ -463,15 +463,25 @@ async def run_chat_turn(
     if action_mode == "code" and "action_mode" in _agent_params:
         kwargs["action_mode"] = "code"
 
-    # Browser tools
+    # Browser tools (Playwright). Opt-in via Settings → Enable browser tools.
     if settings.get("browser_tools"):
         try:
             from clawagents.browser import create_browser_tools
 
             kwargs.setdefault("tools", [])
             kwargs["tools"] = list(kwargs["tools"]) + list(create_browser_tools())
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            on_event(
+                "warn",
+                {
+                    "message": (
+                        "Browser tools enabled but failed to load "
+                        f"({type(exc).__name__}: {exc}). "
+                        "Install with: pip install 'clawagents[browser]' "
+                        "&& playwright install chromium"
+                    ),
+                },
+            )
 
     # ── Event forwarding ────────────────────────────────────────────────
     # The typed stream (on_stream_event) is the authoritative channel for

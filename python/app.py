@@ -306,8 +306,10 @@ class AutoApprove(BaseModel):
     # to True runs without a confirmation prompt. Defaults are opt-in (safe).
     edit: bool = False
     execute: bool = False
-    # Network egress (web_fetch / browser_*). Default off — ask first.
+    # web_fetch / web_search. Default off — ask first.
     web: bool = False
+    # browser_* tools (also requires settings.browser_tools). Default off.
+    browser: bool = False
 
 
 InteractionStyle = Literal["interactive", "auto"]
@@ -340,10 +342,15 @@ _EDIT_TOOLS = frozenset({
     "delete_file",
 })
 
-# Network / browser tools — gated under the "web" auto-approve category.
+# Network search/fetch — gated under the "web" auto-approve category.
 _WEB_TOOLS = frozenset({
     "web_fetch",
     "web_search",
+})
+
+# Headless browser — gated under the "browser" auto-approve category.
+# Also requires settings.browser_tools so the tools are registered at all.
+_BROWSER_TOOLS = frozenset({
     "browser_navigate",
     "browser_snapshot",
     "browser_click",
@@ -384,6 +391,8 @@ def _tool_category(name: str) -> str:
         return "edit"
     if name in _WEB_TOOLS:
         return "web"
+    if name in _BROWSER_TOOLS:
+        return "browser"
     return "execute"
 
 
@@ -471,16 +480,20 @@ def _make_before_tool(
 
     from mcp_loader import CONTEXT_MODE_WRITE_TOOLS
 
-    # ctx_execute & co. run arbitrary code (their "sandbox" captures stdout,
-    # it does not confine writes) — gate them like the built-in shell tool.
-    # web_fetch / browser_* leave the machine — gated under auto_approve.web.
-    gated_tools = frozenset(WRITE_CLASS_TOOLS) | CONTEXT_MODE_WRITE_TOOLS | _WEB_TOOLS
+    # web_fetch / web_search / browser_* leave the machine — gated under
+    # auto_approve.web and auto_approve.browser respectively.
+    gated_tools = (
+        frozenset(WRITE_CLASS_TOOLS)
+        | CONTEXT_MODE_WRITE_TOOLS
+        | _WEB_TOOLS
+        | _BROWSER_TOOLS
+    )
 
     def _pre_approved(category: str, file_path: str | None) -> bool:
         """Granular auto-approve (Cline-style). Authoritative when provided.
 
         'Edit' auto-approve only covers in-workspace files; edits outside the
-        workspace still prompt. 'Execute' / 'web' have no path, so they cover all.
+        workspace still prompt. 'Execute' / 'web' / 'browser' have no path.
         """
         if auto_approve is None:
             # Legacy / direct-API behavior: fall back to mode heuristics.
@@ -489,6 +502,8 @@ def _make_before_tool(
             return bool(auto_approve.edit) and _in_workspace(file_path)
         if category == "web":
             return bool(auto_approve.web)
+        if category == "browser":
+            return bool(auto_approve.browser)
         return bool(auto_approve.execute)
 
     def _is_readonly_shell(command: str | None) -> bool:

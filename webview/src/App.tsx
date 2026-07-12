@@ -137,12 +137,14 @@ export function App() {
     edit: false,
     execute: false,
     web: false,
+    browser: false,
   });
   const [caveman, setCaveman] = useState(false);
   const [autoApproveOpen, setAutoApproveOpen] = useState(false);
   const [includeContext, setIncludeContext] = useState(true);
   const [busy, setBusy] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
+  const [hasTavilyKey, setHasTavilyKey] = useState(false);
   const [sidecar, setSidecar] = useState<"stopped" | "starting" | "running" | "error">(
     "stopped",
   );
@@ -243,6 +245,9 @@ export function App() {
             setCaveman(msg.caveman);
           }
           setHasApiKey(msg.hasApiKey);
+          if (typeof msg.hasTavilyKey === "boolean") {
+            setHasTavilyKey(msg.hasTavilyKey);
+          }
           setSidecar(msg.sidecar);
           setChatId(msg.chatId);
           setChats(msg.chats || []);
@@ -1442,14 +1447,26 @@ export function App() {
               />
               Context Mode (token-efficient ctx_* tools)
             </label>
-            <label className="check">
+            <label
+              className="check"
+              title="Register Playwright browser_* tools (navigate, snapshot, click). Needs: pip install 'clawagents[browser]' && playwright install chromium. Auto-approve → Browser still decides whether each call asks first."
+            >
               <input
                 type="checkbox"
                 checked={Boolean(settings.browser_tools)}
                 onChange={(e) => setSettings((s) => ({ ...s, browser_tools: e.target.checked }))}
               />
-              Browser tools
+              Enable browser tools (Playwright)
             </label>
+            <div className="muted tiny" style={{ marginTop: 6 }}>
+              Web search uses Tavily. Status:{" "}
+              {hasTavilyKey ? (
+                <strong>key configured</strong>
+              ) : (
+                <span>no key — use Set API key… → Tavily</span>
+              )}
+              . Fetch/search auto-approve is under the composer Auto-approve → Web.
+            </div>
           </section>
 
           <section className="settings-section">
@@ -1484,7 +1501,7 @@ export function App() {
             <button
               type="button"
               className="primary"
-              title="Prompts for a provider + key; stored encrypted in VS Code SecretStorage. A key in the workspace .env overrides it."
+              title="Prompts for OpenAI / Anthropic / Gemini / Tavily; stored encrypted in VS Code SecretStorage. Workspace .env overrides SecretStorage when both are set."
               onClick={() => {
                 setVerifyMsg("Enter the key in the dialog at the top of the window…");
                 post({ type: "set_api_key" });
@@ -1804,6 +1821,7 @@ export function App() {
                         autoApprove.edit && "Edit",
                         autoApprove.execute && "Execute",
                         autoApprove.web && "Web",
+                        autoApprove.browser && "Browser",
                       ]
                         .filter(Boolean)
                         .join(", ") || "nothing (asks each time)"}
@@ -1834,14 +1852,32 @@ export function App() {
                   </label>
                   <label
                     className="check"
-                    title="web_fetch and browser tools (network egress). Off = ask each time."
+                    title="web_fetch and web_search (Tavily). Off = ask each time. Set Tavily key under Settings → Set API key…"
                   >
                     <input
                       type="checkbox"
                       checked={autoApprove.web}
                       onChange={() => toggleApprove("web")}
                     />
-                    Web fetch &amp; browser
+                    Web fetch &amp; search
+                    {!hasTavilyKey && (
+                      <span className="muted tiny"> (Tavily key missing for search)</span>
+                    )}
+                  </label>
+                  <label
+                    className="check"
+                    title="browser_* tools. Requires Settings → Enable browser tools. Off = ask each time."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={autoApprove.browser}
+                      onChange={() => toggleApprove("browser")}
+                      disabled={!settings.browser_tools}
+                    />
+                    Browser (Playwright)
+                    {!settings.browser_tools && (
+                      <span className="muted tiny"> (enable in Settings first)</span>
+                    )}
                   </label>
                   <label
                     className="check"
@@ -1857,11 +1893,13 @@ export function App() {
                   <div className="muted tiny">
                     In <strong>Plan</strong>, only read-only shell (ls/echo/pwd) runs — and
                     interaction is always Interactive.
-                    In <strong>Act + Interactive</strong>, unchecked Edit/Execute/Web ask first.
-                    In <strong>Act + Auto</strong>, ask_user is skipped and Edit/Execute/Web are
-                    approved for that turn.
+                    In <strong>Act + Interactive</strong>, unchecked Edit/Execute/Web/Browser ask
+                    first.
+                    In <strong>Act + Auto</strong>, ask_user is skipped; Auto-approve toggles still
+                    apply.
                     <strong> Caveman</strong> makes the agent reply ultra-brief.
-                    Enable Browser tools under Settings for browser_* tools.
+                    Enable browser tools under Settings; install{" "}
+                    <code>clawagents[browser]</code> + Chromium for Playwright.
                   </div>
                 </div>
               )}

@@ -17,7 +17,7 @@ export interface SidecarHandle {
 
 function redactSecrets(text: string): string {
   // Build patterns at runtime so static scanners do not treat the source as a secret.
-  const keyNames = ["OPENAI", "ANTHROPIC", "GEMINI", "GOOGLE", "GATEWAY"]
+  const keyNames = ["OPENAI", "ANTHROPIC", "GEMINI", "GOOGLE", "GATEWAY", "TAVILY"]
     .map((p) => `${p}_API_KEY`)
     .join("|");
   const openaiPrefix = ["sk", "-"].join("");
@@ -125,6 +125,7 @@ export class SidecarManager {
       openai: ["OPENAI_API_KEY"],
       anthropic: ["ANTHROPIC_API_KEY"],
       gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+      tavily: ["TAVILY_API_KEY"],
     };
     for (const [prov, vars] of Object.entries(keyVars)) {
       if (vars.some((v) => apiEnv[v])) {
@@ -144,7 +145,6 @@ export class SidecarManager {
         }
       }
     }
-
     const env: NodeJS.ProcessEnv = {
       ...curatedProcessEnv(),
       ...shellKeys,

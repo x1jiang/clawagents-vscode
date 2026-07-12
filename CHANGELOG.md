@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 — 2026-07-11
+
+- Settings → **Set API key…** includes **Tavily** (SecretStorage → `TAVILY_API_KEY`) for `web_search`
+- Auto-approve: separate **Web** (fetch/search) and **Browser** (Playwright) checkboxes
+- Browser tools remain opt-in under Settings; clearer install hint when load fails
+
+## Unreleased
+
 ## 1.0.0 — 2026-07-11
 
 - Graduate from Marketplace **Preview** (`preview` flag removed)

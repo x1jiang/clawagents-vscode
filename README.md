@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat in the **right sidebar**, edit your wo
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.11.1** (auto-installed / upgraded by the extension)
+- **clawagents ≥ 6.11.2** (auto-installed / upgraded by the extension)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -20,7 +20,7 @@ clawagents[gemini,anthropic,mcp]  fastapi  uvicorn  pydantic  python-dotenv
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
 
-3. Add credentials: Command Palette → **ClawAgents: Set Provider Credential**, or put provider variables in a workspace env file (see [clawagents docs](https://github.com/x1jiang/clawagents_py)).
+3. Add credentials: Command Palette → **ClawAgents: Set Provider Credential** (includes **Tavily** for `web_search`), or put keys in a workspace `.env`. For browser tools: Settings → **Enable browser tools**, then `pip install 'clawagents[browser]' && playwright install chromium`.
 
 4. Open the **Secondary Side Bar** (right) and click the ClawAgents icon, or run **ClawAgents: Open Chat** (`⌘⇧'` / `Ctrl+Shift+'`).
 

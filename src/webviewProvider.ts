@@ -31,7 +31,12 @@ import { SidecarManager } from "./sidecar";
 export const SIDEBAR_ID = "clawagents.sidebar";
 const STATE_KEY = "clawagents.chatState.v2";
 
-const DEFAULT_AUTO_APPROVE: AutoApprove = { edit: false, execute: false, web: false };
+const DEFAULT_AUTO_APPROVE: AutoApprove = {
+  edit: false,
+  execute: false,
+  web: false,
+  browser: false,
+};
 
 /** Warn once per session about a non-local base_url from workspace settings. */
 let warnedUntrustedBaseUrl = false;
@@ -322,6 +327,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       hasApiKey: await this.config.hasAnyApiKey(),
+      hasTavilyKey: await this.config.hasTavilyKey(),
       sidecar: this.sidecar.current ? "running" : "stopped",
       chatId: this.chatId,
       chats,
@@ -701,6 +707,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.sidecar.ensureStarted();
           this.post({ type: "sidecar", state: "running" });
           await this.pushReady();
+
+          if (savedProvider.toLowerCase().includes("tavily")) {
+            this.post({
+              type: "verify_result",
+              provider: "tavily",
+              ok: true,
+              detail: "Tavily key saved; sidecar restarted — web_search is ready",
+            });
+            break;
+          }
+
           // Map UI label → provider id for a live probe.
           const providerId =
             savedProvider.toLowerCase().includes("gemini")
