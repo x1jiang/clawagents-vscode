@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.20 — 2026-07-11
+
+- UI polish: clearer header toolbar, context meter chip, Checkpoints/Compact actions
+- Checkpoint panel restyle with Files / Chat / Both restore controls
+- Softer composer and tab chrome within VS Code theme tokens
+
 ## 0.5.19 — 2026-07-11
 
 - Require / auto-upgrade to **clawagents ≥ 6.11.0** (shadow restore modes, always-on rules, modes, CodeAct, evals)

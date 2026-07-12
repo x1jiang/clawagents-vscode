@@ -35,11 +35,18 @@ body,
 }
 
 .header {
-  padding: 10px 12px 8px;
+  padding: 10px 12px 0;
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 6%, transparent) 0%,
+      transparent 48%
+    ),
+    var(--bg);
 }
 
 .header-top {
@@ -51,7 +58,7 @@ body,
 
 .brand {
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   font-size: 14px;
 }
 
@@ -59,30 +66,42 @@ body,
   color: var(--muted);
   font-size: 11px;
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   align-items: center;
-  overflow: hidden;
 }
 
-.meta span:first-child {
+.meta-workspace {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 40%;
-  flex-shrink: 1;
+  max-width: 36%;
   min-width: 0;
+  color: var(--fg);
+  opacity: 0.85;
+}
+
+.meta-stat {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.meta-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .model-select {
-  max-width: 42%;
-  min-width: 7rem;
+  max-width: 11rem;
+  min-width: 6.5rem;
   flex-shrink: 1;
   background: var(--input-bg);
   color: var(--input-fg);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 5px;
   font-size: 11px;
-  padding: 1px 4px;
+  padding: 2px 6px;
   cursor: pointer;
 }
 
@@ -94,11 +113,11 @@ body,
 
 .cost.session {
   color: var(--fg);
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .sep {
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
 .pill {
@@ -106,10 +125,11 @@ body,
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 2px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--muted);
+  background: color-mix(in srgb, var(--input-bg) 70%, transparent);
 }
 
 .pill-dot {
@@ -374,10 +394,11 @@ summary {
 
 .composer {
   border-top: 1px solid var(--border);
-  padding: 8px 10px 10px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  background: color-mix(in srgb, var(--input-bg) 28%, var(--bg));
 }
 
 .toolbar {
@@ -573,24 +594,27 @@ button.send {
 
 .tabs {
   display: flex;
-  gap: 4px;
-  margin-top: 6px;
+  gap: 2px;
+  margin: 0 -4px;
+  padding: 6px 4px 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 
 .tab {
   background: transparent;
   border: 1px solid transparent;
   color: var(--muted);
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 6px;
   font-size: 11px;
   text-transform: capitalize;
+  cursor: pointer;
 }
 
 .tab.active {
   color: var(--fg);
   border-color: var(--border);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .panel {
@@ -861,30 +885,169 @@ button.send {
     opacity: 0.35;
   }
 }
----
 
 .context-meter {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-variant-numeric: tabular-nums;
+  padding: 1px 6px 1px 4px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--input-bg) 55%, transparent);
 }
+
 .context-meter-bar {
   display: inline-block;
-  width: 48px;
-  height: 6px;
+  width: 44px;
+  height: 5px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--muted) 35%, transparent);
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
   overflow: hidden;
-  vertical-align: middle;
 }
+
 .context-meter-fill {
   display: block;
   height: 100%;
+  border-radius: inherit;
+  transition: width 0.25s ease;
 }
-.context-meter-fill.ok { background: #3d9a5f; }
-.context-meter-fill.warn { background: #c9a227; }
-.context-meter-fill.hot { background: #c44; }
+
+.context-meter-fill.ok {
+  background: #3d9a5f;
+}
+.context-meter-fill.warn {
+  background: #c9a227;
+}
+.context-meter-fill.hot {
+  background: #c44;
+}
+
+.context-meter-pct {
+  font-size: 10px;
+  color: var(--fg);
+  opacity: 0.9;
+}
+
+.compact-chip {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.tool-chip {
+  appearance: none;
+  background: color-mix(in srgb, var(--input-bg) 85%, transparent);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.tool-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.tool-chip.active,
+.tool-chip.primary {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.checkpoint-panel {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px 12px;
+  max-height: 220px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--input-bg) 40%, var(--bg));
+}
+
+.checkpoint-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.checkpoint-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.checkpoint-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.checkpoint-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checkpoint-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.checkpoint-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.checkpoint-sha {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+}
+
+.checkpoint-label {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.checkpoint-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
 .linkish {
   background: none;
   border: none;
@@ -893,33 +1056,3 @@ button.send {
   padding: 0 4px;
   font: inherit;
 }
-.checkpoint-panel {
-  border-bottom: 1px solid var(--border);
-  padding: 8px 12px;
-  max-height: 180px;
-  overflow: auto;
-}
-.checkpoint-panel-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.checkpoint-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.checkpoint-list li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  padding: 4px 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-}
-.checkpoint-actions button {
-  font-size: 11px;
-  margin-right: 4px;
-}
-.muted { color: var(--muted); }

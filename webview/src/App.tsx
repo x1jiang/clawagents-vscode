@@ -832,8 +832,9 @@ export function App() {
           </div>
         </div>
         <div className="meta">
-          <span title={workspace}>{workspaceName}</span>
-          <span className="sep">·</span>
+          <span className="meta-workspace" title={workspace}>
+            {workspaceName}
+          </span>
           <select
             className="model-select"
             value={activeModelId}
@@ -849,84 +850,76 @@ export function App() {
             ))}
           </select>
           {ctx && (
-            <>
-              <span className="sep">·</span>
-              <span
-                className="context-meter"
-                title={`Context ~${Math.round(ctx.ratio * 100)}% (${(
-                  usage.lastInputTokens || promptTok
-                ).toLocaleString()} / ${ctx.window.toLocaleString()})`}
-              >
-                <span className="context-meter-bar">
-                  <span
-                    className={
-                      ctx.ratio < 0.5
-                        ? "context-meter-fill ok"
-                        : ctx.ratio < 0.8
-                          ? "context-meter-fill warn"
-                          : "context-meter-fill hot"
-                    }
-                    style={{ width: `${Math.max(2, Math.round(ctx.ratio * 100))}%` }}
-                  />
-                </span>
-                {Math.round(ctx.ratio * 100)}%
+            <span
+              className="context-meter"
+              title={`Context ~${Math.round(ctx.ratio * 100)}% (${(
+                usage.lastInputTokens || promptTok
+              ).toLocaleString()} / ${ctx.window.toLocaleString()})`}
+            >
+              <span className="context-meter-bar" aria-hidden>
+                <span
+                  className={
+                    ctx.ratio < 0.5
+                      ? "context-meter-fill ok"
+                      : ctx.ratio < 0.8
+                        ? "context-meter-fill warn"
+                        : "context-meter-fill hot"
+                  }
+                  style={{ width: `${Math.max(2, Math.round(ctx.ratio * 100))}%` }}
+                />
               </span>
-            </>
+              <span className="context-meter-pct">{Math.round(ctx.ratio * 100)}%</span>
+            </span>
           )}
           {compactPhase && (
-            <>
-              <span className="sep">·</span>
-              <span title="Compaction in progress">compact:{compactPhase}</span>
-            </>
+            <span className="compact-chip" title="Compaction in progress">
+              compact · {compactPhase}
+            </span>
           )}
           {totalTok > 0 && (
-            <>
-              <span className="sep">·</span>
-              <span title={`${promptTok} in / ${completionTok} out (this run)`}>
-                {totalTok.toLocaleString()} tok
-              </span>
-            </>
+            <span
+              className="meta-stat"
+              title={`${promptTok} in / ${completionTok} out (this run)`}
+            >
+              {totalTok.toLocaleString()} tok
+            </span>
           )}
-          <button
-            type="button"
-            className="linkish"
-            title="List shadow-git checkpoints (/checkpoints)"
-            onClick={() => post({ type: "list_checkpoints" })}
-          >
-            ckpt
-          </button>
-          <button
-            type="button"
-            className="linkish"
-            title="Compact session (/compact)"
-            onClick={() => post({ type: "compact_chat" })}
-          >
-            compact
-          </button>
           {runCost != null && totalTok > 0 && (
-            <>
-              <span className="sep">·</span>
-              <span
-                className="cost"
-                title="Estimated API cost for this run (last/current turn). List price, uncached — not a bill."
-              >
-                run ~{formatUsd(runCost)}
-              </span>
-            </>
+            <span
+              className="cost"
+              title="Estimated API cost for this run (last/current turn). List price, uncached — not a bill."
+            >
+              run ~{formatUsd(runCost)}
+            </span>
           )}
           {sessionCostShown > 0 && (
-            <>
-              <span className="sep">·</span>
-              <span
-                className="cost session"
-                title="Estimated total for this chat (all runs). Persisted with the chat — survives reload."
-              >
-                session ~{formatUsd(sessionCostShown)}
-              </span>
-            </>
+            <span
+              className="cost session"
+              title="Estimated total for this chat (all runs). Persisted with the chat — survives reload."
+            >
+              session ~{formatUsd(sessionCostShown)}
+            </span>
           )}
+          <div className="meta-actions">
+            <button
+              type="button"
+              className={`tool-chip${checkpointsOpen ? " active" : ""}`}
+              title="Shadow-git checkpoints (/checkpoints)"
+              onClick={() => post({ type: "list_checkpoints" })}
+            >
+              Checkpoints
+            </button>
+            <button
+              type="button"
+              className="tool-chip"
+              title="Compact session (/compact)"
+              onClick={() => post({ type: "compact_chat" })}
+            >
+              Compact
+            </button>
+          </div>
         </div>
-        <nav className="tabs">
+        <nav className="tabs" aria-label="Panels">
           {(["chat", "history", "settings", "diagnostics"] as Panel[]).map((p) => (
             <button
               key={p}
@@ -970,50 +963,66 @@ export function App() {
       </header>
 
       {checkpointsOpen && (
-        <div className="checkpoint-panel">
+        <div className="checkpoint-panel" role="region" aria-label="Checkpoints">
           <div className="checkpoint-panel-head">
-            <strong>Checkpoints</strong>
-            <button type="button" className="linkish" onClick={() => setCheckpointsOpen(false)}>
-              close
+            <div>
+              <strong>Checkpoints</strong>
+              <span className="checkpoint-sub">Restore files, chat, or both</span>
+            </div>
+            <button
+              type="button"
+              className="tool-chip"
+              onClick={() => setCheckpointsOpen(false)}
+            >
+              Close
             </button>
           </div>
           {checkpoints.length === 0 ? (
-            <p className="muted">No checkpoints yet.</p>
+            <p className="checkpoint-empty">No checkpoints yet — they appear after write tools.</p>
           ) : (
             <ul className="checkpoint-list">
               {checkpoints.slice(0, 12).map((cp) => {
                 const sha = String(cp.sha || "");
                 if (!sha) return null;
+                const label = String(cp.tool || cp.label || cp.message || "checkpoint");
                 return (
                   <li key={sha}>
-                    <code>{sha.slice(0, 10)}</code>{" "}
-                    <span className="muted">
-                      {String(cp.tool || cp.label || cp.message || "")}
-                    </span>
+                    <div className="checkpoint-main">
+                      <code className="checkpoint-sha">{sha.slice(0, 10)}</code>
+                      <span className="checkpoint-label" title={label}>
+                        {label}
+                      </span>
+                    </div>
                     <div className="checkpoint-actions">
                       <button
                         type="button"
+                        className="tool-chip"
+                        title="Restore workspace files only"
                         onClick={() =>
                           post({ type: "restore_checkpoint", sha, mode: "files" })
                         }
                       >
-                        files
+                        Files
                       </button>
                       <button
                         type="button"
+                        className="tool-chip"
+                        title="Restore conversation only"
                         onClick={() =>
                           post({ type: "restore_checkpoint", sha, mode: "conversation" })
                         }
                       >
-                        chat
+                        Chat
                       </button>
                       <button
                         type="button"
+                        className="tool-chip primary"
+                        title="Restore files and conversation"
                         onClick={() =>
                           post({ type: "restore_checkpoint", sha, mode: "both" })
                         }
                       >
-                        both
+                        Both
                       </button>
                     </div>
                   </li>
