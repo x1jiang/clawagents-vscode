@@ -514,10 +514,15 @@ async def run_chat_turn(
                 pass
             on_event("checkpoint", payload)
             return
+        # NOTE: the library emits ``approval_required`` for *every* native
+        # tool call (its own opt-in HITL path, inert here because the sidecar
+        # sets no approval_handler). The sidecar gates tools through
+        # ``before_tool`` instead, which raises its own ``permission_required``.
+        # Forwarding the library event too would double-prompt the webview, so
+        # it is deliberately excluded from this set.
         if kind in {
             "compact_progress",
             "context",
-            "approval_required",
             "warn",
             "error",
         }:

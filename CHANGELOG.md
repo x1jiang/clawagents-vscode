@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.21 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.11.1** (CodeAct sandbox + checkpoint ref hardening)
+- Do not forward library `approval_required` into the webview (avoids double permission prompts; sidecar uses `before_tool`)
+
 ## 0.5.20 — 2026-07-11
 
 - UI polish: clearer header toolbar, context meter chip, Checkpoints/Compact actions

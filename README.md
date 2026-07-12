@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat in the **right sidebar**, edit your wo
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.11.0** (auto-installed / upgraded by the extension)
+- **clawagents ≥ 6.11.1** (auto-installed / upgraded by the extension)
 - A provider credential for at least one model provider
 
 ## Quick start
