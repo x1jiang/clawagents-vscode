@@ -93,6 +93,7 @@ export type HostToWebview =
       phase?: string;
       label?: string;
       messageCount?: number;
+      ts?: number;
     }
   | {
       type: "done";
@@ -138,7 +139,12 @@ export type HostToWebview =
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
   | { type: "sidecar"; state: "stopped" | "starting" | "running" | "error"; detail?: string }
-  | { type: "checkpoints"; checkpoints: Array<Record<string, unknown>> };
+  | {
+      type: "checkpoints";
+      checkpoints: Array<Record<string, unknown>>;
+      /** When false, refresh the chip only — don't open the panel. Default true. */
+      open?: boolean;
+    };
 
 export type WebviewToHost =
   | { type: "ready" }
@@ -176,7 +182,7 @@ export type WebviewToHost =
   | { type: "restore_snapshot"; snapshotId: string; rel: string }
   | { type: "restore_checkpoint"; sha: string; mode: "files" | "conversation" | "both" }
   | { type: "compact_chat" }
-  | { type: "list_checkpoints" }
+  | { type: "list_checkpoints"; open?: boolean }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
   | { type: "save_settings"; settings: Record<string, unknown> }
@@ -184,6 +190,7 @@ export type WebviewToHost =
   | { type: "pick_skill_dir" }
   | { type: "verify_key"; provider: string }
   | { type: "set_api_key" }
+  | { type: "clear_api_key" }
   | { type: "load_diagnostics" }
   | { type: "load_stats" }
   | {

@@ -106,6 +106,13 @@ export function activate(context: vscode.ExtensionContext): void {
         await provider?.restartSidecar();
       }
     }),
+    vscode.commands.registerCommand("clawagents.clearApiKey", async () => {
+      const cleared = await config.promptClearApiKey();
+      if (cleared) {
+        sidecar?.stop();
+        await provider?.restartSidecar();
+      }
+    }),
   );
 
   const sidecarSettings = [

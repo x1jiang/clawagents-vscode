@@ -186,6 +186,7 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
         phase: data.phase ? String(data.phase) : undefined,
         label: data.label ? String(data.label) : undefined,
         messageCount: num(data.message_count ?? data.messageCount),
+        ts: num(data.ts) ?? Math.floor(Date.now() / 1000),
       };
     case "approval_required":
       return {

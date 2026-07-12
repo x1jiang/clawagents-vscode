@@ -152,21 +152,19 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   async openChat(): Promise<void> {
-    // Secondary Side Bar (right) — same strip Claude Code / Codex use.
-    // Focusing the view opens the auxiliary bar when needed.
-    try {
-      await vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
-    } catch {
-      /* older hosts without auxiliary bar */
-    }
+    // Activity Bar (left) — focus the ClawAgents view container.
     await vscode.commands.executeCommand("clawagents.sidebar.focus");
   }
 
   async toggleChat(): Promise<void> {
-    // Toggle the right auxiliary bar; if opening, focus ClawAgents.
+    // Focus if hidden; if already visible, collapse the sidebar view.
     try {
-      await vscode.commands.executeCommand("workbench.action.toggleAuxiliaryBar");
-      await vscode.commands.executeCommand("clawagents.sidebar.focus");
+      const visible = this.view?.visible;
+      if (visible) {
+        await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility");
+      } else {
+        await this.openChat();
+      }
     } catch {
       await this.openChat();
     }
@@ -593,7 +591,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "list_checkpoints":
         try {
           const rows = await this.gateway.listCheckpoints(20);
-          this.post({ type: "checkpoints", checkpoints: rows });
+          this.post({
+            type: "checkpoints",
+            checkpoints: rows,
+            open: msg.open !== false,
+          });
         } catch (err) {
           this.post({
             type: "error",
@@ -632,9 +634,23 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "save_settings":
         try {
           const incoming = { ...(msg.settings || {}) } as Record<string, unknown>;
+          let previous: Record<string, unknown> = {};
+          try {
+            previous = (await this.gateway.getSettings()) as Record<string, unknown>;
+          } catch {
+            previous = {};
+          }
           const baseUrl =
             typeof incoming.base_url === "string" ? incoming.base_url.trim() : "";
-          if (baseUrl && !isTrustedBaseUrl(baseUrl)) {
+          const prevBaseUrl =
+            typeof previous.base_url === "string" ? previous.base_url.trim() : "";
+          const baseUrlChanged = baseUrl !== prevBaseUrl;
+          // Only prompt when a new/changed custom URL isn't already trusted.
+          if (
+            baseUrl &&
+            !isTrustedBaseUrl(baseUrl) &&
+            (baseUrlChanged || !previous.trust_custom_base_url)
+          ) {
             const choice = await vscode.window.showWarningMessage(
               `Custom base URL "${baseUrl}" will receive provider API keys. Only continue if you trust this endpoint.`,
               { modal: true },
@@ -643,13 +659,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             );
             if (choice !== "Trust and save") {
               this.post({ type: "status", message: "Settings save cancelled" });
+              this.post({
+                type: "settings",
+                settings: previous,
+              });
               break;
             }
             incoming.trust_custom_base_url = true;
           } else if (!baseUrl) {
             incoming.trust_custom_base_url = false;
+          } else if (previous.trust_custom_base_url && !baseUrlChanged) {
+            incoming.trust_custom_base_url = true;
           }
-          if (incoming.mcp_trust_workspace === true) {
+          // Only confirm workspace MCP trust when newly enabling.
+          if (incoming.mcp_trust_workspace === true && !previous.mcp_trust_workspace) {
             const choice = await vscode.window.showWarningMessage(
               "Trust workspace .clawagents/mcp.json? It can run local commands from this repo.",
               { modal: true },
@@ -743,6 +766,42 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               })`,
             });
           }
+        } catch (err) {
+          this.post({
+            type: "sidecar",
+            state: "error",
+            detail: err instanceof Error ? err.message : String(err),
+          });
+          this.post({
+            type: "verify_result",
+            provider: "api key",
+            ok: false,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "clear_api_key":
+        try {
+          const cleared = await this.config.promptClearApiKey();
+          if (!cleared) {
+            this.post({
+              type: "verify_result",
+              provider: "api key",
+              ok: false,
+              detail: "cancelled — nothing changed",
+            });
+            break;
+          }
+          this.sidecar.stop();
+          await this.sidecar.ensureStarted();
+          this.post({ type: "sidecar", state: "running" });
+          await this.pushReady();
+          this.post({
+            type: "verify_result",
+            provider: "api key",
+            ok: true,
+            detail: `${cleared === "all" ? "All keys" : cleared} cleared; sidecar restarted`,
+          });
         } catch (err) {
           this.post({
             type: "sidecar",

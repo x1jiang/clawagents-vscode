@@ -39,5 +39,5 @@ export function contextUsage(
   if (inputTokensThisTurn <= 0) return null;
   const window = contextWindowFor(model);
   if (window === null) return null;
-  return { ratio: inputTokensThisTurn / window, window };
+  return { ratio: Math.min(1, inputTokensThisTurn / window), window };
 }

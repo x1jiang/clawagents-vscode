@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, or local models.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -42,7 +42,7 @@
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
-      "secondarySidebar": [
+      "activitybar": [
         {
           "id": "clawagents",
           "title": "ClawAgents",
@@ -69,8 +69,8 @@
       },
       {
         "command": "clawagents.toggleChat",
-        "title": "ClawAgents: Toggle Right Panel",
-        "icon": "$(layout-sidebar-right)"
+        "title": "ClawAgents: Toggle Chat Panel",
+        "icon": "$(layout-sidebar-left)"
       },
       {
         "command": "clawagents.newChat",
@@ -106,6 +106,10 @@
       {
         "command": "clawagents.setApiKey",
         "title": "ClawAgents: Set API Key (OpenAI / Anthropic / Gemini / Tavily)"
+      },
+      {
+        "command": "clawagents.clearApiKey",
+        "title": "ClawAgents: Clear API Key…"
       },
       {
         "command": "clawagents.installPythonDeps",

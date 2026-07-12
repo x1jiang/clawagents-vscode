@@ -306,6 +306,71 @@ export class ExtensionConfig {
     await this.secrets.store(TAVILY_SECRET_KEY, cleaned);
   }
 
+  async clearApiKey(provider: keyof typeof SECRET_KEYS): Promise<void> {
+    await this.secrets.delete(SECRET_KEYS[provider]);
+  }
+
+  async clearTavilyApiKey(): Promise<void> {
+    await this.secrets.delete(TAVILY_SECRET_KEY);
+  }
+
+  async clearAllApiKeys(): Promise<void> {
+    await Promise.all([
+      this.clearApiKey("openai"),
+      this.clearApiKey("anthropic"),
+      this.clearApiKey("gemini"),
+      this.clearTavilyApiKey(),
+    ]);
+  }
+
+  /** Prompt which SecretStorage key(s) to remove. Returns a label when cleared. */
+  async promptClearApiKey(): Promise<string | undefined> {
+    type ClearChoice = {
+      label: string;
+      description?: string;
+      id: "openai" | "anthropic" | "gemini" | "tavily" | "all";
+    };
+    const choice = await vscode.window.showQuickPick<ClearChoice>(
+      [
+        { label: "OpenAI", id: "openai" },
+        { label: "Anthropic", id: "anthropic" },
+        { label: "Gemini", id: "gemini" },
+        { label: "Tavily (web_search)", id: "tavily" },
+        {
+          label: "Clear all ClawAgents keys",
+          description: "OpenAI + Anthropic + Gemini + Tavily",
+          id: "all",
+        },
+      ],
+      { title: "Clear which API key from SecretStorage?" },
+    );
+    if (!choice) {
+      return undefined;
+    }
+    const confirm = await vscode.window.showWarningMessage(
+      choice.id === "all"
+        ? "Remove all ClawAgents API keys from VS Code SecretStorage?"
+        : `Remove the ${choice.label} API key from VS Code SecretStorage?`,
+      { modal: true },
+      "Clear",
+    );
+    if (confirm !== "Clear") {
+      return undefined;
+    }
+    if (choice.id === "all") {
+      await this.clearAllApiKeys();
+      void vscode.window.showInformationMessage("All ClawAgents API keys cleared.");
+      return "all";
+    }
+    if (choice.id === "tavily") {
+      await this.clearTavilyApiKey();
+    } else {
+      await this.clearApiKey(choice.id);
+    }
+    void vscode.window.showInformationMessage(`${choice.label} API key cleared.`);
+    return choice.label;
+  }
+
   /** Prompt for a provider + key (or Tavily for web_search). Returns the label when saved. */
   async promptSetApiKey(): Promise<string | undefined> {
     type KeyChoice = {

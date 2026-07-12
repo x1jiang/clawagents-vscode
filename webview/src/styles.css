@@ -941,6 +941,9 @@ button.send {
 
 .tool-chip {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: color-mix(in srgb, var(--input-bg) 85%, transparent);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -950,6 +953,20 @@ button.send {
   font-size: 11px;
   cursor: pointer;
   line-height: 1.4;
+}
+
+.tool-chip-meta {
+  font-size: 10px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tool-chip.compact-action .context-meter.in-chip {
+  padding: 0;
+  border: none;
+  background: transparent;
+  gap: 4px;
 }
 
 .tool-chip:hover {
@@ -1036,6 +1053,15 @@ button.send {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 1;
+}
+
+.checkpoint-when {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .checkpoint-actions {

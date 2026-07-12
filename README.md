@@ -1,6 +1,6 @@
 # ClawAgents for VS Code
 
-Coding agent for VS Code and Cursor. Chat in the **right sidebar**, edit your workspace with permission controls, and use OpenAI, Anthropic, Gemini, or local OpenAI-compatible models (including Ollama).
+Coding agent for VS Code and Cursor. Chat from the **Activity Bar** (left), edit your workspace with permission controls, and use OpenAI, Anthropic, Gemini, or local OpenAI-compatible models (including Ollama).
 
 ## Requirements
 
@@ -22,7 +22,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 
 3. Add credentials: Command Palette → **ClawAgents: Set Provider Credential** (includes **Tavily** for `web_search`), or put keys in a workspace `.env`. For browser tools: Settings → **Enable browser tools**, then `pip install 'clawagents[browser]' && playwright install chromium`.
 
-4. Open the **Secondary Side Bar** (right) and click the ClawAgents icon, or run **ClawAgents: Open Chat** (`⌘⇧'` / `Ctrl+Shift+'`).
+4. Click the **ClawAgents** icon in the left **Activity Bar**, or run **ClawAgents: Open Chat** (`⌘⇧'` / `Ctrl+Shift+'`).
 
 5. Start in **Plan** / ask mode if you want confirmations. Turn on **Auto-approve → Edit / Execute** only when you trust the agent for that workspace.
 

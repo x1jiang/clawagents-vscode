@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 — 2026-07-12
+
+- Move ClawAgents icon to the left **Activity Bar** (was Secondary Side Bar)
+- Settings → **Clear API key…** / command **ClawAgents: Clear API Key…** (per provider or all)
+- Header: last checkpoint time on **Checkpoints**; context % bar on **Compact**
+- Settings panel **autosaves** (~0.5s debounce); MCP/base-URL trust prompts only when newly enabling
+
 ## 1.0.1 — 2026-07-11
 
 - Settings → **Set API key…** includes **Tavily** (SecretStorage → `TAVILY_API_KEY`) for `web_search`

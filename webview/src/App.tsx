@@ -18,6 +18,7 @@ import {
 } from "./vscodeApi";
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
+import { checkpointTs, formatCheckpointWhen } from "./formatTime";
 
 type ChatItem =
   | { kind: "user"; text: string }
@@ -124,6 +125,21 @@ function asStringList(value: unknown): string[] {
     : [];
 }
 
+function normalizeSettingsForSave(settings: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...settings,
+    skill_dirs: asStringList(settings.skill_dirs)
+      .map((d) => d.trim())
+      .filter(Boolean),
+    skill_ignore_dirs: asStringList(settings.skill_ignore_dirs)
+      .map((d) => d.trim())
+      .filter(Boolean),
+    skill_exclude: asStringList(settings.skill_exclude)
+      .map((d) => d.trim())
+      .filter(Boolean),
+  };
+}
+
 type Panel = "chat" | "history" | "settings" | "diagnostics";
 
 export function App() {
@@ -170,6 +186,8 @@ export function App() {
     Array<Record<string, unknown>>
   >([]);
   const [checkpointsOpen, setCheckpointsOpen] = useState(false);
+  /** Forces relative checkpoint labels ("2m ago") to refresh while the panel is open. */
+  const [nowTick, setNowTick] = useState(() => Date.now());
   /** Sum of estimated USD for completed runs in this chat (not including the in-flight run). */
   const [sessionCostUsd, setSessionCostUsd] = useState(0);
   const runCommittedRef = useRef(false);
@@ -185,6 +203,11 @@ export function App() {
   const streamingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const persistTimer = useRef<number | undefined>();
+  const settingsSaveTimer = useRef<number | undefined>();
+  /** Skip one effect cycle after applying host-pushed settings (avoid save loops). */
+  const skipSettingsAutosave = useRef(true);
+  /** True after the first host settings payload — blocks empty initial autosave. */
+  const settingsAutosaveReady = useRef(false);
   const historySearchTimer = useRef<number | undefined>();
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
@@ -252,6 +275,8 @@ export function App() {
           setChatId(msg.chatId);
           setChats(msg.chats || []);
           if (msg.settings) {
+            skipSettingsAutosave.current = true;
+            settingsAutosaveReady.current = true;
             setSettings(msg.settings);
             if (typeof msg.settings.model === "string" && msg.settings.model) {
               setModel(msg.settings.model);
@@ -266,6 +291,8 @@ export function App() {
           if (msg.stats) {
             setStats(msg.stats);
           }
+          // Quiet refresh so the Checkpoints chip can show last time.
+          post({ type: "list_checkpoints", open: false });
           break;
         case "sidecar":
           setSidecar(msg.state);
@@ -279,6 +306,8 @@ export function App() {
           }
           break;
         case "settings":
+          skipSettingsAutosave.current = true;
+          settingsAutosaveReady.current = true;
           setSettings(msg.settings || {});
           if (typeof msg.settings?.model === "string" && msg.settings.model) {
             setModel(msg.settings.model);
@@ -516,6 +545,7 @@ export function App() {
                   phase: msg.phase,
                   label: msg.label,
                   message_count: msg.messageCount,
+                  ts: msg.ts ?? Math.floor(Date.now() / 1000),
                 },
                 ...prev.filter((r) => r.sha !== msg.sha),
               ];
@@ -526,7 +556,9 @@ export function App() {
         }
         case "checkpoints": {
           setCheckpoints(msg.checkpoints || []);
-          setCheckpointsOpen(true);
+          if (msg.open !== false) {
+            setCheckpointsOpen(true);
+          }
           break;
         }
         case "done": {
@@ -607,6 +639,26 @@ export function App() {
     }, 400);
     return () => window.clearTimeout(persistTimer.current);
   }, [items, draft, mode, chatId, autoApprove, interaction, caveman]);
+
+  // Debounced autosave for the Settings panel (checkboxes, skill dirs, etc.).
+  useEffect(() => {
+    if (!settingsAutosaveReady.current) {
+      return;
+    }
+    if (skipSettingsAutosave.current) {
+      skipSettingsAutosave.current = false;
+      return;
+    }
+    window.clearTimeout(settingsSaveTimer.current);
+    settingsSaveTimer.current = window.setTimeout(() => {
+      setVerifyMsg("Saving…");
+      post({
+        type: "save_settings",
+        settings: normalizeSettingsForSave(settings),
+      });
+    }, 500);
+    return () => window.clearTimeout(settingsSaveTimer.current);
+  }, [settings]);
 
   useEffect(() => {
     if (panel !== "history") {
@@ -770,6 +822,20 @@ export function App() {
     activeModelId || model,
     usage.lastInputTokens || promptTok || 0,
   );
+  const ctxPct = ctx ? Math.round(Math.min(1, ctx.ratio) * 100) : null;
+  const lastCheckpointTs = useMemo(() => {
+    for (const row of checkpoints) {
+      const ts = checkpointTs(row);
+      if (ts != null) return ts;
+    }
+    return undefined;
+  }, [checkpoints]);
+  useEffect(() => {
+    if (lastCheckpointTs == null) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, [lastCheckpointTs]);
+  const lastCheckpointLabel = formatCheckpointWhen(lastCheckpointTs, nowTick);
   const runCost = estimateCostUsd(
     activeModelId || model,
     promptTok,
@@ -783,8 +849,11 @@ export function App() {
   const selectModel = (next: string) => {
     setModel(next || "default");
     const nextSettings = { ...settings, model: next };
+    // Immediate save for the next turn; skip the debounced effect to avoid a double write.
+    skipSettingsAutosave.current = true;
     setSettings(nextSettings);
-    post({ type: "save_settings", settings: nextSettings });
+    setVerifyMsg("Saving…");
+    post({ type: "save_settings", settings: normalizeSettingsForSave(nextSettings) });
   };
 
   const send = () => {
@@ -799,7 +868,7 @@ export function App() {
     }
     if (value === "/checkpoints") {
       setDraft("");
-      post({ type: "list_checkpoints" });
+      post({ type: "list_checkpoints", open: true });
       return;
     }
     setDraft("");
@@ -854,28 +923,6 @@ export function App() {
               </option>
             ))}
           </select>
-          {ctx && (
-            <span
-              className="context-meter"
-              title={`Context ~${Math.round(ctx.ratio * 100)}% (${(
-                usage.lastInputTokens || promptTok
-              ).toLocaleString()} / ${ctx.window.toLocaleString()})`}
-            >
-              <span className="context-meter-bar" aria-hidden>
-                <span
-                  className={
-                    ctx.ratio < 0.5
-                      ? "context-meter-fill ok"
-                      : ctx.ratio < 0.8
-                        ? "context-meter-fill warn"
-                        : "context-meter-fill hot"
-                  }
-                  style={{ width: `${Math.max(2, Math.round(ctx.ratio * 100))}%` }}
-                />
-              </span>
-              <span className="context-meter-pct">{Math.round(ctx.ratio * 100)}%</span>
-            </span>
-          )}
           {compactPhase && (
             <span className="compact-chip" title="Compaction in progress">
               compact · {compactPhase}
@@ -909,17 +956,47 @@ export function App() {
             <button
               type="button"
               className={`tool-chip${checkpointsOpen ? " active" : ""}`}
-              title="Shadow-git checkpoints (/checkpoints)"
-              onClick={() => post({ type: "list_checkpoints" })}
+              title={
+                lastCheckpointLabel
+                  ? `Last checkpoint ${lastCheckpointLabel} — open restore panel (/checkpoints)`
+                  : "Shadow-git checkpoints (/checkpoints)"
+              }
+              onClick={() => post({ type: "list_checkpoints", open: true })}
             >
               Checkpoints
+              {lastCheckpointLabel ? (
+                <span className="tool-chip-meta">{lastCheckpointLabel}</span>
+              ) : null}
             </button>
             <button
               type="button"
-              className="tool-chip"
-              title="Compact session (/compact)"
+              className="tool-chip compact-action"
+              title={
+                ctx && ctxPct != null
+                  ? `Context ~${ctxPct}% (${(
+                      usage.lastInputTokens || promptTok
+                    ).toLocaleString()} / ${ctx.window.toLocaleString()}) — compact session`
+                  : "Compact session (/compact)"
+              }
               onClick={() => post({ type: "compact_chat" })}
             >
+              {ctx && ctxPct != null ? (
+                <span className="context-meter in-chip" aria-hidden>
+                  <span className="context-meter-bar">
+                    <span
+                      className={
+                        ctx.ratio < 0.5
+                          ? "context-meter-fill ok"
+                          : ctx.ratio < 0.8
+                            ? "context-meter-fill warn"
+                            : "context-meter-fill hot"
+                      }
+                      style={{ width: `${Math.max(2, ctxPct)}%` }}
+                    />
+                  </span>
+                  <span className="context-meter-pct">{ctxPct}%</span>
+                </span>
+              ) : null}
               Compact
             </button>
           </div>
@@ -990,6 +1067,7 @@ export function App() {
                 const sha = String(cp.sha || "");
                 if (!sha) return null;
                 const label = String(cp.tool || cp.label || cp.message || "checkpoint");
+                const when = formatCheckpointWhen(checkpointTs(cp), nowTick);
                 return (
                   <li key={sha}>
                     <div className="checkpoint-main">
@@ -997,6 +1075,7 @@ export function App() {
                       <span className="checkpoint-label" title={label}>
                         {label}
                       </span>
+                      {when ? <span className="checkpoint-when">{when}</span> : null}
                     </div>
                     <div className="checkpoint-actions">
                       <button
@@ -1471,6 +1550,9 @@ export function App() {
 
           <section className="settings-section">
             <h3 className="settings-heading">Advanced</h3>
+            <p className="muted tiny" style={{ marginTop: 0 }}>
+              Changes autosave after a short pause. Trust prompts only appear when newly enabling.
+            </p>
             <label className="check">
               <input
                 type="checkbox"
@@ -1512,6 +1594,17 @@ export function App() {
             <button
               type="button"
               className="ghost"
+              title="Remove OpenAI / Anthropic / Gemini / Tavily keys from VS Code SecretStorage"
+              onClick={() => {
+                setVerifyMsg("Choose which key to clear…");
+                post({ type: "clear_api_key" });
+              }}
+            >
+              Clear API key…
+            </button>
+            <button
+              type="button"
+              className="ghost"
               onClick={() => {
                 post({
                   type: "verify_key",
@@ -1525,25 +1618,13 @@ export function App() {
             <button
               type="button"
               className="primary"
+              title="Flush settings now (also autosaves ~0.5s after changes)"
               onClick={() => {
+                window.clearTimeout(settingsSaveTimer.current);
                 setVerifyMsg("Saving…");
-                const skillDirs = asStringList(settings.skill_dirs)
-                  .map((d) => d.trim())
-                  .filter(Boolean);
-                const skillIgnore = asStringList(settings.skill_ignore_dirs)
-                  .map((d) => d.trim())
-                  .filter(Boolean);
-                const skillExclude = asStringList(settings.skill_exclude)
-                  .map((d) => d.trim())
-                  .filter(Boolean);
                 post({
                   type: "save_settings",
-                  settings: {
-                    ...settings,
-                    skill_dirs: skillDirs,
-                    skill_ignore_dirs: skillIgnore,
-                    skill_exclude: skillExclude,
-                  },
+                  settings: normalizeSettingsForSave(settings),
                 });
               }}
             >
