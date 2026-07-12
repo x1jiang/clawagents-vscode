@@ -535,6 +535,66 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "restore_checkpoint":
+        try {
+          const res = await this.gateway.restoreCheckpoint(
+            msg.sha,
+            msg.mode,
+            this.chatId,
+          );
+          this.post({
+            type: "status",
+            message: res.ok
+              ? `Restored checkpoint ${msg.sha.slice(0, 12)} (${msg.mode})`
+              : `Restore failed: ${String(res.error || "unknown")}`,
+          });
+          if (res.ok && (msg.mode === "conversation" || msg.mode === "both") && this.chatId) {
+            const chat = await this.gateway.getChat(this.chatId);
+            const events = (chat.events as Array<Record<string, unknown>>) || [];
+            this.post({
+              type: "restore",
+              items: eventsToItems(events),
+              mode: (chat.mode as AgentMode) || this.mode,
+              chatId: this.chatId,
+            });
+          }
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "compact_chat":
+        try {
+          if (!this.chatId) {
+            throw new Error("No active chat");
+          }
+          const res = await this.gateway.compactChat(this.chatId);
+          this.post({
+            type: "status",
+            message: res.compacted
+              ? `Compacted ${String(res.before)} → ${String(res.after)} messages`
+              : `Compact skipped: ${String(res.reason || "")}`,
+          });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "list_checkpoints":
+        try {
+          const rows = await this.gateway.listCheckpoints(20);
+          this.post({ type: "checkpoints", checkpoints: rows });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
       case "restart_sidecar":
         await this.restartSidecar();
         break;

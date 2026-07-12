@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.19 — 2026-07-11
+
+- Require / auto-upgrade to **clawagents ≥ 6.11.0** (shadow restore modes, always-on rules, modes, CodeAct, evals)
+- Context meter + `/compact` + compact_progress visibility
+- Checkpoint timeline with files / conversation / both restore
+- Settings: agent persona mode + CodeAct action mode
+
 ## 0.5.18 — 2026-07-11
 
 - Require / auto-upgrade to **clawagents ≥ 6.10.8** (compaction budget escalation + message-identity fix)

@@ -72,6 +72,20 @@ export type HostToWebview =
       totalTokens?: number;
       runCostUsd?: number;
       sessionCostUsd?: number;
+      lastInputTokens?: number;
+    }
+  | {
+      type: "compact_progress";
+      phase: string;
+      message?: string;
+    }
+  | {
+      type: "checkpoint";
+      sha: string;
+      tool?: string;
+      phase?: string;
+      label?: string;
+      messageCount?: number;
     }
   | {
       type: "done";
@@ -116,7 +130,8 @@ export type HostToWebview =
   | { type: "verify_result"; provider: string; ok: boolean; detail?: string }
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
-  | { type: "sidecar"; state: "stopped" | "starting" | "running" | "error"; detail?: string };
+  | { type: "sidecar"; state: "stopped" | "starting" | "running" | "error"; detail?: string }
+  | { type: "checkpoints"; checkpoints: Array<Record<string, unknown>> };
 
 export type WebviewToHost =
   | { type: "ready" }
@@ -152,6 +167,9 @@ export type WebviewToHost =
   | { type: "open_file"; path: string; line?: number }
   | { type: "diff_snapshot"; path: string; snapshotId?: string; snapshotRel?: string }
   | { type: "restore_snapshot"; snapshotId: string; rel: string }
+  | { type: "restore_checkpoint"; sha: string; mode: "files" | "conversation" | "both" }
+  | { type: "compact_chat" }
+  | { type: "list_checkpoints" }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
   | { type: "save_settings"; settings: Record<string, unknown> }

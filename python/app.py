@@ -40,6 +40,7 @@ from snapshots import (
     list_snapshots,
     restore_file,
     restore_shadow_checkpoint,
+    shadow_checkpoint_diff,
 )
 from stats import get_stats, record_turn
 
@@ -446,6 +447,12 @@ class RestoreBody(BaseModel):
 
 class CheckpointRestoreBody(BaseModel):
     sha: str
+    mode: str = "files"
+    chat_id: str | None = None
+
+
+class CompactBody(BaseModel):
+    pass
 
 
 class VerifyBody(BaseModel):
@@ -701,7 +708,48 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return restore_shadow_checkpoint(body.sha)
+        return restore_shadow_checkpoint(
+            body.sha, mode=body.mode or "files", chat_id=body.chat_id
+        )
+
+    @app.get("/checkpoints/diff")
+    async def checkpoints_diff(
+        request: Request, lhs: str, rhs: str | None = None
+    ):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return shadow_checkpoint_diff(lhs, rhs)
+
+    @app.get("/modes")
+    async def modes_list(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.modes import load_modes
+
+            modes = load_modes(workspace=str(WORKSPACE))
+            return [
+                {
+                    "id": m.id,
+                    "name": m.display_name(),
+                    "permission_mode": m.permission_mode,
+                    "auto_approve": m.auto_approve,
+                }
+                for m in modes.values()
+            ]
+        except Exception as exc:  # noqa: BLE001
+            return [{"error": str(exc)}]
+
+    @app.post("/chats/{chat_id}/compact")
+    async def chats_compact(chat_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        from chats import compact_chat
+
+        return await compact_chat(chat_id)
 
     @app.get("/chats")
     async def chats_list(request: Request, q: str | None = None):

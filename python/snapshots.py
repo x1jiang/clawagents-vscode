@@ -6,7 +6,15 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from paths import SNAPSHOTS_DIR, WORKSPACE, ensure_dirs, path_under, safe_id
+from paths import (
+    SNAPSHOTS_DIR,
+    SESSIONS_MEMORY_DIR,
+    WORKSPACE,
+    chat_ui_log_path,
+    ensure_dirs,
+    path_under,
+    safe_id,
+)
 
 
 def list_snapshots(limit: int = 50) -> list[dict[str, Any]]:
@@ -26,7 +34,6 @@ def list_snapshots(limit: int = 50) -> list[dict[str, Any]]:
             if not f.is_file():
                 continue
             try:
-                # Skip symlink escapes that resolve outside the snapshot dir.
                 f.resolve().relative_to(base)
             except (OSError, ValueError):
                 continue
@@ -47,7 +54,6 @@ def snapshot_file_path(snapshot_id: str, rel: str) -> Path | None:
     base = path_under(SNAPSHOTS_DIR, sid)
     if base is None or not base.is_dir():
         return None
-    # Reject absolute / empty rel; confine under the snapshot directory.
     if not rel or rel.startswith(("/", "\\")) or ".." in Path(rel).parts:
         return None
     target = path_under(base, rel)
@@ -72,11 +78,7 @@ def restore_file(snapshot_id: str, rel: str, dest_rel: str | None = None) -> dic
 
 
 def latest_snapshot_for(rel_or_abs: str) -> dict[str, Any] | None:
-    """Find the newest snapshot that contains this workspace-relative path.
-
-    Snapshots are stored flat by basename (``snapshots/<ts>/<name>``), so a
-    nested workspace path like ``src/foo.py`` must also match on basename.
-    """
+    """Find the newest snapshot that contains this workspace-relative path."""
     rel = rel_or_abs
     try:
         p = Path(rel_or_abs)
@@ -85,9 +87,9 @@ def latest_snapshot_for(rel_or_abs: str) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001
         pass
     base = Path(rel).name
-
+    # Prefer exact relative path; fall back to basename for legacy flat snaps.
     def _matches(f: str) -> bool:
-        return f == rel or f.endswith(f"/{rel}") or Path(f).name == base
+        return f == rel or f.endswith(f"/{rel}") or f == base or Path(f).name == base
 
     for snap in list_snapshots(limit=100):
         match = next((f for f in snap["files"] if _matches(f)), None)
@@ -97,7 +99,6 @@ def latest_snapshot_for(rel_or_abs: str) -> dict[str, Any] | None:
 
 
 def list_shadow_checkpoints(limit: int = 30) -> list[dict[str, Any]]:
-    """List Cline-style shadow-git checkpoints (requires clawagents with shadow_checkpoint)."""
     try:
         from clawagents.memory.shadow_checkpoint import list_checkpoints
 
@@ -106,10 +107,39 @@ def list_shadow_checkpoints(limit: int = 30) -> list[dict[str, Any]]:
         return [{"error": str(exc)}]
 
 
-def restore_shadow_checkpoint(sha: str) -> dict[str, Any]:
+def restore_shadow_checkpoint(
+    sha: str,
+    *,
+    mode: str = "files",
+    chat_id: str | None = None,
+) -> dict[str, Any]:
     try:
         from clawagents.memory.shadow_checkpoint import restore_checkpoint
 
-        return restore_checkpoint(sha, workspace=str(WORKSPACE))
+        session_path = None
+        ui_path = None
+        if chat_id:
+            session_path = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
+            try:
+                ui_path = chat_ui_log_path(chat_id)
+            except Exception:  # noqa: BLE001
+                ui_path = None
+        mode_norm = mode if mode in ("files", "conversation", "both") else "files"
+        return restore_checkpoint(
+            sha,
+            workspace=str(WORKSPACE),
+            mode=mode_norm,  # type: ignore[arg-type]
+            session_path=session_path,
+            chat_ui_path=ui_path,
+        )
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
+
+
+def shadow_checkpoint_diff(lhs: str, rhs: str | None = None) -> dict[str, Any]:
+    try:
+        from clawagents.memory.shadow_checkpoint import checkpoint_diff
+
+        return checkpoint_diff(lhs, rhs, workspace=str(WORKSPACE))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc), "files": []}

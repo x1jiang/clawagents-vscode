@@ -17,6 +17,7 @@ import {
   type InteractionStyle,
 } from "./vscodeApi";
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
+import { contextUsage } from "./contextWindow";
 
 type ChatItem =
   | { kind: "user"; text: string }
@@ -160,7 +161,13 @@ export function App() {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    lastInputTokens?: number;
   }>({});
+  const [compactPhase, setCompactPhase] = useState<string | undefined>();
+  const [checkpoints, setCheckpoints] = useState<
+    Array<Record<string, unknown>>
+  >([]);
+  const [checkpointsOpen, setCheckpointsOpen] = useState(false);
   /** Sum of estimated USD for completed runs in this chat (not including the in-flight run). */
   const [sessionCostUsd, setSessionCostUsd] = useState(0);
   const runCommittedRef = useRef(false);
@@ -481,9 +488,40 @@ export function App() {
             promptTokens: msg.promptTokens,
             completionTokens: msg.completionTokens,
             totalTokens: msg.totalTokens,
+            lastInputTokens: msg.lastInputTokens ?? msg.promptTokens,
           };
           runUsageRef.current = next;
           setUsage(next);
+          break;
+        }
+        case "compact_progress": {
+          setCompactPhase(msg.phase || undefined);
+          if (msg.phase === "end" || msg.phase === "failed" || msg.phase === "dropped") {
+            window.setTimeout(() => setCompactPhase(undefined), 2500);
+          }
+          break;
+        }
+        case "checkpoint": {
+          if (msg.sha) {
+            setCheckpoints((prev) => {
+              const next = [
+                {
+                  sha: msg.sha,
+                  tool: msg.tool,
+                  phase: msg.phase,
+                  label: msg.label,
+                  message_count: msg.messageCount,
+                },
+                ...prev.filter((r) => r.sha !== msg.sha),
+              ];
+              return next.slice(0, 30);
+            });
+          }
+          break;
+        }
+        case "checkpoints": {
+          setCheckpoints(msg.checkpoints || []);
+          setCheckpointsOpen(true);
           break;
         }
         case "done": {
@@ -723,6 +761,10 @@ export function App() {
   const completionTok = usage.completionTokens || 0;
   const totalTok =
     usage.totalTokens ?? (promptTok || completionTok ? promptTok + completionTok : 0);
+  const ctx = contextUsage(
+    activeModelId || model,
+    usage.lastInputTokens || promptTok || 0,
+  );
   const runCost = estimateCostUsd(
     activeModelId || model,
     promptTok,
@@ -743,6 +785,16 @@ export function App() {
   const send = () => {
     const value = draft.trim();
     if (!value) {
+      return;
+    }
+    if (value === "/compact") {
+      setDraft("");
+      post({ type: "compact_chat" });
+      return;
+    }
+    if (value === "/checkpoints") {
+      setDraft("");
+      post({ type: "list_checkpoints" });
       return;
     }
     setDraft("");
@@ -796,6 +848,37 @@ export function App() {
               </option>
             ))}
           </select>
+          {ctx && (
+            <>
+              <span className="sep">·</span>
+              <span
+                className="context-meter"
+                title={`Context ~${Math.round(ctx.ratio * 100)}% (${(
+                  usage.lastInputTokens || promptTok
+                ).toLocaleString()} / ${ctx.window.toLocaleString()})`}
+              >
+                <span className="context-meter-bar">
+                  <span
+                    className={
+                      ctx.ratio < 0.5
+                        ? "context-meter-fill ok"
+                        : ctx.ratio < 0.8
+                          ? "context-meter-fill warn"
+                          : "context-meter-fill hot"
+                    }
+                    style={{ width: `${Math.max(2, Math.round(ctx.ratio * 100))}%` }}
+                  />
+                </span>
+                {Math.round(ctx.ratio * 100)}%
+              </span>
+            </>
+          )}
+          {compactPhase && (
+            <>
+              <span className="sep">·</span>
+              <span title="Compaction in progress">compact:{compactPhase}</span>
+            </>
+          )}
           {totalTok > 0 && (
             <>
               <span className="sep">·</span>
@@ -804,6 +887,22 @@ export function App() {
               </span>
             </>
           )}
+          <button
+            type="button"
+            className="linkish"
+            title="List shadow-git checkpoints (/checkpoints)"
+            onClick={() => post({ type: "list_checkpoints" })}
+          >
+            ckpt
+          </button>
+          <button
+            type="button"
+            className="linkish"
+            title="Compact session (/compact)"
+            onClick={() => post({ type: "compact_chat" })}
+          >
+            compact
+          </button>
           {runCost != null && totalTok > 0 && (
             <>
               <span className="sep">·</span>
@@ -869,6 +968,61 @@ export function App() {
           </div>
         )}
       </header>
+
+      {checkpointsOpen && (
+        <div className="checkpoint-panel">
+          <div className="checkpoint-panel-head">
+            <strong>Checkpoints</strong>
+            <button type="button" className="linkish" onClick={() => setCheckpointsOpen(false)}>
+              close
+            </button>
+          </div>
+          {checkpoints.length === 0 ? (
+            <p className="muted">No checkpoints yet.</p>
+          ) : (
+            <ul className="checkpoint-list">
+              {checkpoints.slice(0, 12).map((cp) => {
+                const sha = String(cp.sha || "");
+                if (!sha) return null;
+                return (
+                  <li key={sha}>
+                    <code>{sha.slice(0, 10)}</code>{" "}
+                    <span className="muted">
+                      {String(cp.tool || cp.label || cp.message || "")}
+                    </span>
+                    <div className="checkpoint-actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          post({ type: "restore_checkpoint", sha, mode: "files" })
+                        }
+                      >
+                        files
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          post({ type: "restore_checkpoint", sha, mode: "conversation" })
+                        }
+                      >
+                        chat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          post({ type: "restore_checkpoint", sha, mode: "both" })
+                        }
+                      >
+                        both
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
 
       {panel === "history" && (
         <div className="panel">
@@ -970,6 +1124,29 @@ export function App() {
                 <option value="read_only">read_only</option>
                 <option value="auto">auto</option>
                 <option value="full_access">full_access</option>
+              </select>
+            </label>
+            <label>
+              Agent persona mode
+              <select
+                value={String(settings.agent_mode || "")}
+                onChange={(e) => setSettings((s) => ({ ...s, agent_mode: e.target.value }))}
+              >
+                <option value="">(none — permission mode only)</option>
+                <option value="ask">ask</option>
+                <option value="architect">architect</option>
+                <option value="code">code</option>
+                <option value="ci">ci</option>
+              </select>
+            </label>
+            <label>
+              Action mode
+              <select
+                value={String(settings.action_mode || "tools")}
+                onChange={(e) => setSettings((s) => ({ ...s, action_mode: e.target.value }))}
+              >
+                <option value="tools">tools (ReAct)</option>
+                <option value="code">code (CodeAct)</option>
               </select>
             </label>
             <label>

@@ -259,20 +259,60 @@ def _decide_by_mode(mode: str, file_path: str | None) -> str | None:
 
 
 def build_augmented_task(chat_id: str, content: str, settings: dict[str, Any]) -> str:
+    """Augment the first user turn with workspace system prompt only.
+
+    Project rules (CLAUDE.md / AGENTS.md / .clawagents/rules) are injected
+    every LLM round via clawagents memory/rules — do not also wrap them into
+    the user task (that caused double-injection and fade-after-compact).
+    """
     mem_path = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
     is_first = not mem_path.exists() or mem_path.stat().st_size == 0
     if not is_first:
         return content
-    sections: list[str] = []
     ws = (settings.get("workspace_system_prompt") or "").strip()
-    if ws:
-        sections.append(f"<workspace_system_prompt>\n{ws}\n</workspace_system_prompt>")
-    instructions = read_project_instructions()
-    if instructions:
-        sections.append(f"<project_instructions>\n{instructions}\n</project_instructions>")
-    if not sections:
+    if not ws:
         return content
-    return "\n\n".join(sections) + "\n\n" + content
+    return f"<workspace_system_prompt>\n{ws}\n</workspace_system_prompt>\n\n{content}"
+
+
+async def compact_chat(chat_id: str) -> dict[str, Any]:
+    """Manually compact session memory: backup + keep head/tail with a stub summary."""
+    import time
+
+    ensure_dirs()
+    mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
+    if not mem.exists():
+        return {"compacted": False, "reason": "no session memory"}
+    lines = [ln for ln in mem.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    if len(lines) < 8:
+        return {"compacted": False, "reason": "not enough history to compact"}
+    backup = mem.with_suffix(mem.suffix + f".before-compact-{int(time.time())}")
+    backup.write_text(mem.read_text(encoding="utf-8"), encoding="utf-8")
+    head = lines[:2]
+    tail = lines[-4:]
+    summary = {
+        "role": "user",
+        "content": (
+            "[Compacted conversation] Older turns were summarized away. "
+            f"Dropped {len(lines) - len(head) - len(tail)} messages. "
+            "Continue from the recent context below."
+        ),
+    }
+    kept = head + [json.dumps(summary)] + tail
+    mem.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    append_ui_event(
+        chat_id,
+        {
+            "kind": "status",
+            "text": f"Compacted session ({len(lines)} → {len(kept)} messages)",
+        },
+    )
+    return {
+        "compacted": True,
+        "before": len(lines),
+        "after": len(kept),
+        "backup": backup.name,
+    }
 
 
 def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[str, Any]:
@@ -415,6 +455,14 @@ async def run_chat_turn(
     if instructions:
         kwargs["instruction"] = "\n\n".join(instructions)
 
+    # Custom persona modes from .clawagents/modes.json (library builtins + workspace)
+    agent_mode = str(settings.get("agent_mode") or "").strip()
+    if agent_mode and "mode" in _agent_params:
+        kwargs["mode"] = agent_mode
+    action_mode = str(settings.get("action_mode") or "tools").strip()
+    if action_mode == "code" and "action_mode" in _agent_params:
+        kwargs["action_mode"] = "code"
+
     # Browser tools
     if settings.get("browser_tools"):
         try:
@@ -430,10 +478,51 @@ async def run_chat_turn(
     # UI-visible events: it is the only one that carries assistant deltas,
     # per-turn assistant messages, tool args/output with call ids, and
     # per-request usage. The legacy on_event channel is forwarded only for
-    # operational kinds (warn / error) that have no typed equivalent shown
-    # in the UI.
+    # operational kinds (warn / error / checkpoint / compact_progress /
+    # context / approval_required) that the webview needs.
     saw_assistant = False
     usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+    def _session_message_count() -> int:
+        mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
+        if not mem.exists():
+            return 0
+        return sum(1 for ln in mem.read_text(encoding="utf-8").splitlines() if ln.strip())
+
+    def _forward_legacy(kind: str, data: dict[str, Any]) -> None:
+        if kind == "checkpoint":
+            payload = dict(data or {})
+            payload.setdefault("chat_id", chat_id)
+            payload.setdefault("message_count", _session_message_count())
+            # Best-effort: re-bind metadata on the library index for conversation restore.
+            try:
+                from clawagents.memory.shadow_checkpoint import bind_checkpoint_meta
+
+                sha = str(payload.get("sha") or "")
+                if sha:
+                    bind_checkpoint_meta(
+                        sha,
+                        workspace=str(WORKSPACE),
+                        tool=str(payload.get("tool") or "") or None,
+                        message_count=int(payload.get("message_count") or 0),
+                        session_path=SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl",
+                        chat_ui_path=chat_ui_log_path(chat_id),
+                        label=str(payload.get("label") or "") or None,
+                        phase=str(payload.get("phase") or "") or None,
+                    )
+            except Exception:  # noqa: BLE001
+                pass
+            on_event("checkpoint", payload)
+            return
+        if kind in {
+            "compact_progress",
+            "context",
+            "approval_required",
+            "warn",
+            "error",
+        }:
+            on_event(kind, data or {})
+            return
 
     def _on_stream_event(ev: Any) -> None:
         nonlocal saw_assistant
@@ -488,6 +577,8 @@ async def run_chat_turn(
         # update (or a stuck "running" card if tool_call was shown).
         if kind in ("warn", "error", "tool_skipped"):
             on_event(kind, data or {})
+            return
+        _forward_legacy(kind, data or {})
 
     with _turn_lock:
         # Capture cwd *inside* the lock: with concurrent turns, capturing it

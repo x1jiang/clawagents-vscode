@@ -163,6 +163,36 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
         totalTokens: num(data.total_tokens ?? data.totalTokens ?? data.tokens_used),
         runCostUsd: num(data.run_cost_usd ?? data.runCostUsd),
         sessionCostUsd: num(data.session_cost_usd ?? data.sessionCostUsd),
+        lastInputTokens: num(
+          data.last_input_tokens ?? data.prompt_tokens ?? data.input_tokens,
+        ),
+      };
+    case "compact_progress":
+      return {
+        type: "compact_progress",
+        phase: String(data.phase ?? ""),
+        message: data.message ? String(data.message) : undefined,
+      };
+    case "context":
+      return {
+        type: "status",
+        message: String(data.message ?? "context"),
+      };
+    case "checkpoint":
+      return {
+        type: "checkpoint",
+        sha: String(data.sha ?? ""),
+        tool: data.tool ? String(data.tool) : undefined,
+        phase: data.phase ? String(data.phase) : undefined,
+        label: data.label ? String(data.label) : undefined,
+        messageCount: num(data.message_count ?? data.messageCount),
+      };
+    case "approval_required":
+      return {
+        type: "permission_required",
+        requestId: String(data.call_id ?? data.id ?? data.request_id ?? ""),
+        tool: String(data.tool_name ?? data.name ?? data.tool ?? "tool"),
+        reason: "Library require_approval",
       };
     case "warn":
       return { type: "status", message: `⚠ ${String(data.message ?? "warning")}` };
@@ -299,6 +329,45 @@ export class GatewayClient {
       this.requireHandle(),
       "GET",
       `/snapshots/latest?path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  listCheckpoints(limit = 30) {
+    return requestJson<Array<Record<string, unknown>>>(
+      this.requireHandle(),
+      "GET",
+      `/checkpoints?limit=${limit}`,
+    );
+  }
+
+  restoreCheckpoint(sha: string, mode: "files" | "conversation" | "both" = "files", chatId?: string) {
+    return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/checkpoints/restore", {
+      sha,
+      mode,
+      chat_id: chatId,
+    });
+  }
+
+  checkpointDiff(lhs: string, rhs?: string) {
+    const q = new URLSearchParams({ lhs });
+    if (rhs) q.set("rhs", rhs);
+    return requestJson<{ ok: boolean; files?: Array<{ status: string; path: string }> }>(
+      this.requireHandle(),
+      "GET",
+      `/checkpoints/diff?${q.toString()}`,
+    );
+  }
+
+  listModes() {
+    return requestJson<Array<{ id: string; name: string }>>(this.requireHandle(), "GET", "/modes");
+  }
+
+  compactChat(chatId: string) {
+    return requestJson<Record<string, unknown>>(
+      this.requireHandle(),
+      "POST",
+      `/chats/${encodeURIComponent(chatId)}/compact`,
+      {},
     );
   }
 
