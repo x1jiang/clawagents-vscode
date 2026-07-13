@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.14 — 2026-07-12
+
+- Remove Cline attribution from README / LICENSE / NOTICE
+
 ## 1.0.13 — 2026-07-12
 
 - Secondary Side Bar flame icon: teal (`#2DD4BF`) so it’s visible on dark themes and distinct from Claude (orange) / Codex (white)

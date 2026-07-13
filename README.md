@@ -82,7 +82,3 @@ npm run build
 # F5 → Run ClawAgents Extension
 npm run package
 ```
-
-## Attribution
-
-UI/host patterns adapted from [Cline](https://github.com/cline/cline) (Apache-2.0). Agent runtime is [clawagents](https://github.com/x1jiang/clawagents_py) (MIT). See `NOTICE`.
