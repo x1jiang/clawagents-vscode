@@ -360,6 +360,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       hasBedrockKey: Boolean((await this.config.getApiKeyEnv()).BEDROCK_API_KEY),
       hasAwsCreds: this.config.hasAwsCredentials(),
       hasOpenAIKey: Boolean((await this.config.getApiKeyEnv()).OPENAI_API_KEY),
+      hasAnthropicKey: Boolean((await this.config.getApiKeyEnv()).ANTHROPIC_API_KEY),
       hasGeminiKey: Boolean(
         (await this.config.getApiKeyEnv()).GEMINI_API_KEY ||
           (await this.config.getApiKeyEnv()).GOOGLE_API_KEY,
@@ -889,7 +890,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "set_provider_key":
         try {
-          await this.config.setApiKey(msg.provider, msg.apiKey);
+          if (msg.provider === "tavily") {
+            await this.config.setTavilyApiKey(msg.apiKey);
+          } else {
+            await this.config.setApiKey(msg.provider, msg.apiKey);
+          }
           this.sidecar.stop();
           await this.sidecar.ensureStarted();
           this.post({ type: "sidecar", state: "running" });
@@ -899,12 +904,46 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             anthropic: "Anthropic",
             gemini: "Gemini",
             bedrock: "Bedrock Access Gateway",
+            tavily: "Tavily",
           };
           this.post({
             type: "verify_result",
             provider: msg.provider,
             ok: true,
             detail: `${labels[msg.provider] || msg.provider} API key saved; sidecar restarted`,
+          });
+        } catch (err) {
+          this.post({
+            type: "verify_result",
+            provider: msg.provider,
+            ok: false,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "clear_provider_key":
+        try {
+          if (msg.provider === "tavily") {
+            await this.config.clearTavilyApiKey();
+          } else {
+            await this.config.clearApiKey(msg.provider);
+          }
+          this.sidecar.stop();
+          await this.sidecar.ensureStarted();
+          this.post({ type: "sidecar", state: "running" });
+          await this.pushReady();
+          const labels: Record<string, string> = {
+            openai: "OpenAI / compatible",
+            anthropic: "Anthropic",
+            gemini: "Gemini",
+            bedrock: "Bedrock Access Gateway",
+            tavily: "Tavily",
+          };
+          this.post({
+            type: "verify_result",
+            provider: msg.provider,
+            ok: true,
+            detail: `${labels[msg.provider] || msg.provider} key cleared; sidecar restarted`,
           });
         } catch (err) {
           this.post({

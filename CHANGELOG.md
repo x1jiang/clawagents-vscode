@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.18 — 2026-07-13
+
+- Settings: API keys live only on each Provider card (OpenAI / Anthropic / Gemini / Bedrock) + Tavily under Browser/web — removed duplicate Set/Clear/Verify from Advanced
+
 ## 1.0.17 — 2026-07-13
 
 - OpenAI compatible gateways: **Wire API** (auto / Responses / Chat Completions) + **Verify TLS** settings

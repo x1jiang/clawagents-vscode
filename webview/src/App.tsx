@@ -205,6 +205,7 @@ export function App() {
   const [hasBedrockKey, setHasBedrockKey] = useState(false);
   const [hasAwsCreds, setHasAwsCreds] = useState(false);
   const [hasOpenAIKey, setHasOpenAIKey] = useState(false);
+  const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [providerKeyDraft, setProviderKeyDraft] = useState("");
   const [providerSetupMsg, setProviderSetupMsg] = useState("");
@@ -327,6 +328,9 @@ export function App() {
           if (typeof msg.hasOpenAIKey === "boolean") {
             setHasOpenAIKey(msg.hasOpenAIKey);
           }
+          if (typeof msg.hasAnthropicKey === "boolean") {
+            setHasAnthropicKey(msg.hasAnthropicKey);
+          }
           if (typeof msg.hasGeminiKey === "boolean") {
             setHasGeminiKey(msg.hasGeminiKey);
           }
@@ -400,13 +404,31 @@ export function App() {
           setVerifyMsg(
             `${msg.provider}: ${msg.ok ? "✓" : "✗"} ${msg.detail || (msg.ok ? "ok" : "missing")}`,
           );
-          if (msg.provider === "bedrock" || msg.provider === "openai" || msg.provider === "gemini") {
+          if (
+            msg.provider === "bedrock" ||
+            msg.provider === "openai" ||
+            msg.provider === "anthropic" ||
+            msg.provider === "gemini" ||
+            msg.provider === "tavily"
+          ) {
             setProviderSetupMsg(`${msg.ok ? "✓" : "✗"} ${msg.detail || ""}`);
             if (msg.ok && String(msg.detail || "").toLowerCase().includes("saved")) {
               setHasApiKey(true);
               if (msg.provider === "bedrock") setHasBedrockKey(true);
               if (msg.provider === "openai") setHasOpenAIKey(true);
+              if (msg.provider === "anthropic") setHasAnthropicKey(true);
               if (msg.provider === "gemini") setHasGeminiKey(true);
+              if (msg.provider === "tavily") setHasTavilyKey(true);
+            }
+            if (
+              msg.ok &&
+              String(msg.detail || "").toLowerCase().includes("cleared")
+            ) {
+              if (msg.provider === "bedrock") setHasBedrockKey(false);
+              if (msg.provider === "openai") setHasOpenAIKey(false);
+              if (msg.provider === "anthropic") setHasAnthropicKey(false);
+              if (msg.provider === "gemini") setHasGeminiKey(false);
+              if (msg.provider === "tavily") setHasTavilyKey(false);
             }
           }
           break;
@@ -1319,6 +1341,13 @@ export function App() {
                 ))}
               </select>
             </label>
+            {(selectedProvider === "auto" || selectedProvider === "ollama") && (
+              <p className="settings-hint">
+                {selectedProvider === "ollama"
+                  ? "Ollama usually needs no key. For a remote OpenAI-compatible host, switch Provider to OpenAI and set Base URL + key there."
+                  : "Pick OpenAI, Anthropic, Gemini, or Bedrock above to save/verify that provider’s API key in one place."}
+              </p>
+            )}
             <label>
               Model
               <select
@@ -1564,12 +1593,12 @@ export function App() {
                     type="button"
                     className="ghost tiny"
                     onClick={() => {
+                      setProviderSetupMsg("Testing gateway…");
                       const base = String(settings.base_url || "").trim();
                       if (!base) {
                         setProviderSetupMsg("Set Base URL first (or click Local BAG).");
                         return;
                       }
-                      setProviderSetupMsg("Testing gateway…");
                       post({
                         type: "test_compatible_endpoint",
                         baseUrl: base,
@@ -1580,6 +1609,17 @@ export function App() {
                     }}
                   >
                     Test gateway
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    disabled={!hasBedrockKey}
+                    onClick={() => {
+                      setProviderSetupMsg("Clearing gateway key…");
+                      post({ type: "clear_provider_key", provider: "bedrock" });
+                    }}
+                  >
+                    Clear key
                   </button>
                 </div>
                 <p className="settings-hint">
@@ -1716,6 +1756,17 @@ export function App() {
                   >
                     Test connection
                   </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    disabled={!hasOpenAIKey}
+                    onClick={() => {
+                      setProviderSetupMsg("Clearing OpenAI key…");
+                      post({ type: "clear_provider_key", provider: "openai" });
+                    }}
+                  >
+                    Clear key
+                  </button>
                 </div>
                 <p className="settings-hint">
                   Key: {hasOpenAIKey ? "saved" : "not set"}
@@ -1777,6 +1828,17 @@ export function App() {
                   <button
                     type="button"
                     className="ghost tiny"
+                    disabled={!hasGeminiKey}
+                    onClick={() => {
+                      setProviderSetupMsg("Clearing Gemini key…");
+                      post({ type: "clear_provider_key", provider: "gemini" });
+                    }}
+                  >
+                    Clear key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
                     title="Use OpenAI provider + BAG for Bedrock models instead"
                     onClick={() => {
                       setSettings((s) => ({
@@ -1794,6 +1856,72 @@ export function App() {
                 </div>
                 <p className="settings-hint">
                   Key: {hasGeminiKey ? "saved" : "not set"}
+                  {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
+                </p>
+              </div>
+            )}
+            {selectedProvider === "anthropic" && (
+              <div className="provider-setup">
+                <h4 className="provider-setup-title">Anthropic</h4>
+                <p className="settings-hint">
+                  Native Anthropic API. For Claude on Bedrock, switch Provider to AWS Bedrock
+                  (IAM) or OpenAI + BAG.
+                </p>
+                <label>
+                  Anthropic API key
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={providerKeyDraft}
+                    onChange={(e) => setProviderKeyDraft(e.target.value)}
+                    placeholder={
+                      hasAnthropicKey
+                        ? "••••••••  (saved — paste to replace)"
+                        : "sk-ant-…"
+                    }
+                  />
+                </label>
+                <div className="provider-actions">
+                  <button
+                    type="button"
+                    className="primary tiny"
+                    disabled={!providerKeyDraft.trim()}
+                    onClick={() => {
+                      setProviderSetupMsg("Saving Anthropic key…");
+                      post({
+                        type: "set_provider_key",
+                        provider: "anthropic",
+                        apiKey: providerKeyDraft.trim(),
+                      });
+                      setProviderKeyDraft("");
+                    }}
+                  >
+                    Save API key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      setProviderSetupMsg("Verifying Anthropic key…");
+                      post({ type: "verify_key", provider: "anthropic" });
+                    }}
+                  >
+                    Verify key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    disabled={!hasAnthropicKey}
+                    onClick={() => {
+                      setProviderSetupMsg("Clearing Anthropic key…");
+                      post({ type: "clear_provider_key", provider: "anthropic" });
+                    }}
+                  >
+                    Clear key
+                  </button>
+                </div>
+                <p className="settings-hint">
+                  Key: {hasAnthropicKey ? "saved" : "not set"}
                   {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
                 </p>
               </div>
@@ -2133,16 +2261,64 @@ export function App() {
               {hasTavilyKey ? (
                 <strong>key configured</strong>
               ) : (
-                <span>no key — use Set API key… → Tavily</span>
+                <span>no key — save a Tavily key below</span>
               )}
               . Fetch/search auto-approve is under the composer Auto-approve → Web.
             </div>
+            <label>
+              Tavily API key (web_search)
+              <input
+                type="password"
+                autoComplete="off"
+                value={providerKeyDraft}
+                onChange={(e) => setProviderKeyDraft(e.target.value)}
+                placeholder={
+                  hasTavilyKey
+                    ? "••••••••  (saved — paste to replace)"
+                    : "tvly-… from tavily.com"
+                }
+              />
+            </label>
+            <div className="provider-actions">
+              <button
+                type="button"
+                className="primary tiny"
+                disabled={!providerKeyDraft.trim()}
+                onClick={() => {
+                  setProviderSetupMsg("Saving Tavily key…");
+                  post({
+                    type: "set_provider_key",
+                    provider: "tavily",
+                    apiKey: providerKeyDraft.trim(),
+                  });
+                  setProviderKeyDraft("");
+                }}
+              >
+                Save Tavily key
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
+                disabled={!hasTavilyKey}
+                onClick={() => {
+                  setProviderSetupMsg("Clearing Tavily key…");
+                  post({ type: "clear_provider_key", provider: "tavily" });
+                }}
+              >
+                Clear key
+              </button>
+            </div>
+            {providerSetupMsg && (
+              <p className="settings-hint">{providerSetupMsg}</p>
+            )}
           </section>
 
           <section className="settings-section">
             <h3 className="settings-heading">Advanced</h3>
             <p className="muted tiny" style={{ marginTop: 0 }}>
-              Changes autosave after a short pause. Trust prompts only appear when newly enabling.
+              Changes autosave after a short pause. API keys live under the Provider card
+              above (and Tavily under Browser / web). Command Palette still has Set/Clear
+              API key if you prefer dialogs.
             </p>
             <label className="check">
               <input
@@ -2174,41 +2350,6 @@ export function App() {
             <button
               type="button"
               className="primary"
-              title="Prompts for OpenAI / Anthropic / Gemini / Bedrock gateway / Tavily; stored encrypted in VS Code SecretStorage. Workspace .env overrides SecretStorage when both are set."
-              onClick={() => {
-                setVerifyMsg("Enter the key in the dialog at the top of the window…");
-                post({ type: "set_api_key" });
-              }}
-            >
-              Set API key…
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              title="Remove OpenAI / Anthropic / Gemini / Bedrock / Tavily keys from VS Code SecretStorage"
-              onClick={() => {
-                setVerifyMsg("Choose which key to clear…");
-                post({ type: "clear_api_key" });
-              }}
-            >
-              Clear API key…
-            </button>
-            <button
-              type="button"
-              className="ghost"
-              onClick={() => {
-                post({
-                  type: "verify_key",
-                  provider: selectedProvider === "auto" ? "openai" : selectedProvider,
-                });
-                setVerifyMsg("Checking…");
-              }}
-            >
-              Verify key
-            </button>
-            <button
-              type="button"
-              className="primary"
               title="Flush settings now (also autosaves ~0.5s after changes)"
               onClick={() => {
                 window.clearTimeout(settingsSaveTimer.current);
@@ -2219,7 +2360,7 @@ export function App() {
                 });
               }}
             >
-              Save
+              Save settings
             </button>
           </div>
           {verifyMsg && <div className="muted">{verifyMsg}</div>}
@@ -2524,7 +2665,7 @@ export function App() {
                   </label>
                   <label
                     className="check"
-                    title="web_fetch and web_search (Tavily). Off = ask each time. Set Tavily key under Settings → Set API key…"
+                    title="web_fetch and web_search (Tavily). Off = ask each time. Set Tavily key under Settings → Browser / web."
                   >
                     <input
                       type="checkbox"

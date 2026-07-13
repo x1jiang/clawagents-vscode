@@ -36,6 +36,7 @@ export type HostToWebview =
       hasBedrockKey?: boolean;
       hasAwsCreds?: boolean;
       hasOpenAIKey?: boolean;
+      hasAnthropicKey?: boolean;
       hasGeminiKey?: boolean;
       sidecar: "stopped" | "running";
       chatId?: string;
@@ -197,8 +198,12 @@ export type WebviewToHost =
   | { type: "set_bedrock_key"; apiKey: string }
   | {
       type: "set_provider_key";
-      provider: "openai" | "anthropic" | "gemini" | "bedrock";
+      provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily";
       apiKey: string;
+    }
+  | {
+      type: "clear_provider_key";
+      provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily";
     }
   | { type: "test_bedrock_gateway"; baseUrl: string; apiKey?: string }
   | {
