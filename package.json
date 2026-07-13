@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -42,22 +42,42 @@
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "clawagents-activity",
+          "title": "ClawAgents",
+          "icon": "media/icon.svg",
+          "when": "clawagents:useActivityBar"
+        }
+      ],
       "secondarySidebar": [
         {
           "id": "clawagents",
           "title": "ClawAgents",
-          "icon": "media/icon.svg"
+          "icon": "media/icon.svg",
+          "when": "!clawagents:useActivityBar"
         }
       ]
     },
     "views": {
+      "clawagents-activity": [
+        {
+          "type": "webview",
+          "id": "clawagents.sidebarActivity",
+          "name": "ClawAgents",
+          "visibility": "visible",
+          "icon": "media/icon.svg",
+          "when": "clawagents:useActivityBar"
+        }
+      ],
       "clawagents": [
         {
           "type": "webview",
           "id": "clawagents.sidebar",
           "name": "ClawAgents",
           "visibility": "visible",
-          "icon": "media/icon.svg"
+          "icon": "media/icon.svg",
+          "when": "!clawagents:useActivityBar"
         }
       ]
     },
@@ -72,7 +92,7 @@
       },
       {
         "command": "clawagents.toggleChat",
-        "title": "ClawAgents: Toggle Right Panel",
+        "title": "ClawAgents: Toggle Sidebar",
         "icon": "$(layout-sidebar-right)"
       },
       {
@@ -141,17 +161,17 @@
       "view/title": [
         {
           "command": "clawagents.newChat",
-          "when": "view == clawagents.sidebar",
+          "when": "view == clawagents.sidebar || view == clawagents.sidebarActivity",
           "group": "navigation@1"
         },
         {
           "command": "clawagents.cancel",
-          "when": "view == clawagents.sidebar",
+          "when": "view == clawagents.sidebar || view == clawagents.sidebarActivity",
           "group": "navigation@2"
         },
         {
           "command": "clawagents.restartSidecar",
-          "when": "view == clawagents.sidebar",
+          "when": "view == clawagents.sidebar || view == clawagents.sidebarActivity",
           "group": "navigation@3"
         }
       ],
@@ -184,8 +204,8 @@
       "properties": {
         "clawagents.revealOnStartup": {
           "type": "boolean",
-          "default": true,
-          "description": "On startup, open the right Secondary Side Bar and show ClawAgents so its icon appears next to other AI panels."
+          "default": false,
+          "description": "On startup, focus the ClawAgents sidebar view."
         },
         "clawagents.pythonPath": {
           "type": "string",

@@ -29,6 +29,7 @@ import type {
 import { SidecarManager } from "./sidecar";
 
 export const SIDEBAR_ID = "clawagents.sidebar";
+export const SIDEBAR_ACTIVITY_ID = "clawagents.sidebarActivity";
 const STATE_KEY = "clawagents.chatState.v2";
 
 const DEFAULT_AUTO_APPROVE: AutoApprove = {
@@ -152,18 +153,40 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   async openChat(): Promise<void> {
-    // Secondary Side Bar (right) — same strip Claude Code / Codex use.
-    // Focusing the view opens the auxiliary bar when needed.
-    try {
-      await vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
-    } catch {
-      /* older hosts without auxiliary bar */
+    // Cursor Glass has no reliable Secondary Side Bar — use Activity Bar.
+    // VS Code: Secondary Side Bar (right).
+    const isCursor = vscode.env.appName.toLowerCase().includes("cursor");
+    if (!isCursor) {
+      try {
+        await vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
+      } catch {
+        /* older hosts */
+      }
     }
-    await vscode.commands.executeCommand("clawagents.sidebar.focus");
+    const focusIds = isCursor
+      ? ["clawagents.sidebarActivity.focus", "clawagents.sidebar.focus"]
+      : ["clawagents.sidebar.focus", "clawagents.sidebarActivity.focus"];
+    for (const id of focusIds) {
+      try {
+        await vscode.commands.executeCommand(id);
+        return;
+      } catch {
+        /* try next */
+      }
+    }
   }
 
   async toggleChat(): Promise<void> {
-    // Toggle the right auxiliary bar; if opening, focus ClawAgents.
+    const isCursor = vscode.env.appName.toLowerCase().includes("cursor");
+    if (isCursor) {
+      try {
+        await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility");
+      } catch {
+        /* ignore */
+      }
+      await this.openChat();
+      return;
+    }
     try {
       await vscode.commands.executeCommand("workbench.action.toggleAuxiliaryBar");
       await vscode.commands.executeCommand("clawagents.sidebar.focus");

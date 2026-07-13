@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.10 — 2026-07-12
+
+- **Cursor**: show ClawAgents on the left **Activity Bar** (Claude/Codex title-bar icons are Cursor built-ins — third-party extensions cannot join that strip)
+- **VS Code**: keep Secondary Side Bar on the right when the auxiliary bar is available
+
 ## 1.0.9 — 2026-07-12
 
 - Show ClawAgents in the right Secondary Side Bar strip: themeable SVG icon, editor title-bar Open button, reveal panel on startup (`clawagents.revealOnStartup`)

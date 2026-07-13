@@ -14,6 +14,22 @@ let sidecar: SidecarManager | undefined;
 let provider: ClawAgentsWebviewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Cursor Glass does not host third-party icons next to Claude/Codex (those are
+  // built-in Agents). Use the left Activity Bar instead — same fallback Claude Code uses.
+  const isCursor = vscode.env.appName.toLowerCase().includes("cursor");
+  void vscode.commands.executeCommand("setContext", "clawagents:useActivityBar", isCursor);
+  if (!isCursor) {
+    void (async () => {
+      const cmds = await vscode.commands.getCommands(true);
+      const hasAux =
+        cmds.includes("workbench.action.focusAuxiliaryBar") ||
+        cmds.includes("workbench.action.toggleAuxiliaryBar");
+      if (!hasAux) {
+        await vscode.commands.executeCommand("setContext", "clawagents:useActivityBar", true);
+      }
+    })();
+  }
+
   const config = new ExtensionConfig(context.secrets);
   sidecar = new SidecarManager(context.extensionPath, config);
   provider = new ClawAgentsWebviewProvider(context, sidecar, config);
@@ -31,10 +47,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   })();
 
+  const webviewOpts = { webviewOptions: { retainContextWhenHidden: true } };
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(ClawAgentsWebviewProvider.viewType, provider, {
-      webviewOptions: { retainContextWhenHidden: true },
-    }),
+    vscode.window.registerWebviewViewProvider("clawagents.sidebar", provider, webviewOpts),
+    vscode.window.registerWebviewViewProvider("clawagents.sidebarActivity", provider, webviewOpts),
   );
 
   context.subscriptions.push(
@@ -147,19 +163,12 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   });
 
-  // Reveal Secondary Side Bar + ClawAgents so the flame icon appears in the
-  // same right-side strip as Cursor's built-in Claude / Codex controls.
+  // Optional: focus sidebar on startup (off by default).
   const revealOnStartup = vscode.workspace
     .getConfiguration("clawagents")
-    .get<boolean>("revealOnStartup", true);
+    .get<boolean>("revealOnStartup", false);
   if (revealOnStartup) {
-    void (async () => {
-      try {
-        await provider?.openChat();
-      } catch {
-        /* host may not have an auxiliary bar yet */
-      }
-    })();
+    void provider?.openChat();
   }
 }
 
