@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from clawagents.provider_profiles import BUILTIN_PROVIDER_PROFILES, load_provider_profiles
 
 from pricing import attach_prices
+from url_trust import is_trusted_base_url
 
 
 _CATALOG: list[dict[str, Any]] = [
@@ -102,6 +105,23 @@ _CATALOG: list[dict[str, Any]] = [
     },
 ]
 
+# Non-chat IDs from OpenAI-compatible /models lists.
+_NON_CHAT_MODEL_HINTS = (
+    "embedding",
+    "whisper",
+    "tts-",
+    "tts_",
+    "dall-e",
+    "moderation",
+    "transcribe",
+    "realtime",
+    "image-",
+    "davinci",
+    "babbage",
+    "curie",
+    "ada-",
+)
+
 
 def _has_aws_credentials() -> bool:
     """True when native Bedrock can use the AWS credential chain.
@@ -123,7 +143,6 @@ def _has_aws_credentials() -> bool:
 
 def _ollama_reachable() -> bool:
     """True when a local Ollama daemon answers quickly."""
-    import urllib.error
     import urllib.request
 
     try:
@@ -148,29 +167,177 @@ def _provider_credentials_present(provider_id: str, env_key: str | None) -> bool
     return bool(os.environ.get(str(env_key)))
 
 
+def _settings_base_url() -> tuple[str, bool]:
+    """Return (trusted base_url or '', ssl_verify) from vscode settings."""
+    try:
+        from settings_store import load_settings
+
+        settings = load_settings()
+    except Exception:  # noqa: BLE001
+        return "", True
+    raw = str(settings.get("base_url") or "").strip()
+    ssl_verify = settings.get("ssl_verify", True) is not False
+    if not raw:
+        return "", ssl_verify
+    if is_trusted_base_url(raw) or settings.get("trust_custom_base_url"):
+        return raw.rstrip("/"), ssl_verify
+    return "", ssl_verify
+
+
+def _ssl_context(ssl_verify: bool) -> Any:
+    import ssl
+
+    if not ssl_verify:
+        return ssl._create_unverified_context()
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+def _http_get_json(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    ssl_verify: bool = True,
+    timeout: float = 8.0,
+) -> Any:
+    import urllib.request
+
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(
+        req, timeout=timeout, context=_ssl_context(ssl_verify)
+    ) as resp:
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def _looks_like_chat_model(model_id: str) -> bool:
+    mid = (model_id or "").strip().lower()
+    if not mid:
+        return False
+    return not any(h in mid for h in _NON_CHAT_MODEL_HINTS)
+
+
+def _fetch_compatible_models(
+    base_url: str,
+    key: str,
+    *,
+    ssl_verify: bool = True,
+) -> list[dict[str, Any]]:
+    """GET ``{base_url}/models`` and return chat-ish ``{id,label}`` rows."""
+    url = f"{base_url.rstrip('/')}/models"
+    headers: dict[str, str] = {}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    data = _http_get_json(url, headers=headers, ssl_verify=ssl_verify, timeout=12.0)
+    rows = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        mid = str(row.get("id") or "").strip()
+        if not mid or mid in seen or not _looks_like_chat_model(mid):
+            continue
+        seen.add(mid)
+        out.append({"id": mid, "label": mid})
+    out.sort(key=lambda m: m["id"].lower())
+    return out
+
+
+def _probe_compatible_endpoint(
+    base_url: str,
+    key: str,
+    *,
+    ssl_verify: bool = True,
+) -> tuple[bool, str, list[dict[str, Any]]]:
+    """Live-check an OpenAI-compatible ``/models`` and return models on success."""
+    import ssl
+    import urllib.error
+
+    try:
+        models = _fetch_compatible_models(base_url, key, ssl_verify=ssl_verify)
+    except Exception as exc:  # noqa: BLE001
+        # Private-CA corporate gateways often fail default verify even when the
+        # Settings checkbox is still on — retry once without verify.
+        if ssl_verify and isinstance(exc, (ssl.SSLError, urllib.error.URLError)):
+            try:
+                models = _fetch_compatible_models(base_url, key, ssl_verify=False)
+                host = urlparse(base_url).netloc or base_url
+                if models:
+                    return (
+                        True,
+                        f"Key valid — {len(models)} models from {host} (TLS verify skipped)",
+                        models,
+                    )
+                return True, f"Key valid at {host} (TLS verify skipped; no chat models)", []
+            except Exception as retry_exc:  # noqa: BLE001
+                exc = retry_exc
+        if isinstance(exc, urllib.error.HTTPError) and exc.code in (400, 401, 403):
+            return False, f"Key REJECTED by endpoint (HTTP {exc.code})", []
+        msg = str(exc).encode("ascii", "replace").decode("ascii")
+        return False, f"Endpoint check failed ({type(exc).__name__}: {msg})", []
+    host = urlparse(base_url).netloc or base_url
+    if models:
+        return True, f"Key valid — {len(models)} models from {host}", models
+    return True, f"Key valid at {host} (no chat models listed)", []
+
+
 def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
     """Build the sidebar provider/model catalog.
 
     ``available`` means credentials are present and (when ``probe_keys``) a
     cheap live check did not reject the key. The chat model dropdown only
     lists models from available providers.
+
+    When Settings ``base_url`` is a trusted OpenAI-compatible endpoint, OpenAI
+    (and Bedrock gateway mode) probe/list models from that host instead of
+    api.openai.com.
     """
+    settings_base, ssl_verify = _settings_base_url()
     out: list[dict[str, Any]] = []
     for p in _CATALOG:
         env_key = p.get("env_key")
         ek: str | None = env_key if env_key is None or isinstance(env_key, str) else str(env_key)
         available = _provider_credentials_present(str(p["id"]), ek)
-        if available and probe_keys and p["id"] in ("openai", "anthropic", "gemini"):
-            checked = verify_api_key(str(p["id"]), probe=True)
-            available = bool(checked.get("ok"))
+        models = list(p["models"])
+        pid = str(p["id"])
+
+        # Custom OpenAI-compatible base URL (Settings) → probe + list that host.
+        use_custom = bool(settings_base and pid == "openai")
+
+        if use_custom and available:
+            key = _sanitize_api_key(os.environ.get("OPENAI_API_KEY"))
+            ok, _detail, remote_models = _probe_compatible_endpoint(
+                settings_base, key or "", ssl_verify=ssl_verify
+            )
+            # Key is present — never flip to "(no key)" just because the gateway
+            # probe failed (TLS, timeout). Prefer remote /models when it works.
+            if ok and remote_models:
+                models = remote_models
+        elif available and probe_keys and pid in ("openai", "anthropic", "gemini"):
+            checked = verify_api_key(pid, probe=True)
+            # Missing/rejected key → unavailable. Network blips keep available.
+            detail = str(checked.get("detail") or "")
+            if not checked.get("ok") and (
+                "REJECTED" in detail or "Missing" in detail or "empty" in detail.lower()
+            ):
+                available = False
+            elif not checked.get("ok"):
+                available = True
+
         out.append(
             {
-                "id": p["id"],
+                "id": pid,
                 "name": p["name"],
                 "available": available,
-                "base_url": p.get("base_url"),
+                "base_url": settings_base if use_custom else p.get("base_url"),
                 "models": attach_prices(
-                    [{**m, "available": available} for m in p["models"]]
+                    [{**m, "available": available} for m in models]
                 ),
             }
         )
@@ -216,8 +383,6 @@ def _sanitize_api_key(raw: str | None) -> str:
 
 def _key_source(provider: str) -> str:
     """Where the effective key came from (provenance passed by the host)."""
-    import json
-
     raw = os.environ.get("CLAW_KEY_SOURCES", "")
     try:
         sources = json.loads(raw) if raw else {}
@@ -237,6 +402,15 @@ def _probe_key(provider: str, key: str) -> tuple[bool, str]:
     if not key:
         return False, "Key empty after sanitizing (check for hidden/non-ASCII characters)"
 
+    # OpenAI (+ compatible): prefer Settings base_url when trusted.
+    if provider == "openai":
+        settings_base, ssl_verify = _settings_base_url()
+        if settings_base:
+            ok, detail, _models = _probe_compatible_endpoint(
+                settings_base, key, ssl_verify=ssl_verify
+            )
+            return ok, detail
+
     probes: dict[str, tuple[str, dict[str, str]]] = {
         "openai": ("https://api.openai.com/v1/models", {"Authorization": f"Bearer {key}"}),
         "anthropic": (
@@ -254,18 +428,8 @@ def _probe_key(provider: str, key: str) -> tuple[bool, str]:
         return True, "Key present in environment"
     url, headers = probes[provider]
     req = urllib.request.Request(url, headers=headers)
-    # Framework Python's default SSL context often has no CA bundle; use
-    # certifi's (always present - the openai package depends on it).
-    ssl_ctx = None
     try:
-        import certifi
-        import ssl
-
-        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        pass
-    try:
-        with urllib.request.urlopen(req, timeout=8, context=ssl_ctx):
+        with urllib.request.urlopen(req, timeout=8, context=_ssl_context(True)):
             return True, "Key valid (live check passed)"
     except urllib.error.HTTPError as exc:
         if exc.code in (400, 401, 403):
@@ -334,6 +498,17 @@ def verify_api_key(provider: str, *, probe: bool = False) -> dict[str, Any]:
     if not probe:
         return {"ok": True, "provider": provider, "detail": f"Key present{source}"}
     if provider == "bedrock":
+        settings_base, ssl_verify = _settings_base_url()
+        if settings_base:
+            ok, detail, models = _probe_compatible_endpoint(
+                settings_base, key, ssl_verify=ssl_verify
+            )
+            extra = f" · {len(models)} models" if models else ""
+            return {
+                "ok": ok,
+                "provider": provider,
+                "detail": f"{detail}{extra}{source}",
+            }
         return {
             "ok": True,
             "provider": provider,

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.19 — 2026-07-13
+
+- Custom OpenAI-compatible Base URL: probe `/v1/models` and fill the model dropdown from the gateway (fixes header stuck on **default** / Provider **OpenAI (no key)**)
+- Refresh provider catalog after Save settings; Wire API + TLS verify save immediately
+
 ## 1.0.18 — 2026-07-13
 
 - Settings: API keys live only on each Provider card (OpenAI / Anthropic / Gemini / Bedrock) + Tavily under Browser/web — removed duplicate Set/Clear/Verify from Advanced

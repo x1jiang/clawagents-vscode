@@ -768,7 +768,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
           const settings = await this.gateway.putSettings(incoming);
-          this.post({ type: "settings", settings });
+          // Re-fetch providers so custom base_url / TLS changes update the model list.
+          let providers: unknown[] = [];
+          try {
+            providers = await this.gateway.getProviders();
+          } catch {
+            /* catalog refresh is best-effort */
+          }
+          this.post({ type: "settings", settings, providers });
           this.post({ type: "status", message: "Settings saved" });
           try {
             const skills = await this.gateway.getSkills();

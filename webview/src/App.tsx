@@ -879,21 +879,20 @@ export function App() {
   const allModels = useMemo(() => {
     const seen = new Set<string>();
     const rows: NonNullable<Provider["models"]> = [];
-    // Only list models the user can call (credentials + live key check).
-    // Auto mode merges available providers only.
+    // Header model list: for a concrete provider, show its catalog even if the
+    // live key probe failed (custom gateway keys often fail against api.openai.com).
+    // Auto mode still prefers providers marked available.
     let lists: Array<NonNullable<Provider["models"]>>;
     if (selectedProvider === "auto") {
-      lists = providerCatalog
-        .filter((p) => p.available !== false)
-        .map((p) => p.models || []);
+      const available = providerCatalog.filter((p) => p.available !== false);
+      lists = (available.length ? available : providerCatalog).map((p) => p.models || []);
     } else {
       const selected = providerCatalog.find((p) => p.id === selectedProvider);
-      lists =
-        selected && selected.available !== false ? [selected.models || []] : [[]];
+      lists = selected ? [selected.models || []] : [[]];
     }
     for (const list of lists) {
       for (const m of list) {
-        if (!m?.id || seen.has(m.id) || m.available === false) {
+        if (!m?.id || seen.has(m.id)) {
           continue;
         }
         seen.add(m.id);
@@ -963,6 +962,20 @@ export function App() {
     post({ type: "save_settings", settings: { reasoning_effort: next } });
   };
 
+  const selectWireApi = (next: string) => {
+    skipSettingsAutosave.current = true;
+    setSettings((s) => ({ ...s, wire_api: next }));
+    setVerifyMsg("Saving…");
+    post({ type: "save_settings", settings: { wire_api: next } });
+  };
+
+  const selectSslVerify = (next: boolean) => {
+    skipSettingsAutosave.current = true;
+    setSettings((s) => ({ ...s, ssl_verify: next }));
+    setVerifyMsg("Saving…");
+    post({ type: "save_settings", settings: { ssl_verify: next } });
+  };
+
   const send = () => {
     const value = draft.trim();
     if (!value) {
@@ -1024,6 +1037,9 @@ export function App() {
             onChange={(e) => selectModel(e.target.value)}
           >
             <option value="">default</option>
+            {activeModelId && !allModels.some((m) => m.id === activeModelId) && (
+              <option value={activeModelId}>{activeModelId}</option>
+            )}
             {allModels.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label || m.id}
@@ -1411,9 +1427,7 @@ export function App() {
                   Wire API
                   <select
                     value={String(settings.wire_api || "auto")}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, wire_api: e.target.value }))
-                    }
+                    onChange={(e) => selectWireApi(e.target.value)}
                   >
                     <option value="auto">Auto (model decides)</option>
                     <option value="responses">Responses (/v1/responses)</option>
@@ -1424,20 +1438,19 @@ export function App() {
                   <span className="settings-hint">
                     Use Responses for Codex / Responses-only gateways that 404
                     chat/completions. Auto picks Responses for GPT-5.5/5.6/Codex.
+                    Saved immediately.
                   </span>
                 </label>
                 <label className="row">
                   <input
                     type="checkbox"
                     checked={settings.ssl_verify !== false}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, ssl_verify: e.target.checked }))
-                    }
+                    onChange={(e) => selectSslVerify(e.target.checked)}
                   />
                   Verify TLS certificates
                   <span className="settings-hint">
                     Uncheck for corporate proxies with a private CA (auto-off when
-                    you Trust a custom HTTPS base URL).
+                    you Trust a custom HTTPS base URL). Saved immediately.
                   </span>
                 </label>
               </>
