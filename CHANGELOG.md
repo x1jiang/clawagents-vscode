@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.8 — 2026-07-12
+
+- Settings provider dropdown: hide builtin `Profile: bedrock-gateway` (duplicate of **AWS Bedrock**; gateway mode stays on the Bedrock card)
+
 ## 1.0.7 — 2026-07-12
 
 - **AWS Bedrock native IAM** — select Bedrock, pick AWS model IDs (Claude / Nova / Llama / GPT-OSS / …), leave Base URL empty

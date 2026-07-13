@@ -148,9 +148,13 @@ def build_provider_catalog() -> list[dict[str, Any]]:
                 ),
             }
         )
-    # Named profiles
+    # Named profiles from ~/.clawagents/profiles.json (and cwd). Skip library
+    # builtins — those are already listed above (openai/anthropic/gemini/ollama/
+    # bedrock). Exposing ``profile:bedrock-gateway`` duplicated AWS Bedrock in
+    # the Settings dropdown; gateway mode lives on the Bedrock card (Base URL).
+    catalog_ids = {p["id"] for p in out}
     for name, profile in load_provider_profiles().items():
-        if name in BUILTIN_PROVIDER_PROFILES and name in {p["id"] for p in out}:
+        if name in BUILTIN_PROVIDER_PROFILES or name in catalog_ids:
             continue
         out.append(
             {
