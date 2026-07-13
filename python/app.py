@@ -438,6 +438,12 @@ class SettingsBody(BaseModel):
     trust_custom_base_url: bool | None = None
     aws_region: str | None = None
     aws_profile: str | None = None
+    # OpenAI reasoning / transport — must be on the body or PUT silently drops them.
+    reasoning_effort: str | None = None
+    wire_api: str | None = None
+    ssl_verify: bool | None = None
+
+    model_config = {"extra": "ignore"}
 
 
 class CreateChatBody(BaseModel):
@@ -661,7 +667,12 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        patch = {k: v for k, v in body.model_dump().items() if v is not None}
+        # exclude_unset: partial patches (effort / wire_api only) must not wipe
+        # other keys. Keep explicit False (ssl_verify) via exclude_none=False.
+        from settings_store import DEFAULTS
+
+        raw = body.model_dump(exclude_unset=True)
+        patch = {k: v for k, v in raw.items() if k in DEFAULTS}
         return save_settings(patch)
 
     @app.get("/skills")

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.20 — 2026-07-13
+
+- Fix Settings save: `wire_api`, `reasoning_effort`, and `ssl_verify` were dropped by the API body schema (UI snapped back; chat kept hitting Chat Completions → 404 on Responses-only gateways)
+
 ## 1.0.19 — 2026-07-13
 
 - Custom OpenAI-compatible Base URL: probe `/v1/models` and fill the model dropdown from the gateway (fixes header stuck on **default** / Provider **OpenAI (no key)**)
