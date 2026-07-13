@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.24 — 2026-07-13
+
+- Skills: require `clawagents>=6.12.6` so `list_skills` is registered (overflow catalog) while full skill bodies still load only via `use_skill`
+
 ## 1.0.23 — 2026-07-13
 
 - Cleaner API-key handling: pass host SecretStorage key as explicit `api_key=` every turn; sidecar sets `CLAWAGENTS_SKIP_DOTENV=1` so clawagents never reloads workspace `.env` mid-process (requires `clawagents>=6.12.5`)

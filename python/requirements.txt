@@ -5,7 +5,7 @@
 #
 # Or Command Palette → ClawAgents: Install/Upgrade Python Dependencies
 #
-clawagents>=6.12.5,<7
+clawagents>=6.12.6,<7
 fastapi>=0.115.0,<1
 uvicorn>=0.30.0,<1
 pydantic>=2.7.0,<3
