@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -86,7 +86,7 @@
         "command": "clawagents.openChat",
         "title": "ClawAgents: Open Chat",
         "icon": {
-          "light": "media/icon.svg",
+          "light": "media/icon-light.svg",
           "dark": "media/icon.svg"
         }
       },

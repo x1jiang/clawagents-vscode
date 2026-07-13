@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.13 — 2026-07-12
+
+- Secondary Side Bar flame icon: teal (`#2DD4BF`) so it’s visible on dark themes and distinct from Claude (orange) / Codex (white)
+
 ## 1.0.12 — 2026-07-12
 
 - **Effort** selector for GPT-5.5/5.6 and o-series (Light / Medium / High / Extra High / None) — header + Settings; requires `clawagents>=6.12.1`
