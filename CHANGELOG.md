@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.16 — 2026-07-13
+
+- OpenAI GPT-5.5/5.6: auto-route to Responses API via `clawagents>=6.12.2` so Effort applies with tools (Ollama/BAG stay on Chat Completions)
+
 ## 1.0.15 — 2026-07-12
 
 - Model dropdown: only list models for providers with credentials that pass a live key check (auto no longer dumps every catalog entry)

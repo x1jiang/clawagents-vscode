@@ -1346,7 +1346,7 @@ export function App() {
                 </select>
                 <span className="settings-hint">
                   Thinking depth for GPT-5.5/5.6 and o-series. Agent tool turns on
-                  GPT-5.5/5.6 still use Effort=None on Chat Completions (API limit).
+                  GPT-5.5/5.6 auto-use Responses API so Effort applies with tools.
                 </span>
               </label>
             )}
