@@ -1,6 +1,6 @@
 # Publish checklist (Marketplace)
 
-Publisher **`clawagents`** · source https://github.com/x1jiang/clawagents-vscode · version **1.0.29**
+Publisher **`clawagents`** · source https://github.com/x1jiang/clawagents-vscode · version **1.0.30**
 
 For the full **Python + VS Code** release flow (bump, build, tag, GitHub, PyPI), see [`../RELEASE.md`](../RELEASE.md).
 
