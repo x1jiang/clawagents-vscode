@@ -98,45 +98,71 @@ _CATALOG: list[dict[str, Any]] = [
             {"id": "mistral.mistral-large-2407-v1:0", "label": "Mistral Large"},
             {"id": "openai.gpt-oss-120b-1:0", "label": "GPT-OSS 120B"},
             {"id": "openai.gpt-oss-20b-1:0", "label": "GPT-OSS 20B"},
-            {"id": "deepseek.r1-v1:0", "label": "DeepSeek R1"},
         ],
     },
 ]
 
 
 def _has_aws_credentials() -> bool:
-    """True when native Bedrock can use the AWS credential chain."""
+    """True when native Bedrock can use the AWS credential chain.
+
+    Region alone is not enough — that used to mark Bedrock "available" for
+    everyone with ``AWS_REGION`` set and flooded the model dropdown.
+    """
     if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
         return True
     if os.environ.get("AWS_PROFILE") or os.environ.get("AWS_DEFAULT_PROFILE"):
         return True
-    # Instance / task / SSO role often set region only; boto3 still resolves creds.
-    if os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"):
-        return True
     # Shared credentials file under $HOME (common local setup).
     home = os.path.expanduser("~")
-    for rel in (".aws/credentials", ".aws/config"):
-        path = os.path.join(home, rel)
-        if os.path.isfile(path):
-            return True
+    creds = os.path.join(home, ".aws", "credentials")
+    if os.path.isfile(creds) and os.path.getsize(creds) > 0:
+        return True
     return False
 
 
-def build_provider_catalog() -> list[dict[str, Any]]:
+def _ollama_reachable() -> bool:
+    """True when a local Ollama daemon answers quickly."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=0.35)
+        return True
+    except Exception:  # noqa: BLE001 — offline / refused ⇒ not available
+        return False
+
+
+def _provider_credentials_present(provider_id: str, env_key: str | None) -> bool:
+    """Whether this provider has local credentials (before live probe)."""
+    if provider_id == "ollama":
+        return _ollama_reachable()
+    if env_key is None:
+        return True
+    if env_key == "GEMINI_API_KEY":
+        return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+    if env_key == "BEDROCK_API_KEY":
+        # Do NOT treat OPENAI_API_KEY as Bedrock access — that listed every
+        # Bedrock model whenever OpenAI was configured.
+        return bool(os.environ.get("BEDROCK_API_KEY") or _has_aws_credentials())
+    return bool(os.environ.get(str(env_key)))
+
+
+def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
+    """Build the sidebar provider/model catalog.
+
+    ``available`` means credentials are present and (when ``probe_keys``) a
+    cheap live check did not reject the key. The chat model dropdown only
+    lists models from available providers.
+    """
     out: list[dict[str, Any]] = []
     for p in _CATALOG:
         env_key = p.get("env_key")
-        available = True if env_key is None else bool(
-            os.environ.get(str(env_key))
-            or (env_key == "GEMINI_API_KEY" and os.environ.get("GOOGLE_API_KEY"))
-            or (
-                env_key == "BEDROCK_API_KEY"
-                and (
-                    os.environ.get("OPENAI_API_KEY")
-                    or _has_aws_credentials()
-                )
-            )
-        )
+        ek: str | None = env_key if env_key is None or isinstance(env_key, str) else str(env_key)
+        available = _provider_credentials_present(str(p["id"]), ek)
+        if available and probe_keys and p["id"] in ("openai", "anthropic", "gemini"):
+            checked = verify_api_key(str(p["id"]), probe=True)
+            available = bool(checked.get("ok"))
         out.append(
             {
                 "id": p["id"],

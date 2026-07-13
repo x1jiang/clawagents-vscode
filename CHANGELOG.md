@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.15 — 2026-07-12
+
+- Model dropdown: only list models for providers with credentials that pass a live key check (auto no longer dumps every catalog entry)
+- Remove DeepSeek R1 from Bedrock catalog
+- Bedrock availability no longer unlocked by `OPENAI_API_KEY` alone; Ollama only when local daemon responds
+
 ## 1.0.14 — 2026-07-12
 
 - Remove Cline attribution from README / LICENSE / NOTICE

@@ -857,13 +857,21 @@ export function App() {
   const allModels = useMemo(() => {
     const seen = new Set<string>();
     const rows: NonNullable<Provider["models"]> = [];
-    const lists =
-      selectedProvider === "auto"
-        ? providerCatalog.map((p) => p.models || [])
-        : [providerCatalog.find((p) => p.id === selectedProvider)?.models || []];
+    // Only list models the user can call (credentials + live key check).
+    // Auto mode merges available providers only.
+    let lists: Array<NonNullable<Provider["models"]>>;
+    if (selectedProvider === "auto") {
+      lists = providerCatalog
+        .filter((p) => p.available !== false)
+        .map((p) => p.models || []);
+    } else {
+      const selected = providerCatalog.find((p) => p.id === selectedProvider);
+      lists =
+        selected && selected.available !== false ? [selected.models || []] : [[]];
+    }
     for (const list of lists) {
       for (const m of list) {
-        if (!m?.id || seen.has(m.id)) {
+        if (!m?.id || seen.has(m.id) || m.available === false) {
           continue;
         }
         seen.add(m.id);

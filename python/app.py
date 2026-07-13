@@ -634,7 +634,10 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return build_provider_catalog()
+        import asyncio as _asyncio
+
+        # Live key probes (network) — keep them off the event loop.
+        return await _asyncio.to_thread(build_provider_catalog, probe_keys=True)
 
     @app.post("/settings/verify-key")
     async def verify_key(body: VerifyBody, request: Request):
