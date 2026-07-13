@@ -404,6 +404,15 @@ async def run_chat_turn(
     from clawagents.agent import create_claw_agent
     from clawagents.session.backends import JsonlFileSession
 
+    # Host SecretStorage keys must win over workspace .env (clawagents may
+    # load_dotenv with override=True on first create_claw_agent).
+    try:
+        from spawn_secrets import restore_spawn_secrets
+
+        restore_spawn_secrets()
+    except Exception:  # noqa: BLE001
+        pass
+
     ensure_dirs()
     settings = load_settings()
 

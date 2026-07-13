@@ -162,6 +162,9 @@ export class SidecarManager {
       PYTHONUNBUFFERED: "1",
       CLAW_KEY_SOURCES: JSON.stringify(keySources),
       CLAW_CONTEXT_MODE: this.config.contextMode ? "1" : "0",
+      // SecretStorage / spawn env must beat workspace .env inside clawagents
+      // (load_dotenv default override=True would otherwise clobber the UI key).
+      CLAWAGENTS_DOTENV_OVERRIDE: "0",
     };
     if (model) {
       env.CLAW_MODEL = model;

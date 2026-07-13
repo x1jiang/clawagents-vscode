@@ -19,16 +19,14 @@ if _MONOREPO_SRC.is_dir() and str(_MONOREPO_SRC) not in sys.path:
 
 
 def _normalize_env() -> None:
-    """Reconcile provider env aliases before anything reads them.
+    """Reconcile provider env aliases before anything reads them."""
+    from spawn_secrets import normalize_provider_aliases, snapshot_spawn_secrets
 
-    clawagents reads GEMINI_API_KEY only; users (and Google's own docs)
-    often export GOOGLE_API_KEY instead. Mirror it so availability checks
-    and the runtime agree.
-    """
-    if os.environ.get("GOOGLE_API_KEY") and not os.environ.get("GEMINI_API_KEY"):
-        os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
+    normalize_provider_aliases()
+    snapshot_spawn_secrets()
 
 
+# Snapshot helpers live in spawn_secrets (imported by chats before each turn).
 def _check_dependencies() -> None:
     missing: list[str] = []
     for mod, pip_name in (

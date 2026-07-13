@@ -1,13 +1,13 @@
 # Publish checklist (Marketplace)
 
-Publisher **`clawagents`** · source https://github.com/x1jiang/clawagents-vscode · version **1.0.21**
+Publisher **`clawagents`** · source https://github.com/x1jiang/clawagents-vscode · version **1.0.22**
 
 ## Done already
 
 - [x] Publisher created on Marketplace
 - [x] GitHub repo pushed: https://github.com/x1jiang/clawagents-vscode
 - [x] `package.json` repository / bugs / homepage point at that repo
-- [x] VSIX built: `clawagents-1.0.21.vsix`
+- [x] VSIX built: `clawagents-1.0.22.vsix`
 
 ## You still need: Azure DevOps PAT (once)
 
@@ -25,7 +25,7 @@ From `clawagents_vscode`:
 
 ```bash
 # Option A — env var (no interactive login store)
-VSCE_PAT='paste-token-here' npx @vscode/vsce publish --packagePath ./clawagents-1.0.21.vsix
+VSCE_PAT='paste-token-here' npx @vscode/vsce publish --packagePath ./clawagents-1.0.22.vsix
 
 # Option B — login once, then publish
 npx @vscode/vsce login clawagents   # paste PAT when prompted
@@ -42,7 +42,7 @@ https://marketplace.visualstudio.com/items?itemName=clawagents.clawagents
 3. Publish:
 
 ```bash
-npx ovsx publish ./clawagents-1.0.21.vsix -p "$OVSX_PAT"
+npx ovsx publish ./clawagents-1.0.22.vsix -p "$OVSX_PAT"
 ```
 
 ## After publish

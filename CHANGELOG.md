@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.22 — 2026-07-13
+
+- Fix: UI / SecretStorage API keys no longer get overwritten by workspace `.env` on the second chat turn (`CLAWAGENTS_DOTENV_OVERRIDE=0` + spawn-secret restore; requires `clawagents>=6.12.4` for the library-side fix)
+
 ## 1.0.21 — 2026-07-13
 
 - Harden settings: single source of truth (`DEFAULTS` + `sanitize_patch`); remove duplicate `SettingsBody` so new keys cannot be silently dropped
