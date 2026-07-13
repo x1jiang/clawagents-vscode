@@ -479,6 +479,9 @@ export class GatewayClient {
                   promptTokens: num(data.prompt_tokens),
                   completionTokens: num(data.completion_tokens),
                   totalTokens: num(data.total_tokens),
+                  lastInputTokens: num(
+                    data.last_input_tokens ?? data.prompt_tokens ?? data.input_tokens,
+                  ),
                   runCostUsd: num(usageObj.run_cost_usd),
                   sessionCostUsd: num(usageObj.session_cost_usd),
                 });

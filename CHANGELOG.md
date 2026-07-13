@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.28 — 2026-07-13
+
+- Fix context meter: show latest prompt size vs window (was summing every tool-loop round → false 100%)
+
 ## 1.0.27 — 2026-07-13
 
 - Skills: auto-load personal homes (`~/.codex/skills`, `~/.claude/skills`, `~/.agents/skills`) so cohort/workflow skills are available without manual folder registration

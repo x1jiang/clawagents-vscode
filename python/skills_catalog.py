@@ -10,13 +10,16 @@ from paths import WORKSPACE, under_workspace
 from settings_store import load_settings
 
 _AUTO_NAMES = ("skills", ".skills", "skill", ".skill", "Skills")
-# Personal skill libraries used by Codex / Claude Code / agents. Loaded when
-# skill_user_homes is true (default) so cohort/workflow skills under
-# ~/.codex/skills are available without manual registration.
+# Personal skill libraries used by ClawAgents / Codex / Claude Code / agents.
+# Loaded when skill_user_homes is true (default) so cohort/workflow skills
+# under e.g. ~/.codex/skills are available without manual registration.
+# Ordered lowest→highest precedence (later dirs win name collisions in
+# SkillStore); ClawAgents' own home wins over other agents' libraries.
 _USER_SKILL_HOMES = (
     "~/.codex/skills",
     "~/.claude/skills",
     "~/.agents/skills",
+    "~/.clawagents/skills",
 )
 
 
@@ -97,14 +100,18 @@ def resolve_skill_dir_paths(settings: dict[str, Any] | None = None) -> list[str]
     return [e["path"] for e in resolve_skill_dirs(settings)]
 
 
-def _scan_skills(dirs: list[str]) -> list[dict[str, Any]]:
-    """Load skills from dirs via SkillStore (same rules as the agent)."""
+def _scan_skills(dirs: list[str]) -> tuple[list[dict[str, Any]], dict[str, str], list[str]]:
+    """Load skills from dirs via SkillStore (same rules as the agent).
+
+    Returns (skills, ineligible name→reason, loader warnings). The last two
+    are empty on older clawagents installs that don't expose them.
+    """
     if not dirs:
-        return []
+        return [], {}, []
     try:
         from clawagents.tools.skills import SkillStore
     except Exception:  # noqa: BLE001
-        return []
+        return [], {}, []
 
     store = SkillStore()
     for d in dirs:
@@ -120,7 +127,10 @@ def _scan_skills(dirs: list[str]) -> list[dict[str, Any]]:
         except RuntimeError:
             asyncio.run(store.load_all())
     except Exception:  # noqa: BLE001
-        return []
+        return [], {}, []
+
+    ineligible = dict(getattr(store, "ineligible", {}) or {})
+    warnings = list(getattr(store, "warnings", []) or [])
 
     # Map skill path → owning root dir for UI badges
     root_paths = [Path(d).resolve() for d in dirs]
@@ -150,7 +160,7 @@ def _scan_skills(dirs: list[str]) -> list[dict[str, Any]]:
             }
         )
     out.sort(key=lambda s: s["name"].lower())
-    return out
+    return out, ineligible, warnings
 
 
 def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -160,17 +170,18 @@ def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     dir_paths = [f["path"] for f in folders]
 
     # Include bundled skills in the preview so the list matches runtime.
+    # Bundled goes FIRST (lowest precedence) to mirror create_claw_agent.
     try:
         from clawagents.agent import _get_bundled_skills_dir
 
         bundled = _get_bundled_skills_dir()
         if bundled and Path(bundled).is_dir() and bundled not in dir_paths:
-            folders.append({"path": bundled, "origin": "bundled"})
-            dir_paths.append(bundled)
+            folders.insert(0, {"path": bundled, "origin": "bundled"})
+            dir_paths.insert(0, bundled)
     except Exception:  # noqa: BLE001
         pass
 
-    skills = _scan_skills(dir_paths)
+    skills, ineligible, warnings = _scan_skills(dir_paths)
     exclude = [
         n for n in (settings.get("skill_exclude") or []) if isinstance(n, str) and n.strip()
     ]
@@ -191,4 +202,8 @@ def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "excluded": exclude,
         "ignored_dirs": ignored,
         "auto_discover": bool(settings.get("skill_auto_discover", True)),
+        # name → why the skill can't run here (missing binary/env/OS).
+        "unavailable": ineligible,
+        # Loader diagnostics (spec violations, oversized/skipped files).
+        "warnings": warnings,
     }

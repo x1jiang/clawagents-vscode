@@ -685,10 +685,19 @@ async def run_chat_turn(
                 },
             )
         elif kind == "usage":
+            # Cumulative across LLM calls this run (for cost / totals).
             usage_totals["prompt_tokens"] += int(getattr(ev, "input_tokens", 0) or 0)
             usage_totals["completion_tokens"] += int(getattr(ev, "output_tokens", 0) or 0)
             usage_totals["total_tokens"] += int(getattr(ev, "total_tokens", 0) or 0)
-            on_event("usage", dict(usage_totals))
+            # Context meter needs the *latest* prompt size, not the sum —
+            # summing every tool-loop round falsely pegs the bar at 100%.
+            on_event(
+                "usage",
+                {
+                    **usage_totals,
+                    "last_input_tokens": int(getattr(ev, "input_tokens", 0) or 0),
+                },
+            )
 
     def _on_legacy_event(kind: str, data: dict[str, Any] | None = None) -> None:
         if cancel_check():
