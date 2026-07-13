@@ -153,8 +153,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   async openChat(): Promise<void> {
-    // Cursor Glass has no reliable Secondary Side Bar — use Activity Bar.
-    // VS Code: Secondary Side Bar (right).
+    // VS Code: Secondary Side Bar (right), same strip as Claude Code / Codex.
+    // Cursor: Activity Bar.
     const isCursor = vscode.env.appName.toLowerCase().includes("cursor");
     if (!isCursor) {
       try {
@@ -162,11 +162,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       } catch {
         /* older hosts */
       }
+      try {
+        await vscode.commands.executeCommand("clawagents.sidebar.focus");
+        return;
+      } catch {
+        /* fall through */
+      }
     }
-    const focusIds = isCursor
-      ? ["clawagents.sidebarActivity.focus", "clawagents.sidebar.focus"]
-      : ["clawagents.sidebar.focus", "clawagents.sidebarActivity.focus"];
-    for (const id of focusIds) {
+    for (const id of [
+      "clawagents.sidebarActivity.focus",
+      "clawagents.sidebar.focus",
+    ]) {
       try {
         await vscode.commands.executeCommand(id);
         return;

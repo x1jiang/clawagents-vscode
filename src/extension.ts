@@ -14,19 +14,23 @@ let sidecar: SidecarManager | undefined;
 let provider: ClawAgentsWebviewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
-  // Cursor Glass does not host third-party icons next to Claude/Codex (those are
-  // built-in Agents). Use the left Activity Bar instead — same fallback Claude Code uses.
+  // VS Code: Secondary Side Bar (right) — same strip as Claude Code / Codex.
+  // Cursor Glass: Activity Bar fallback (no reliable secondary sidebar for 3rd-party).
   const isCursor = vscode.env.appName.toLowerCase().includes("cursor");
   void vscode.commands.executeCommand("setContext", "clawagents:useActivityBar", isCursor);
   if (!isCursor) {
+    // Explicitly keep Secondary Side Bar for VS Code even if aux probe races.
+    void vscode.commands.executeCommand("setContext", "clawagents:useActivityBar", false);
+  } else {
     void (async () => {
       const cmds = await vscode.commands.getCommands(true);
       const hasAux =
         cmds.includes("workbench.action.focusAuxiliaryBar") ||
         cmds.includes("workbench.action.toggleAuxiliaryBar");
-      if (!hasAux) {
-        await vscode.commands.executeCommand("setContext", "clawagents:useActivityBar", true);
-      }
+      // If somehow Cursor reports a working aux bar, still prefer Activity Bar to
+      // avoid the known "secondary sidebar not supported" blank panel.
+      void hasAux;
+      await vscode.commands.executeCommand("setContext", "clawagents:useActivityBar", true);
     })();
   }
 

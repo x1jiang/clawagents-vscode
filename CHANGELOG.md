@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11 — 2026-07-12
+
+- **VS Code**: Secondary Side Bar + editor title Open button (same pattern as Claude Code / Codex) so the flame icon appears in the right strip
+- Install target clarified: use VS Code (`code --install-extension`), not only Cursor
+
 ## 1.0.10 — 2026-07-12
 
 - **Cursor**: show ClawAgents on the left **Activity Bar** (Claude/Codex title-bar icons are Cursor built-ins — third-party extensions cannot join that strip)
