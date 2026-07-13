@@ -42,6 +42,10 @@ DEFAULTS: dict[str, Any] = {
     "aws_profile": "",
     # OpenAI reasoning effort (none|low|medium|high|xhigh). Empty = provider default.
     "reasoning_effort": "medium",
+    # OpenAI transport for compatible endpoints: auto | responses | chat_completions.
+    "wire_api": "auto",
+    # TLS verify for custom base_url (False for private-CA / corporate proxies).
+    "ssl_verify": True,
 }
 
 

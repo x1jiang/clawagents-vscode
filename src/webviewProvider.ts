@@ -694,12 +694,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           } catch {
             previous = {};
           }
+          const baseUrlProvided = Object.prototype.hasOwnProperty.call(incoming, "base_url");
           const baseUrl =
             typeof incoming.base_url === "string" ? incoming.base_url.trim() : "";
           const prevBaseUrl =
             typeof previous.base_url === "string" ? previous.base_url.trim() : "";
           // Bedrock Access Gateway / OpenAI-compatible: normalize pasted URLs.
-          if (baseUrl) {
+          if (baseUrlProvided && baseUrl) {
             const provider = String(incoming.provider || previous.provider || "");
             if (provider === "bedrock") {
               const { normalizeBagBaseUrl } = await import("./bedrockGateway");
@@ -712,11 +713,16 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 : normalizeOpenAICompatibleBaseUrl(baseUrl);
             }
           }
-          const normalizedBase =
-            typeof incoming.base_url === "string" ? incoming.base_url.trim() : baseUrl;
-          const baseUrlChanged = normalizedBase !== prevBaseUrl;
+          const normalizedBase = baseUrlProvided
+            ? typeof incoming.base_url === "string"
+              ? incoming.base_url.trim()
+              : baseUrl
+            : prevBaseUrl;
+          const baseUrlChanged = baseUrlProvided && normalizedBase !== prevBaseUrl;
           // Only prompt when a new/changed custom URL isn't already trusted.
+          // Partial patches (e.g. effort-only) must not clear trust / base_url.
           if (
+            baseUrlProvided &&
             normalizedBase &&
             !isTrustedBaseUrl(normalizedBase) &&
             (baseUrlChanged || !previous.trust_custom_base_url)
@@ -736,10 +742,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               break;
             }
             incoming.trust_custom_base_url = true;
-          } else if (!normalizedBase) {
+            // Corporate / private-CA gateways usually fail default TLS verify.
+            if (/^https:\/\//i.test(normalizedBase)) {
+              incoming.ssl_verify = false;
+            }
+          } else if (baseUrlProvided && !normalizedBase) {
             incoming.trust_custom_base_url = false;
           } else if (previous.trust_custom_base_url && !baseUrlChanged) {
-            incoming.trust_custom_base_url = true;
+            // Preserve trust across partial saves that omit base_url.
+            if (!Object.prototype.hasOwnProperty.call(incoming, "trust_custom_base_url")) {
+              incoming.trust_custom_base_url = true;
+            }
           }
           // Only confirm workspace MCP trust when newly enabling.
           if (incoming.mcp_trust_workspace === true && !previous.mcp_trust_workspace) {

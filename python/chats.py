@@ -372,6 +372,11 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     effort = str(settings.get("reasoning_effort") or "").strip()
     if effort:
         kwargs["reasoning_effort"] = effort
+    wire = str(settings.get("wire_api") or settings.get("openai_wire_api") or "").strip()
+    if wire:
+        kwargs["wire_api"] = wire
+    if "ssl_verify" in settings:
+        kwargs["ssl_verify"] = bool(settings.get("ssl_verify"))
     return kwargs
 
 

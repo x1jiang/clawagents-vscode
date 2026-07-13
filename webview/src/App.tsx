@@ -932,6 +932,15 @@ export function App() {
     post({ type: "save_settings", settings: normalizeSettingsForSave(nextSettings) });
   };
 
+  const selectEffort = (next: string) => {
+    const nextSettings = { ...settings, reasoning_effort: next };
+    skipSettingsAutosave.current = true;
+    setSettings(nextSettings);
+    setVerifyMsg("Saving…");
+    // Effort-only patch: avoid trust prompts from an unsaved base_url draft.
+    post({ type: "save_settings", settings: { reasoning_effort: next } });
+  };
+
   const send = () => {
     const value = draft.trim();
     if (!value) {
@@ -1005,9 +1014,7 @@ export function App() {
               value={String(settings.reasoning_effort || "medium")}
               title="Thinking effort (OpenAI reasoning models)"
               aria-label="Effort"
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, reasoning_effort: e.target.value }))
-              }
+              onChange={(e) => selectEffort(e.target.value)}
             >
               {EFFORT_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -1334,9 +1341,7 @@ export function App() {
                 Effort
                 <select
                   value={String(settings.reasoning_effort || "medium")}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, reasoning_effort: e.target.value }))
-                  }
+                  onChange={(e) => selectEffort(e.target.value)}
                 >
                   {EFFORT_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -1345,8 +1350,9 @@ export function App() {
                   ))}
                 </select>
                 <span className="settings-hint">
-                  Thinking depth for GPT-5.5/5.6 and o-series. Agent tool turns on
-                  GPT-5.5/5.6 auto-use Responses API so Effort applies with tools.
+                  Thinking depth for GPT-5.5/5.6 and o-series. Saved immediately.
+                  With Wire API = Responses (or Auto on GPT-5.5/5.6), Effort applies
+                  with tools.
                 </span>
               </label>
             )}
@@ -1367,6 +1373,46 @@ export function App() {
                 disabled={selectedProvider === "gemini"}
               />
             </label>
+            {(selectedProvider === "openai" ||
+              selectedProvider === "auto" ||
+              selectedProvider === "ollama" ||
+              selectedProvider === "bedrock") && (
+              <>
+                <label>
+                  Wire API
+                  <select
+                    value={String(settings.wire_api || "auto")}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, wire_api: e.target.value }))
+                    }
+                  >
+                    <option value="auto">Auto (model decides)</option>
+                    <option value="responses">Responses (/v1/responses)</option>
+                    <option value="chat_completions">
+                      Chat Completions (/v1/chat/completions)
+                    </option>
+                  </select>
+                  <span className="settings-hint">
+                    Use Responses for Codex / Responses-only gateways that 404
+                    chat/completions. Auto picks Responses for GPT-5.5/5.6/Codex.
+                  </span>
+                </label>
+                <label className="row">
+                  <input
+                    type="checkbox"
+                    checked={settings.ssl_verify !== false}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, ssl_verify: e.target.checked }))
+                    }
+                  />
+                  Verify TLS certificates
+                  <span className="settings-hint">
+                    Uncheck for corporate proxies with a private CA (auto-off when
+                    you Trust a custom HTTPS base URL).
+                  </span>
+                </label>
+              </>
+            )}
             {selectedProvider === "bedrock" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">AWS Bedrock</h4>

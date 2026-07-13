@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.17 — 2026-07-13
+
+- OpenAI compatible gateways: **Wire API** (auto / Responses / Chat Completions) + **Verify TLS** settings
+- Effort selector saves immediately (no longer stuck on Medium)
+- Requires `clawagents>=6.12.3` for Responses-only proxies (e.g. Codex gateways)
+
 ## 1.0.16 — 2026-07-13
 
 - OpenAI GPT-5.5/5.6: auto-route to Responses API via `clawagents>=6.12.2` so Effort applies with tools (Ollama/BAG stay on Chat Completions)
