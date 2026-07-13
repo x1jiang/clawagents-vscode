@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.29 — 2026-07-13
+
+- Require `clawagents>=6.12.9` (skill loader precedence, safer requires parsing, resource disclosure)
+
 ## 1.0.28 — 2026-07-13
 
 - Fix context meter: show latest prompt size vs window (was summing every tool-loop round → false 100%)
