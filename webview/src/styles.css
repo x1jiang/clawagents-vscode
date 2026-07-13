@@ -737,6 +737,77 @@ button.send {
   color: var(--muted);
 }
 
+.provider-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 92%, #0f766e);
+}
+
+.provider-setup-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.provider-presets,
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.provider-setup label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.provider-setup input[type="password"] {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
+/* Back-compat aliases from 1.0.5 BAG-only card */
+.bag-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 92%, #0f766e);
+}
+
+.bag-setup-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bag-presets,
+.bag-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bag-setup label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.bag-setup input[type="password"] {
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+
 .settings-hint code {
   font-size: 10px;
   padding: 1px 4px;

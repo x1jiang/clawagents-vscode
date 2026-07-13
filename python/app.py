@@ -436,6 +436,8 @@ class SettingsBody(BaseModel):
     allow_full_access: bool | None = None
     allow_external_skill_dirs: bool | None = None
     trust_custom_base_url: bool | None = None
+    aws_region: str | None = None
+    aws_profile: str | None = None
 
 
 class CreateChatBody(BaseModel):

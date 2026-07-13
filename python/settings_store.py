@@ -37,6 +37,9 @@ DEFAULTS: dict[str, Any] = {
     "allow_external_skill_dirs": False,
     # Set by the extension after the user confirms a non-localhost base_url.
     "trust_custom_base_url": False,
+    # Native Amazon Bedrock (IAM). Empty base_url → AsyncAnthropicBedrock / Converse.
+    "aws_region": "",
+    "aws_profile": "",
 }
 
 

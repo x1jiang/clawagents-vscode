@@ -152,19 +152,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   async openChat(): Promise<void> {
-    // Activity Bar (left) — focus the ClawAgents view container.
+    // Secondary Side Bar (right) — same strip Claude Code / Codex use.
+    // Focusing the view opens the auxiliary bar when needed.
+    try {
+      await vscode.commands.executeCommand("workbench.action.focusAuxiliaryBar");
+    } catch {
+      /* older hosts without auxiliary bar */
+    }
     await vscode.commands.executeCommand("clawagents.sidebar.focus");
   }
 
   async toggleChat(): Promise<void> {
-    // Focus if hidden; if already visible, collapse the sidebar view.
+    // Toggle the right auxiliary bar; if opening, focus ClawAgents.
     try {
-      const visible = this.view?.visible;
-      if (visible) {
-        await vscode.commands.executeCommand("workbench.action.toggleSidebarVisibility");
-      } else {
-        await this.openChat();
-      }
+      await vscode.commands.executeCommand("workbench.action.toggleAuxiliaryBar");
+      await vscode.commands.executeCommand("clawagents.sidebar.focus");
     } catch {
       await this.openChat();
     }
@@ -326,6 +328,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       caveman: this.caveman,
       hasApiKey: await this.config.hasAnyApiKey(),
       hasTavilyKey: await this.config.hasTavilyKey(),
+      hasBedrockKey: Boolean((await this.config.getApiKeyEnv()).BEDROCK_API_KEY),
+      hasAwsCreds: this.config.hasAwsCredentials(),
+      hasOpenAIKey: Boolean((await this.config.getApiKeyEnv()).OPENAI_API_KEY),
+      hasGeminiKey: Boolean(
+        (await this.config.getApiKeyEnv()).GEMINI_API_KEY ||
+          (await this.config.getApiKeyEnv()).GOOGLE_API_KEY,
+      ),
       sidecar: this.sidecar.current ? "running" : "stopped",
       chatId: this.chatId,
       chats,
@@ -516,6 +525,22 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "attach_uris":
         await this.attachUris(msg.uris);
         break;
+      case "pick_attach_files": {
+        const uris = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectFolders: false,
+          canSelectMany: true,
+          openLabel: "Attach",
+          title: "Attach workspace files to chat",
+          defaultUri: workspaceRoot()
+            ? vscode.Uri.file(workspaceRoot()!)
+            : undefined,
+        });
+        if (uris?.length) {
+          await this.attachUris(uris.map((u) => u.toString()));
+        }
+        break;
+      }
       case "open_file":
         await this.openPath(msg.path, msg.line);
         break;
@@ -644,15 +669,31 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             typeof incoming.base_url === "string" ? incoming.base_url.trim() : "";
           const prevBaseUrl =
             typeof previous.base_url === "string" ? previous.base_url.trim() : "";
-          const baseUrlChanged = baseUrl !== prevBaseUrl;
+          // Bedrock Access Gateway / OpenAI-compatible: normalize pasted URLs.
+          if (baseUrl) {
+            const provider = String(incoming.provider || previous.provider || "");
+            if (provider === "bedrock") {
+              const { normalizeBagBaseUrl } = await import("./bedrockGateway");
+              incoming.base_url = normalizeBagBaseUrl(baseUrl);
+            } else if (provider === "openai" || provider === "ollama") {
+              const { normalizeOpenAICompatibleBaseUrl, normalizeBagBaseUrl } =
+                await import("./bedrockGateway");
+              incoming.base_url = baseUrl.includes("/api/v1")
+                ? normalizeBagBaseUrl(baseUrl)
+                : normalizeOpenAICompatibleBaseUrl(baseUrl);
+            }
+          }
+          const normalizedBase =
+            typeof incoming.base_url === "string" ? incoming.base_url.trim() : baseUrl;
+          const baseUrlChanged = normalizedBase !== prevBaseUrl;
           // Only prompt when a new/changed custom URL isn't already trusted.
           if (
-            baseUrl &&
-            !isTrustedBaseUrl(baseUrl) &&
+            normalizedBase &&
+            !isTrustedBaseUrl(normalizedBase) &&
             (baseUrlChanged || !previous.trust_custom_base_url)
           ) {
             const choice = await vscode.window.showWarningMessage(
-              `Custom base URL "${baseUrl}" will receive provider API keys. Only continue if you trust this endpoint.`,
+              `Custom base URL "${normalizedBase}" will receive provider API keys. Only continue if you trust this endpoint.`,
               { modal: true },
               "Trust and save",
               "Cancel",
@@ -666,7 +707,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               break;
             }
             incoming.trust_custom_base_url = true;
-          } else if (!baseUrl) {
+          } else if (!normalizedBase) {
             incoming.trust_custom_base_url = false;
           } else if (previous.trust_custom_base_url && !baseUrlChanged) {
             incoming.trust_custom_base_url = true;
@@ -747,7 +788,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               ? "gemini"
               : savedProvider.toLowerCase().includes("anthropic")
                 ? "anthropic"
-                : "openai";
+                : savedProvider.toLowerCase().includes("bedrock")
+                  ? "bedrock"
+                  : "openai";
           try {
             const res = await this.gateway.verifyKey(providerId);
             this.post({
@@ -780,6 +823,103 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "set_bedrock_key":
+        try {
+          await this.config.setApiKey("bedrock", msg.apiKey);
+          this.sidecar.stop();
+          await this.sidecar.ensureStarted();
+          this.post({ type: "sidecar", state: "running" });
+          await this.pushReady();
+          this.post({
+            type: "verify_result",
+            provider: "bedrock",
+            ok: true,
+            detail: "Bedrock Access Gateway API key saved; sidecar restarted",
+          });
+        } catch (err) {
+          this.post({
+            type: "verify_result",
+            provider: "bedrock",
+            ok: false,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "set_provider_key":
+        try {
+          await this.config.setApiKey(msg.provider, msg.apiKey);
+          this.sidecar.stop();
+          await this.sidecar.ensureStarted();
+          this.post({ type: "sidecar", state: "running" });
+          await this.pushReady();
+          const labels: Record<string, string> = {
+            openai: "OpenAI / compatible",
+            anthropic: "Anthropic",
+            gemini: "Gemini",
+            bedrock: "Bedrock Access Gateway",
+          };
+          this.post({
+            type: "verify_result",
+            provider: msg.provider,
+            ok: true,
+            detail: `${labels[msg.provider] || msg.provider} API key saved; sidecar restarted`,
+          });
+        } catch (err) {
+          this.post({
+            type: "verify_result",
+            provider: msg.provider,
+            ok: false,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "test_bedrock_gateway": {
+        const { probeCompatibleEndpoint } = await import("./bedrockGateway");
+        const key =
+          (msg.apiKey || "").trim() ||
+          (await this.config.getApiKeyEnv()).BEDROCK_API_KEY ||
+          "";
+        const result = await probeCompatibleEndpoint(msg.baseUrl || "", key, {
+          style: "bag",
+          label: "Bedrock Access Gateway",
+        });
+        this.post({
+          type: "verify_result",
+          provider: "bedrock",
+          ok: result.ok,
+          detail: result.detail,
+        });
+        break;
+      }
+      case "test_compatible_endpoint": {
+        const { probeCompatibleEndpoint } = await import("./bedrockGateway");
+        const style = msg.style === "bag" ? "bag" : "openai";
+        const env = await this.config.getApiKeyEnv();
+        const provider = msg.provider || (style === "bag" ? "bedrock" : "openai");
+        const key =
+          (msg.apiKey || "").trim() ||
+          (provider === "bedrock"
+            ? env.BEDROCK_API_KEY
+            : provider === "gemini"
+              ? env.GEMINI_API_KEY || env.GOOGLE_API_KEY
+              : env.OPENAI_API_KEY) ||
+          "";
+        const result = await probeCompatibleEndpoint(msg.baseUrl || "", key, {
+          style,
+          allowEmptyKey: style === "openai" && /localhost|127\.0\.0\.1/.test(msg.baseUrl || ""),
+          label:
+            style === "bag"
+              ? "Bedrock Access Gateway"
+              : "OpenAI-compatible endpoint",
+        });
+        this.post({
+          type: "verify_result",
+          provider,
+          ok: result.ok,
+          detail: result.detail,
+        });
+        break;
+      }
       case "clear_api_key":
         try {
           const cleared = await this.config.promptClearApiKey();
@@ -942,7 +1082,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     } else {
       this.post({
         type: "status",
-        message: "Drop files from this workspace onto the draft.",
+        message:
+          "Drop workspace files onto the draft (hold Shift), or use +Attach.",
       });
     }
     if (skipped.length && !refs.length) {

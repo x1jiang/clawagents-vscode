@@ -1,8 +1,35 @@
 # Changelog
 
+## 1.0.7 — 2026-07-12
+
+- **AWS Bedrock native IAM** — select Bedrock, pick AWS model IDs (Claude / Nova / Llama / GPT-OSS / …), leave Base URL empty
+- Settings: AWS region + profile; optional BAG/LiteLLM gateway section
+- Forward `AWS_*` credentials into the sidecar; require `clawagents[bedrock]≥6.12.0`
+
+## 1.0.6 — 2026-07-12
+
+- Settings: guided setup cards for **OpenAI** (Official / Ollama / BAG / Fix URL → /v1) and **Gemini** (inline key + verify)
+- OpenAI provider fully supports OpenAI-compatible endpoints (including BAG as Base URL)
+- Shared `set_provider_key` + `test_compatible_endpoint` for OpenAI / BAG probes
+
+## 1.0.5 — 2026-07-12
+
+- Settings: dedicated **Bedrock Access Gateway** card — Local preset (`http://localhost:8000/api/v1`), Fix URL → `/api/v1`, inline gateway API key, Test connection
+
+## 1.0.4 — 2026-07-12
+
+- Settings: **AWS Bedrock (gateway)** provider + selectable Bedrock model IDs (Claude / Nova / GPT-OSS)
+- Bedrock requires an OpenAI-compatible **Base URL** (LiteLLM or Bedrock Access Gateway); store the gateway token via Set API key
+- clawagents: route `anthropic.*` model IDs through OpenAI provider when `base_url` is set (fixes Bedrock gateway example)
+
+## 1.0.3 — 2026-07-12
+
+- Restore ClawAgents to the right **Secondary Side Bar** (1.0.2 Activity Bar move hid the icon for many users)
+- Drag-and-drop: VS Code requires **holding Shift** to drop into a webview; placeholder/+Attach clarify this; harden URI parsing; **+Attach** file picker
+
 ## 1.0.2 — 2026-07-12
 
-- Move ClawAgents icon to the left **Activity Bar** (was Secondary Side Bar)
+- Move ClawAgents icon to the left **Activity Bar** (was Secondary Side Bar) — reverted in 1.0.3
 - Settings → **Clear API key…** / command **ClawAgents: Clear API Key…** (per provider or all)
 - Header: last checkpoint time on **Checkpoints**; context % bar on **Compact**
 - Settings panel **autosaves** (~0.5s debounce); MCP/base-URL trust prompts only when newly enabling

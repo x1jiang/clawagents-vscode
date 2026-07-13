@@ -33,7 +33,28 @@ OnEvent = Callable[[str, dict[str, Any]], None]
 # Providers that map 1:1 to a clawagents builtin profile. Selecting one in
 # settings (without an explicit model) routes model+key resolution through
 # that profile instead of the ambient PROVIDER/env defaults.
-_PROFILE_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "ollama"})
+_PROFILE_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "ollama", "bedrock"})
+
+
+def _bedrock_api_key() -> str:
+    """Gateway token for OpenAI-compatible Bedrock proxies."""
+    return (
+        (os.environ.get("BEDROCK_API_KEY") or "").strip()
+        or (os.environ.get("OPENAI_API_KEY") or "").strip()
+        or "bedrock"
+    )
+
+
+def _apply_aws_settings(settings: dict[str, Any]) -> None:
+    """Push region/profile from Settings into env for native Bedrock."""
+    region = str(settings.get("aws_region") or "").strip()
+    if region:
+        os.environ["AWS_REGION"] = region
+        os.environ.setdefault("AWS_DEFAULT_REGION", region)
+    profile = str(settings.get("aws_profile") or "").strip()
+    if profile:
+        os.environ["AWS_PROFILE"] = profile
+
 
 # os.chdir is process-global: serialize agent turns so concurrent streams
 # cannot interleave workspace switches or clobber each other's cwd.
@@ -331,6 +352,19 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     provider = str(settings.get("provider") or "auto")
     if provider.startswith("profile:"):
         kwargs["profile"] = provider.split(":", 1)[1]
+    elif provider == "bedrock":
+        _apply_aws_settings(settings)
+        if not effective_model:
+            kwargs["model"] = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        if kwargs.get("base_url"):
+            # OpenAI-compatible gateway (BAG / LiteLLM)
+            kwargs["api_key"] = _bedrock_api_key()
+        # else: native IAM — clawagents routes Bedrock model IDs via
+        # AsyncAnthropicBedrock / Converse; do not force a gateway api_key.
+    elif provider == "openai" and kwargs.get("base_url"):
+        # OpenAI-compatible endpoint (Ollama, BAG, OpenRouter, …): always pass a key.
+        key = (os.environ.get("OPENAI_API_KEY") or "").strip() or "openai"
+        kwargs["api_key"] = key
     elif provider in _PROFILE_PROVIDERS and not effective_model:
         # No explicit model: route default model/key selection through the
         # builtin profile so the provider choice actually takes effect.

@@ -12,6 +12,8 @@ node_modules/**
 esbuild.mjs
 tsconfig.json
 python/**/__pycache__/**
+python/**/.pytest_cache/**
+**/.pytest_cache/**
 **/.DS_Store
 .clawagents/**
 .gitignore

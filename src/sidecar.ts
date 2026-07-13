@@ -4,7 +4,7 @@ import * as http from "http";
 import * as net from "net";
 import * as path from "path";
 import * as vscode from "vscode";
-import { ExtensionConfig, workspaceRoot } from "./config";
+import { AWS_ENV_KEYS, ExtensionConfig, workspaceRoot } from "./config";
 import { curatedProcessEnv } from "./envCurate";
 import { ensureSidecarDeps } from "./pythonDeps";
 
@@ -17,9 +17,14 @@ export interface SidecarHandle {
 
 function redactSecrets(text: string): string {
   // Build patterns at runtime so static scanners do not treat the source as a secret.
-  const keyNames = ["OPENAI", "ANTHROPIC", "GEMINI", "GOOGLE", "GATEWAY", "TAVILY"]
+  const keyNames = ["OPENAI", "ANTHROPIC", "GEMINI", "GOOGLE", "GATEWAY", "TAVILY", "BEDROCK"]
     .map((p) => `${p}_API_KEY`)
     .join("|");
+  const awsSecret = "AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN";
+  text = text.replace(
+    new RegExp(`\\b(?:${keyNames}|${awsSecret})\\s*[=:]\\s*\\S+`, "gi"),
+    (m) => m.replace(/=.*/, "=***").replace(/:.*/, ":***"),
+  );
   const openaiPrefix = ["sk", "-"].join("");
   const googlePrefix = ["AI", "za"].join("");
   return text
@@ -125,7 +130,9 @@ export class SidecarManager {
       openai: ["OPENAI_API_KEY"],
       anthropic: ["ANTHROPIC_API_KEY"],
       gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+      bedrock: ["BEDROCK_API_KEY"],
       tavily: ["TAVILY_API_KEY"],
+      aws: [...AWS_ENV_KEYS],
     };
     for (const [prov, vars] of Object.entries(keyVars)) {
       if (vars.some((v) => apiEnv[v])) {

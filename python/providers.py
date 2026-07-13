@@ -64,7 +64,62 @@ _CATALOG: list[dict[str, Any]] = [
             {"id": "llama3.1", "label": "Llama 3.1"},
         ],
     },
+    {
+        "id": "bedrock",
+        "name": "AWS Bedrock",
+        # Native IAM uses AWS credential chain (no gateway key).
+        # BEDROCK_API_KEY is only for optional OpenAI-compatible gateway (BAG).
+        "env_key": "BEDROCK_API_KEY",
+        "base_url": "",
+        "models": [
+            {
+                "id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                "label": "Claude Sonnet 4.5 (US)",
+            },
+            {
+                "id": "us.anthropic.claude-opus-4-6-20251101-v1:0",
+                "label": "Claude Opus 4.6 (US)",
+            },
+            {
+                "id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                "label": "Claude Haiku 4.5 (US)",
+            },
+            {
+                "id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                "label": "Claude 3.5 Sonnet v2",
+            },
+            {"id": "amazon.nova-pro-v1:0", "label": "Amazon Nova Pro"},
+            {"id": "amazon.nova-lite-v1:0", "label": "Amazon Nova Lite"},
+            {"id": "amazon.nova-micro-v1:0", "label": "Amazon Nova Micro"},
+            {"id": "amazon.nova-premier-v1:0", "label": "Amazon Nova Premier"},
+            {"id": "meta.llama3-3-70b-instruct-v1:0", "label": "Llama 3.3 70B"},
+            {"id": "meta.llama3-1-70b-instruct-v1:0", "label": "Llama 3.1 70B"},
+            {"id": "meta.llama3-1-8b-instruct-v1:0", "label": "Llama 3.1 8B"},
+            {"id": "mistral.mistral-large-2407-v1:0", "label": "Mistral Large"},
+            {"id": "openai.gpt-oss-120b-1:0", "label": "GPT-OSS 120B"},
+            {"id": "openai.gpt-oss-20b-1:0", "label": "GPT-OSS 20B"},
+            {"id": "deepseek.r1-v1:0", "label": "DeepSeek R1"},
+        ],
+    },
 ]
+
+
+def _has_aws_credentials() -> bool:
+    """True when native Bedrock can use the AWS credential chain."""
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        return True
+    if os.environ.get("AWS_PROFILE") or os.environ.get("AWS_DEFAULT_PROFILE"):
+        return True
+    # Instance / task / SSO role often set region only; boto3 still resolves creds.
+    if os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"):
+        return True
+    # Shared credentials file under $HOME (common local setup).
+    home = os.path.expanduser("~")
+    for rel in (".aws/credentials", ".aws/config"):
+        path = os.path.join(home, rel)
+        if os.path.isfile(path):
+            return True
+    return False
 
 
 def build_provider_catalog() -> list[dict[str, Any]]:
@@ -74,6 +129,13 @@ def build_provider_catalog() -> list[dict[str, Any]]:
         available = True if env_key is None else bool(
             os.environ.get(str(env_key))
             or (env_key == "GEMINI_API_KEY" and os.environ.get("GOOGLE_API_KEY"))
+            or (
+                env_key == "BEDROCK_API_KEY"
+                and (
+                    os.environ.get("OPENAI_API_KEY")
+                    or _has_aws_credentials()
+                )
+            )
         )
         out.append(
             {
@@ -194,6 +256,7 @@ def verify_api_key(provider: str, *, probe: bool = False) -> dict[str, Any]:
         "openai": "OPENAI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
         "gemini": "GEMINI_API_KEY",
+        "bedrock": "BEDROCK_API_KEY",
         "ollama": None,
     }
     key_name = mapping.get(provider)
@@ -204,11 +267,47 @@ def verify_api_key(provider: str, *, probe: bool = False) -> dict[str, Any]:
     key = _sanitize_api_key(
         os.environ.get(key_name)
         or (os.environ.get("GOOGLE_API_KEY") if key_name == "GEMINI_API_KEY" else None)
+        or (os.environ.get("OPENAI_API_KEY") if key_name == "BEDROCK_API_KEY" else None)
     )
+    if provider == "bedrock" and not key:
+        if _has_aws_credentials():
+            return {
+                "ok": True,
+                "provider": provider,
+                "detail": (
+                    "Native AWS credentials detected — Base URL empty uses Bedrock IAM "
+                    "(HIPAA). Set Base URL only for BAG / LiteLLM gateway."
+                ),
+            }
+        return {
+            "ok": False,
+            "provider": provider,
+            "detail": (
+                "No AWS credentials (~/.aws or AWS_*) and no BEDROCK_API_KEY. "
+                "Configure IAM for native Bedrock, or a gateway key + Base URL."
+            ),
+        }
     if not key:
         return {"ok": False, "provider": provider, "detail": f"Missing {key_name}"}
-    source = _key_source(provider)
+    source = _key_source(provider if provider != "bedrock" else (
+        "bedrock" if os.environ.get("BEDROCK_API_KEY") else "openai"
+    ))
+    if provider == "bedrock" and not probe:
+        return {
+            "ok": True,
+            "provider": provider,
+            "detail": (
+                f"Gateway key present{source} — leave Base URL empty for native IAM, "
+                "or set it for BAG/LiteLLM"
+            ),
+        }
     if not probe:
         return {"ok": True, "provider": provider, "detail": f"Key present{source}"}
+    if provider == "bedrock":
+        return {
+            "ok": True,
+            "provider": provider,
+            "detail": f"Gateway key present{source} (live check needs Base URL Test)",
+        }
     ok, detail = _probe_key(provider, key)
     return {"ok": ok, "provider": provider, "detail": f"{detail}{source}"}

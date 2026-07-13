@@ -7,6 +7,7 @@ const SECRET_KEYS = {
   openai: "clawagents.openaiApiKey",
   anthropic: "clawagents.anthropicApiKey",
   gemini: "clawagents.geminiApiKey",
+  bedrock: "clawagents.bedrockApiKey",
 } as const;
 
 /** Search key — separate from LLM providers so it never appears as a chat provider. */
@@ -126,11 +127,31 @@ export const DOTENV_ALLOWLIST = new Set([
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
   "GOOGLE_GENAI_API_KEY",
+  "BEDROCK_API_KEY",
   "TAVILY_API_KEY",
+  // Native Amazon Bedrock (IAM / shared credentials / SSO).
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+  "AWS_PROFILE",
+  "AWS_DEFAULT_PROFILE",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
   // Intentionally omit OPENAI_BASE_URL / ANTHROPIC_BASE_URL / etc. — those
   // redirect API keys. Set base_url in ClawAgents Settings (with trust prompt).
   "CLAW_MODEL",
 ]);
+
+/** AWS env keys forwarded into the sidecar for native Bedrock. */
+export const AWS_ENV_KEYS = [
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+  "AWS_PROFILE",
+  "AWS_DEFAULT_PROFILE",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+] as const;
 
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
@@ -210,7 +231,45 @@ export class ExtensionConfig {
 
   async hasAnyApiKey(): Promise<boolean> {
     const env = await this.getApiKeyEnv();
-    return Boolean(env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY || env.GEMINI_API_KEY || env.GOOGLE_API_KEY);
+    if (
+      env.OPENAI_API_KEY ||
+      env.ANTHROPIC_API_KEY ||
+      env.GEMINI_API_KEY ||
+      env.GOOGLE_API_KEY ||
+      env.BEDROCK_API_KEY
+    ) {
+      return true;
+    }
+    return this.hasAwsCredentials();
+  }
+
+  /** Native Bedrock can run without BEDROCK_API_KEY when AWS creds exist. */
+  hasAwsCredentials(): boolean {
+    const dotenv = this.loadWorkspaceDotenv();
+    const pick = (k: string) =>
+      Boolean((dotenv[k] || process.env[k] || "").trim());
+    if (pick("AWS_ACCESS_KEY_ID") && pick("AWS_SECRET_ACCESS_KEY")) {
+      return true;
+    }
+    if (pick("AWS_PROFILE") || pick("AWS_DEFAULT_PROFILE")) {
+      return true;
+    }
+    if (pick("AWS_REGION") || pick("AWS_DEFAULT_REGION")) {
+      return true;
+    }
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      if (home) {
+        const cred = path.join(home, ".aws", "credentials");
+        const cfg = path.join(home, ".aws", "config");
+        if (fs.existsSync(cred) || fs.existsSync(cfg)) {
+          return true;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
   }
 
   async getApiKeyEnv(): Promise<Record<string, string>> {
@@ -218,6 +277,7 @@ export class ExtensionConfig {
     const openai = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.openai)) || "");
     const anthropic = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.anthropic)) || "");
     const gemini = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.gemini)) || "");
+    const bedrock = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.bedrock)) || "");
     const tavily = sanitizeApiKey((await this.secrets.get(TAVILY_SECRET_KEY)) || "");
     if (openai) {
       env.OPENAI_API_KEY = openai;
@@ -228,6 +288,9 @@ export class ExtensionConfig {
     if (gemini) {
       env.GOOGLE_API_KEY = gemini;
       env.GEMINI_API_KEY = gemini;
+    }
+    if (bedrock) {
+      env.BEDROCK_API_KEY = bedrock;
     }
     if (tavily) {
       env.TAVILY_API_KEY = tavily;
@@ -319,6 +382,7 @@ export class ExtensionConfig {
       this.clearApiKey("openai"),
       this.clearApiKey("anthropic"),
       this.clearApiKey("gemini"),
+      this.clearApiKey("bedrock"),
       this.clearTavilyApiKey(),
     ]);
   }
@@ -328,17 +392,22 @@ export class ExtensionConfig {
     type ClearChoice = {
       label: string;
       description?: string;
-      id: "openai" | "anthropic" | "gemini" | "tavily" | "all";
+      id: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily" | "all";
     };
     const choice = await vscode.window.showQuickPick<ClearChoice>(
       [
         { label: "OpenAI", id: "openai" },
         { label: "Anthropic", id: "anthropic" },
         { label: "Gemini", id: "gemini" },
+        {
+          label: "AWS Bedrock (gateway)",
+          description: "OpenAI-compatible Bedrock proxy token",
+          id: "bedrock",
+        },
         { label: "Tavily (web_search)", id: "tavily" },
         {
           label: "Clear all ClawAgents keys",
-          description: "OpenAI + Anthropic + Gemini + Tavily",
+          description: "OpenAI + Anthropic + Gemini + Bedrock + Tavily",
           id: "all",
         },
       ],
@@ -376,7 +445,7 @@ export class ExtensionConfig {
     type KeyChoice = {
       label: string;
       description?: string;
-      id: "openai" | "anthropic" | "gemini" | "tavily";
+      id: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily";
       slot: "llm" | "tavily";
     };
     const choice = await vscode.window.showQuickPick<KeyChoice>(
@@ -384,6 +453,12 @@ export class ExtensionConfig {
         { label: "OpenAI", id: "openai", slot: "llm" },
         { label: "Anthropic", id: "anthropic", slot: "llm" },
         { label: "Gemini", id: "gemini", slot: "llm" },
+        {
+          label: "AWS Bedrock (gateway)",
+          description: "Token for LiteLLM / Bedrock Access Gateway (not AWS IAM)",
+          id: "bedrock",
+          slot: "llm",
+        },
         {
           label: "Tavily (web_search)",
           description: "Enables the built-in web_search tool",
@@ -406,8 +481,15 @@ export class ExtensionConfig {
       prompt:
         choice.slot === "tavily"
           ? "Stored in VS Code SecretStorage. Get a key at https://tavily.com — enables web_search."
-          : "Stored in VS Code SecretStorage and passed to the Python sidecar.",
-      placeHolder: choice.slot === "tavily" ? "tvly-…" : undefined,
+          : choice.id === "bedrock"
+            ? "Gateway token (LiteLLM master key, Bedrock Access Gateway API key, or literal bedrock). AWS IAM stays on the gateway. Also set Base URL in Settings."
+            : "Stored in VS Code SecretStorage and passed to the Python sidecar.",
+      placeHolder:
+        choice.slot === "tavily"
+          ? "tvly-…"
+          : choice.id === "bedrock"
+            ? "bedrock or sk-…"
+            : undefined,
     });
     if (value) {
       if (choice.slot === "tavily") {

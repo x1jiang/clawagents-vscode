@@ -103,6 +103,29 @@ const FALLBACK_PROVIDERS: Provider[] = [
     name: "Ollama (local)",
     models: [{ id: "llama3.1", label: "Llama 3.1" }],
   },
+  {
+    id: "bedrock",
+    name: "AWS Bedrock",
+    models: [
+      {
+        id: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        label: "Claude Sonnet 4.5 (US)",
+      },
+      {
+        id: "us.anthropic.claude-opus-4-6-20251101-v1:0",
+        label: "Claude Opus 4.6 (US)",
+      },
+      {
+        id: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        label: "Claude Haiku 4.5 (US)",
+      },
+      { id: "amazon.nova-pro-v1:0", label: "Amazon Nova Pro" },
+      { id: "amazon.nova-lite-v1:0", label: "Amazon Nova Lite" },
+      { id: "amazon.nova-micro-v1:0", label: "Amazon Nova Micro" },
+      { id: "meta.llama3-3-70b-instruct-v1:0", label: "Llama 3.3 70B" },
+      { id: "openai.gpt-oss-120b-1:0", label: "GPT-OSS 120B" },
+    ],
+  },
 ];
 
 type SkillsPreview = {
@@ -161,6 +184,12 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [hasTavilyKey, setHasTavilyKey] = useState(false);
+  const [hasBedrockKey, setHasBedrockKey] = useState(false);
+  const [hasAwsCreds, setHasAwsCreds] = useState(false);
+  const [hasOpenAIKey, setHasOpenAIKey] = useState(false);
+  const [hasGeminiKey, setHasGeminiKey] = useState(false);
+  const [providerKeyDraft, setProviderKeyDraft] = useState("");
+  const [providerSetupMsg, setProviderSetupMsg] = useState("");
   const [sidecar, setSidecar] = useState<"stopped" | "starting" | "running" | "error">(
     "stopped",
   );
@@ -271,6 +300,18 @@ export function App() {
           if (typeof msg.hasTavilyKey === "boolean") {
             setHasTavilyKey(msg.hasTavilyKey);
           }
+          if (typeof msg.hasBedrockKey === "boolean") {
+            setHasBedrockKey(msg.hasBedrockKey);
+          }
+          if (typeof msg.hasAwsCreds === "boolean") {
+            setHasAwsCreds(msg.hasAwsCreds);
+          }
+          if (typeof msg.hasOpenAIKey === "boolean") {
+            setHasOpenAIKey(msg.hasOpenAIKey);
+          }
+          if (typeof msg.hasGeminiKey === "boolean") {
+            setHasGeminiKey(msg.hasGeminiKey);
+          }
           setSidecar(msg.sidecar);
           setChatId(msg.chatId);
           setChats(msg.chats || []);
@@ -341,6 +382,15 @@ export function App() {
           setVerifyMsg(
             `${msg.provider}: ${msg.ok ? "✓" : "✗"} ${msg.detail || (msg.ok ? "ok" : "missing")}`,
           );
+          if (msg.provider === "bedrock" || msg.provider === "openai" || msg.provider === "gemini") {
+            setProviderSetupMsg(`${msg.ok ? "✓" : "✗"} ${msg.detail || ""}`);
+            if (msg.ok && String(msg.detail || "").toLowerCase().includes("saved")) {
+              setHasApiKey(true);
+              if (msg.provider === "bedrock") setHasBedrockKey(true);
+              if (msg.provider === "openai") setHasOpenAIKey(true);
+              if (msg.provider === "gemini") setHasGeminiKey(true);
+            }
+          }
           break;
         case "diagnostics":
           setDiagnostics(msg.data);
@@ -1035,7 +1085,7 @@ export function App() {
               On a remote SSH host, install packages into the <em>remote</em> Python (
               <code>clawagents.pythonPath</code>), then Restart Sidecar:
               <pre>
-                python3 -m pip install &apos;clawagents[gemini,anthropic,mcp]&apos; fastapi uvicorn
+                python3 -m pip install &apos;clawagents[gemini,anthropic,bedrock,mcp]&apos; fastapi uvicorn
                 pydantic
               </pre>
               Details: Output panel → <em>ClawAgents Sidecar</em>
@@ -1171,7 +1221,44 @@ export function App() {
               Provider
               <select
                 value={selectedProvider}
-                onChange={(e) => setSettings((s) => ({ ...s, provider: e.target.value }))}
+                onChange={(e) => {
+                  const provider = e.target.value;
+                  setProviderKeyDraft("");
+                  setProviderSetupMsg("");
+                  setSettings((s) => {
+                    const next: Record<string, unknown> = { ...s, provider };
+                    if (provider === "bedrock") {
+                      // Native IAM by default — clear leftover BAG URL if it was
+                      // auto-filled from an older extension version.
+                      const prev = String(s.base_url || "").trim();
+                      if (
+                        !prev ||
+                        prev === "http://localhost:8000/api/v1" ||
+                        prev === "http://127.0.0.1:8000/api/v1"
+                      ) {
+                        next.base_url = "";
+                      }
+                      if (!String(s.model || "").trim()) {
+                        next.model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+                      }
+                      if (!String(s.aws_region || "").trim()) {
+                        next.aws_region = "us-east-1";
+                      }
+                    }
+                    return next;
+                  });
+                  if (provider === "bedrock") {
+                    setProviderSetupMsg(
+                      "Native AWS Bedrock (IAM). Leave Base URL empty. Optional: BAG gateway.",
+                    );
+                  } else if (provider === "openai") {
+                    setProviderSetupMsg(
+                      "OpenAI or any OpenAI-compatible endpoint (Ollama, BAG, OpenRouter, …).",
+                    );
+                  } else if (provider === "gemini") {
+                    setProviderSetupMsg("Paste a Gemini API key below (Google AI Studio).");
+                  }
+                }}
               >
                 <option value="auto">auto</option>
                 {providerCatalog.map((p) => (
@@ -1200,13 +1287,407 @@ export function App() {
               </select>
             </label>
             <label>
-              Base URL (OpenAI-compatible / Ollama)
+              Base URL (optional — OpenAI-compatible / Ollama / BAG)
               <input
                 value={String(settings.base_url || "")}
                 onChange={(e) => setSettings((s) => ({ ...s, base_url: e.target.value }))}
-                placeholder="http://localhost:11434/v1"
+                placeholder={
+                  selectedProvider === "bedrock"
+                    ? "empty = native AWS IAM · or http://localhost:8000/api/v1 for BAG"
+                    : selectedProvider === "openai"
+                      ? "empty = api.openai.com · or http://localhost:11434/v1"
+                      : selectedProvider === "gemini"
+                        ? "(unused for native Gemini — use OpenAI provider for proxies)"
+                        : "http://localhost:11434/v1"
+                }
+                disabled={selectedProvider === "gemini"}
               />
             </label>
+            {selectedProvider === "bedrock" && (
+              <div className="provider-setup">
+                <h4 className="provider-setup-title">AWS Bedrock</h4>
+                <p className="settings-hint">
+                  Default: native IAM (HIPAA-friendly). Uses ~/.aws credentials, env keys, or
+                  instance role. Install{" "}
+                  <code>pip install &apos;clawagents[bedrock]&apos;</code>. Enable model access in
+                  the Bedrock console for your account/region.
+                </p>
+                <label>
+                  AWS region
+                  <input
+                    value={String(settings.aws_region || "")}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, aws_region: e.target.value }))
+                    }
+                    placeholder="us-east-1"
+                  />
+                </label>
+                <label>
+                  AWS profile (optional)
+                  <input
+                    value={String(settings.aws_profile || "")}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, aws_profile: e.target.value }))
+                    }
+                    placeholder="default · or named profile from ~/.aws/credentials"
+                  />
+                </label>
+                <div className="provider-presets">
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      const next = {
+                        ...settings,
+                        provider: "bedrock",
+                        base_url: "",
+                        aws_region: String(settings.aws_region || "") || "us-east-1",
+                        model:
+                          String(settings.model || "") ||
+                          "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                      };
+                      setSettings(next);
+                      setModel(String(next.model));
+                      setProviderSetupMsg(
+                        "Native IAM mode — Save settings, then chat (no gateway key).",
+                      );
+                    }}
+                  >
+                    Use native IAM
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      post({ type: "verify_key", provider: "bedrock" });
+                      setProviderSetupMsg("Checking AWS / gateway credentials…");
+                    }}
+                  >
+                    Check credentials
+                  </button>
+                </div>
+                <p className="settings-hint">
+                  AWS: {hasAwsCreds ? "detected" : "not detected"}
+                  {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
+                </p>
+                <h4 className="provider-setup-title">Optional: Access Gateway</h4>
+                <p className="settings-hint">
+                  Only if you run{" "}
+                  <a
+                    href="https://github.com/aws-samples/bedrock-access-gateway"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Bedrock Access Gateway
+                  </a>{" "}
+                  / LiteLLM — set Base URL above and a gateway API key.
+                </p>
+                <div className="provider-presets">
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      const next = {
+                        ...settings,
+                        provider: "bedrock",
+                        base_url: "http://localhost:8000/api/v1",
+                        model:
+                          String(settings.model || "") ||
+                          "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                      };
+                      setSettings(next);
+                      setModel(String(next.model));
+                      setProviderSetupMsg("Local BAG URL applied — save key, then Test.");
+                    }}
+                  >
+                    Local BAG (localhost:8000)
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      const raw = String(settings.base_url || "").trim();
+                      if (!raw) {
+                        setProviderSetupMsg("Paste CloudFormation APIBaseUrl into Base URL first.");
+                        return;
+                      }
+                      const normalized = normalizeBagUrlClient(raw);
+                      setSettings((s) => ({ ...s, provider: "bedrock", base_url: normalized }));
+                      setProviderSetupMsg(`Normalized to ${normalized}`);
+                    }}
+                  >
+                    Fix URL → /api/v1
+                  </button>
+                </div>
+                <label>
+                  Gateway API key
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={providerKeyDraft}
+                    onChange={(e) => setProviderKeyDraft(e.target.value)}
+                    placeholder={
+                      hasBedrockKey
+                        ? "••••••••  (saved — paste to replace)"
+                        : "only needed for BAG / LiteLLM"
+                    }
+                  />
+                </label>
+                <div className="provider-actions">
+                  <button
+                    type="button"
+                    className="primary tiny"
+                    disabled={!providerKeyDraft.trim()}
+                    onClick={() => {
+                      setProviderSetupMsg("Saving gateway key…");
+                      post({
+                        type: "set_provider_key",
+                        provider: "bedrock",
+                        apiKey: providerKeyDraft.trim(),
+                      });
+                      setProviderKeyDraft("");
+                    }}
+                  >
+                    Save gateway key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      const base = String(settings.base_url || "").trim();
+                      if (!base) {
+                        setProviderSetupMsg("Set Base URL first (or click Local BAG).");
+                        return;
+                      }
+                      setProviderSetupMsg("Testing gateway…");
+                      post({
+                        type: "test_compatible_endpoint",
+                        baseUrl: base,
+                        apiKey: providerKeyDraft.trim() || undefined,
+                        style: "bag",
+                        provider: "bedrock",
+                      });
+                    }}
+                  >
+                    Test gateway
+                  </button>
+                </div>
+                <p className="settings-hint">
+                  Gateway key: {hasBedrockKey ? "saved" : "not set"}
+                </p>
+              </div>
+            )}
+            {selectedProvider === "openai" && (
+              <div className="provider-setup">
+                <h4 className="provider-setup-title">OpenAI / compatible endpoint</h4>
+                <p className="settings-hint">
+                  Official OpenAI, or any OpenAI-compatible proxy: Ollama, vLLM, OpenRouter,
+                  LiteLLM, or Bedrock Access Gateway.
+                </p>
+                <div className="provider-presets">
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      setSettings((s) => ({
+                        ...s,
+                        provider: "openai",
+                        base_url: "",
+                        model: String(s.model || "") || "gpt-5.6-sol",
+                      }));
+                      setProviderSetupMsg("Official OpenAI (api.openai.com) — save API key below.");
+                    }}
+                  >
+                    Official OpenAI
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      setSettings((s) => ({
+                        ...s,
+                        provider: "openai",
+                        base_url: "http://localhost:11434/v1",
+                        model: "llama3.1",
+                      }));
+                      setModel("llama3.1");
+                      setProviderSetupMsg("Ollama preset — key optional (use ollama).");
+                    }}
+                  >
+                    Ollama
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    title="Point OpenAI provider at local Bedrock Access Gateway"
+                    onClick={() => {
+                      setSettings((s) => ({
+                        ...s,
+                        provider: "openai",
+                        base_url: "http://localhost:8000/api/v1",
+                        model:
+                          String(s.model || "") ||
+                          "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                      }));
+                      setProviderSetupMsg(
+                        "BAG via OpenAI-compatible client — save the gateway API key as OpenAI key.",
+                      );
+                    }}
+                  >
+                    BAG (localhost:8000)
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      const raw = String(settings.base_url || "").trim();
+                      if (!raw) {
+                        setProviderSetupMsg("Paste a host or URL into Base URL first.");
+                        return;
+                      }
+                      const normalized = normalizeOpenAIUrlClient(raw);
+                      setSettings((s) => ({ ...s, provider: "openai", base_url: normalized }));
+                      setProviderSetupMsg(`Normalized to ${normalized}`);
+                    }}
+                  >
+                    Fix URL → /v1
+                  </button>
+                </div>
+                <label>
+                  API key (OpenAI or gateway token)
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={providerKeyDraft}
+                    onChange={(e) => setProviderKeyDraft(e.target.value)}
+                    placeholder={
+                      hasOpenAIKey
+                        ? "••••••••  (saved — paste to replace)"
+                        : "sk-… / gateway token / ollama"
+                    }
+                  />
+                </label>
+                <div className="provider-actions">
+                  <button
+                    type="button"
+                    className="primary tiny"
+                    disabled={!providerKeyDraft.trim()}
+                    onClick={() => {
+                      setProviderSetupMsg("Saving OpenAI key…");
+                      post({
+                        type: "set_provider_key",
+                        provider: "openai",
+                        apiKey: providerKeyDraft.trim(),
+                      });
+                      setProviderKeyDraft("");
+                    }}
+                  >
+                    Save API key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      const base = String(settings.base_url || "").trim();
+                      if (!base) {
+                        post({ type: "verify_key", provider: "openai" });
+                        setProviderSetupMsg("Verifying official OpenAI key…");
+                        return;
+                      }
+                      setProviderSetupMsg("Testing compatible endpoint…");
+                      post({
+                        type: "test_compatible_endpoint",
+                        baseUrl: base,
+                        apiKey: providerKeyDraft.trim() || undefined,
+                        style: base.includes("/api/v1") ? "bag" : "openai",
+                        provider: "openai",
+                      });
+                    }}
+                  >
+                    Test connection
+                  </button>
+                </div>
+                <p className="settings-hint">
+                  Key: {hasOpenAIKey ? "saved" : "not set"}
+                  {String(settings.base_url || "").trim()
+                    ? ` · endpoint ${String(settings.base_url)}`
+                    : " · official api.openai.com"}
+                  {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
+                </p>
+              </div>
+            )}
+            {selectedProvider === "gemini" && (
+              <div className="provider-setup">
+                <h4 className="provider-setup-title">Google Gemini</h4>
+                <p className="settings-hint">
+                  Native Gemini API (Google AI Studio). For an OpenAI-compatible Gemini proxy,
+                  switch Provider to OpenAI and set Base URL to the proxy.
+                </p>
+                <label>
+                  Gemini API key
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={providerKeyDraft}
+                    onChange={(e) => setProviderKeyDraft(e.target.value)}
+                    placeholder={
+                      hasGeminiKey
+                        ? "••••••••  (saved — paste to replace)"
+                        : "AIza… from Google AI Studio"
+                    }
+                  />
+                </label>
+                <div className="provider-actions">
+                  <button
+                    type="button"
+                    className="primary tiny"
+                    disabled={!providerKeyDraft.trim()}
+                    onClick={() => {
+                      setProviderSetupMsg("Saving Gemini key…");
+                      post({
+                        type: "set_provider_key",
+                        provider: "gemini",
+                        apiKey: providerKeyDraft.trim(),
+                      });
+                      setProviderKeyDraft("");
+                    }}
+                  >
+                    Save API key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      setProviderSetupMsg("Verifying Gemini key…");
+                      post({ type: "verify_key", provider: "gemini" });
+                    }}
+                  >
+                    Verify key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    title="Use OpenAI provider + BAG for Bedrock models instead"
+                    onClick={() => {
+                      setSettings((s) => ({
+                        ...s,
+                        provider: "openai",
+                        base_url: "http://localhost:8000/api/v1",
+                      }));
+                      setProviderSetupMsg(
+                        "Switched to OpenAI + BAG — Gemini is not served by Bedrock Access Gateway.",
+                      );
+                    }}
+                  >
+                    Use BAG via OpenAI…
+                  </button>
+                </div>
+                <p className="settings-hint">
+                  Key: {hasGeminiKey ? "saved" : "not set"}
+                  {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
+                </p>
+              </div>
+            )}
             <label>
               Default mode
               <select
@@ -1583,7 +2064,7 @@ export function App() {
             <button
               type="button"
               className="primary"
-              title="Prompts for OpenAI / Anthropic / Gemini / Tavily; stored encrypted in VS Code SecretStorage. Workspace .env overrides SecretStorage when both are set."
+              title="Prompts for OpenAI / Anthropic / Gemini / Bedrock gateway / Tavily; stored encrypted in VS Code SecretStorage. Workspace .env overrides SecretStorage when both are set."
               onClick={() => {
                 setVerifyMsg("Enter the key in the dialog at the top of the window…");
                 post({ type: "set_api_key" });
@@ -1594,7 +2075,7 @@ export function App() {
             <button
               type="button"
               className="ghost"
-              title="Remove OpenAI / Anthropic / Gemini / Tavily keys from VS Code SecretStorage"
+              title="Remove OpenAI / Anthropic / Gemini / Bedrock / Tavily keys from VS Code SecretStorage"
               onClick={() => {
                 setVerifyMsg("Choose which key to clear…");
                 post({ type: "clear_api_key" });
@@ -2069,6 +2550,15 @@ export function App() {
               <button
                 type="button"
                 className="ghost tiny"
+                disabled={busy}
+                title="Pick files to attach as @path refs"
+                onClick={() => post({ type: "pick_attach_files" })}
+              >
+                +Attach
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
                 disabled={busy || !items.length}
                 title="Regenerate the last reply"
                 onClick={() => post({ type: "regenerate" })}
@@ -2114,6 +2604,20 @@ export function App() {
                 const uris = collectDropUris(e.dataTransfer);
                 if (uris.length) {
                   post({ type: "attach_uris", uris });
+                } else {
+                  // VS Code disables webview pointer-events during drag unless
+                  // Shift is held — empty drops usually mean that restriction.
+                  setItems((prev) => {
+                    const next = [...prev];
+                    const last = next[next.length - 1];
+                    const text =
+                      "Hold Shift while dropping files here (VS Code), or use +Attach.";
+                    if (last?.kind === "status") {
+                      next[next.length - 1] = { kind: "status", text };
+                      return next;
+                    }
+                    return [...next, { kind: "status", text }];
+                  });
                 }
               }}
             >
@@ -2121,7 +2625,7 @@ export function App() {
                 ref={textareaRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={`${planAct === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · drop files · ↵ send · ⇧↵ newline · Esc stop`}
+                placeholder={`${planAct === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
                 rows={3}
                 onKeyDown={(e) => {
                   // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
@@ -2206,10 +2710,55 @@ function looksLikeDiff(text: string): boolean {
   return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
 }
 
+/** Client-side mirror of extension `normalizeBagBaseUrl` for the Fix URL button. */
+function normalizeBagUrlClient(raw: string): string {
+  let text = (raw || "").trim().replace(/\/+$/, "");
+  if (!text) {
+    return "http://localhost:8000/api/v1";
+  }
+  text = text.replace(/\/chat\/completions$/i, "").replace(/\/models$/i, "");
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ? text : `http://${text}`;
+  try {
+    const u = new URL(withScheme);
+    const path = (u.pathname || "/").replace(/\/+$/, "") || "/";
+    if (path === "/" || path === "") {
+      u.pathname = "/api/v1";
+    } else if (path === "/v1" || path === "/api") {
+      u.pathname = "/api/v1";
+    }
+    return u.toString().replace(/\/+$/, "");
+  } catch {
+    return text;
+  }
+}
+
+/** Client-side mirror for OpenAI-compatible …/v1 endpoints. */
+function normalizeOpenAIUrlClient(raw: string): string {
+  let text = (raw || "").trim().replace(/\/+$/, "");
+  if (!text) {
+    return "http://localhost:11434/v1";
+  }
+  text = text.replace(/\/chat\/completions$/i, "").replace(/\/models$/i, "");
+  const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ? text : `http://${text}`;
+  try {
+    const u = new URL(withScheme);
+    const path = (u.pathname || "/").replace(/\/+$/, "") || "/";
+    if (path === "/" || path === "") {
+      u.pathname = "/v1";
+    } else if (path === "/api") {
+      u.pathname = "/v1";
+    }
+    // Keep /api/v1 (BAG) as-is when using OpenAI provider against BAG.
+    return u.toString().replace(/\/+$/, "");
+  } catch {
+    return text;
+  }
+}
+
 /** Collect file URIs from a VS Code explorer / OS drag onto the composer. */
 function collectDropUris(dt: DataTransfer): string[] {
   const found: string[] = [];
-  const push = (raw: string) => {
+  const pushLine = (raw: string) => {
     for (const line of raw.split(/\r?\n/)) {
       const t = line.trim();
       if (t && !t.startsWith("#")) {
@@ -2217,17 +2766,40 @@ function collectDropUris(dt: DataTransfer): string[] {
       }
     }
   };
-  for (const type of [
+  const pushPayload = (type: string, data: string) => {
+    if (!data) {
+      return;
+    }
+    const lower = type.toLowerCase();
+    // VS Code explorer uses JSON string arrays for ResourceURLs.
+    if (lower === "resourceurls" || data.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(data) as unknown;
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (typeof item === "string" && item.trim()) {
+              found.push(item.trim());
+            }
+          }
+          return;
+        }
+      } catch {
+        /* fall through to line split */
+      }
+    }
+    pushLine(data);
+  };
+  const types = new Set<string>([
     "application/vnd.code.uri-list",
     "text/uri-list",
     "ResourceURLs",
+    "resourceurls",
     "text/plain",
-  ]) {
+    ...Array.from(dt.types ?? []),
+  ]);
+  for (const type of types) {
     try {
-      const data = dt.getData(type);
-      if (data) {
-        push(data);
-      }
+      pushPayload(type, dt.getData(type));
     } catch {
       /* ignore */
     }

@@ -33,6 +33,10 @@ export type HostToWebview =
       caveman?: boolean;
       hasApiKey: boolean;
       hasTavilyKey?: boolean;
+      hasBedrockKey?: boolean;
+      hasAwsCreds?: boolean;
+      hasOpenAIKey?: boolean;
+      hasGeminiKey?: boolean;
       sidecar: "stopped" | "running";
       chatId?: string;
       chats?: ChatSummary[];
@@ -176,6 +180,7 @@ export type WebviewToHost =
       kind: "file" | "selection" | "problems" | "editors" | "terminal" | "git";
     }
   | { type: "attach_uris"; uris: string[] }
+  | { type: "pick_attach_files" }
   | { type: "open_file"; path: string; line?: number }
   | { type: "diff_snapshot"; path: string; snapshotId?: string; snapshotRel?: string }
   | { type: "restore_snapshot"; snapshotId: string; rel: string }
@@ -189,6 +194,20 @@ export type WebviewToHost =
   | { type: "pick_skill_dir" }
   | { type: "verify_key"; provider: string }
   | { type: "set_api_key" }
+  | { type: "set_bedrock_key"; apiKey: string }
+  | {
+      type: "set_provider_key";
+      provider: "openai" | "anthropic" | "gemini" | "bedrock";
+      apiKey: string;
+    }
+  | { type: "test_bedrock_gateway"; baseUrl: string; apiKey?: string }
+  | {
+      type: "test_compatible_endpoint";
+      baseUrl: string;
+      apiKey?: string;
+      style?: "openai" | "bag";
+      provider?: string;
+    }
   | { type: "clear_api_key" }
   | { type: "load_diagnostics" }
   | { type: "load_stats" }

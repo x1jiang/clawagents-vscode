@@ -1,8 +1,8 @@
 {
   "name": "clawagents",
   "displayName": "ClawAgents",
-  "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, or local models.",
-  "version": "1.0.2",
+  "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
+  "version": "1.0.7",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -42,7 +42,7 @@
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "clawagents",
           "title": "ClawAgents",
@@ -69,8 +69,8 @@
       },
       {
         "command": "clawagents.toggleChat",
-        "title": "ClawAgents: Toggle Chat Panel",
-        "icon": "$(layout-sidebar-left)"
+        "title": "ClawAgents: Toggle Right Panel",
+        "icon": "$(layout-sidebar-right)"
       },
       {
         "command": "clawagents.newChat",
@@ -105,7 +105,7 @@
       },
       {
         "command": "clawagents.setApiKey",
-        "title": "ClawAgents: Set API Key (OpenAI / Anthropic / Gemini / Tavily)"
+        "title": "ClawAgents: Set API Key (OpenAI / Anthropic / Gemini / Bedrock / Tavily)"
       },
       {
         "command": "clawagents.clearApiKey",
@@ -181,7 +181,7 @@
         "clawagents.model": {
           "type": "string",
           "default": "",
-          "description": "Optional model override (e.g. gpt-4o, gemini-2.5-flash). Empty uses clawagents defaults."
+          "description": "Optional model override (e.g. gpt-4o, gemini-2.5-flash, us.anthropic.claude-sonnet-4-5-20250929-v1:0). Empty uses clawagents defaults."
         },
         "clawagents.provider": {
           "type": "string",
@@ -189,6 +189,7 @@
             "openai",
             "anthropic",
             "gemini",
+            "bedrock",
             "auto"
           ],
           "default": "auto",

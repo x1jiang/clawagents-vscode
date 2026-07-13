@@ -39,9 +39,9 @@ def run_diagnostics() -> dict[str, Any]:
     provider = settings.get("provider") or "auto"
     if provider == "auto":
         any_key = any(
-            verify_api_key(p)["ok"] for p in ("openai", "anthropic", "gemini", "ollama")
+            verify_api_key(p)["ok"] for p in ("openai", "anthropic", "gemini", "bedrock", "ollama")
         )
-        add("api_key", any_key, "at least one provider key or ollama")
+        add("api_key", any_key, "at least one provider key, bedrock gateway, or ollama")
     else:
         v = verify_api_key(str(provider))
         add("api_key", bool(v["ok"]), v.get("detail", ""))
@@ -71,6 +71,16 @@ def run_diagnostics() -> dict[str, Any]:
         "checks": checks,
         "env_keys_present": {
             k: bool(os.environ.get(k))
-            for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+            for k in (
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "GEMINI_API_KEY",
+                "GOOGLE_API_KEY",
+                "BEDROCK_API_KEY",
+                "AWS_REGION",
+                "AWS_DEFAULT_REGION",
+                "AWS_PROFILE",
+                "AWS_ACCESS_KEY_ID",
+            )
         },
     }

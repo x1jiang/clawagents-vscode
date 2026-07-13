@@ -1,6 +1,7 @@
 /** Per-model context-window sizes for the context meter. */
 
 const WINDOWS: Array<[string, number]> = [
+  ["gpt-5.6", 1_050_000],
   ["gpt-5.5", 400_000],
   ["gpt-5.4", 400_000],
   ["gpt-5.2", 400_000],
@@ -14,6 +15,7 @@ const WINDOWS: Array<[string, number]> = [
   ["claude-opus-4", 200_000],
   ["claude-sonnet-4", 200_000],
   ["claude-haiku-4", 200_000],
+  ["gemini-3.5", 1_000_000],
   ["gemini-3", 1_000_000],
   ["gemini-2.5", 1_000_000],
   ["gemini-2.0", 1_000_000],
