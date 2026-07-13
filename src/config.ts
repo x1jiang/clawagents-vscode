@@ -547,21 +547,53 @@ function resolvedTerminal(): vscode.Terminal | undefined {
   return vscode.window.activeTerminal ?? _lastTerminal ?? vscode.window.terminals[0];
 }
 
+/** Paths whose body must never be auto-injected into prompts (secrets). */
+export function isSensitiveEditorPath(relOrName: string): boolean {
+  const base = (relOrName.split(/[/\\]/).pop() || relOrName).toLowerCase();
+  if (/^\.env(\..+)?$/.test(base)) {
+    return true;
+  }
+  if (/\.(pem|key|p12|pfx|p8)$/.test(base)) {
+    return true;
+  }
+  if (/^(id_rsa|id_ed25519|id_ecdsa)(\.pub)?$/.test(base)) {
+    return true;
+  }
+  if (
+    base === ".npmrc" ||
+    base === ".netrc" ||
+    base === "credentials" ||
+    base === "credentials.json" ||
+    base === "secrets.json" ||
+    base === "auth.json" ||
+    /service[_-]?account/.test(base)
+  ) {
+    return true;
+  }
+  return /(?:^|[._-])(secret|secrets|credential|credentials)(?:[._-]|$)/.test(base);
+}
+
 export function buildEditorContext(): string {
   const parts: string[] = [];
   const editor = resolvedEditor();
   if (editor) {
     const rel = vscode.workspace.asRelativePath(editor.document.uri);
-    const sel = editor.document.getText(editor.selection);
     const line = editor.selection.active.line + 1;
     parts.push(`Active file: ${rel}:${line}`);
-    if (sel.trim()) {
-      parts.push(`Selected text:\n\`\`\`${rel}\n${sel}\n\`\`\``);
+    if (isSensitiveEditorPath(rel)) {
+      parts.push(
+        `(Content omitted — ${rel} looks like a secrets file. Use +File only if you intentionally want to share it.)`,
+      );
     } else {
-      const start = Math.max(0, editor.selection.active.line - 20);
-      const end = Math.min(editor.document.lineCount, editor.selection.active.line + 21);
-      const snippet = editor.document.getText(new vscode.Range(start, 0, end, 0));
-      parts.push(`Nearby code (±20 lines):\n\`\`\`${rel}\n${snippet}\n\`\`\``);
+      const sel = editor.document.getText(editor.selection);
+      if (sel.trim()) {
+        parts.push(`Selected text:\n\`\`\`${rel}\n${sel}\n\`\`\``);
+      } else {
+        const start = Math.max(0, editor.selection.active.line - 20);
+        const end = Math.min(editor.document.lineCount, editor.selection.active.line + 21);
+        const snippet = editor.document.getText(new vscode.Range(start, 0, end, 0));
+        parts.push(`Nearby code (±20 lines):\n\`\`\`${rel}\n${snippet}\n\`\`\``);
+      }
     }
   }
 
@@ -705,8 +737,14 @@ export function wrapSelectionBlock(): string | undefined {
   if (!editor) {
     return undefined;
   }
-  const text = editor.document.getText(editor.selection);
   const rel = vscode.workspace.asRelativePath(editor.document.uri);
+  if (isSensitiveEditorPath(rel)) {
+    return (
+      `Selected from \`${rel}\` (content omitted — secrets file). ` +
+      `Attach intentionally only if you need the agent to see it.\n\n`
+    );
+  }
+  const text = editor.document.getText(editor.selection);
   if (text.trim()) {
     return `Selected from \`${rel}\`:\n\`\`\`${rel}\n${text}\n\`\`\`\n\n`;
   }

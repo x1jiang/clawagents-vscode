@@ -46,6 +46,7 @@ export type HostToWebview =
       diagnostics?: unknown;
       stats?: unknown;
       mcp?: unknown[];
+      includeContextByDefault?: boolean;
     }
   | { type: "status"; message: string }
   | { type: "user_echo"; text: string }

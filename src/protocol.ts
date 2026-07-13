@@ -48,6 +48,8 @@ export type HostToWebview =
       diagnostics?: unknown;
       stats?: unknown;
       mcp?: unknown[];
+      /** Prefer Settings / clawagents.includeContextByDefault for the Context checkbox. */
+      includeContextByDefault?: boolean;
     }
   | { type: "status"; message: string }
   | { type: "user_echo"; text: string }

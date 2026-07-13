@@ -43,7 +43,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.model` | *(empty)* | Model override |
 | `clawagents.provider` | `auto` | Preferred provider for credential selection |
 | `clawagents.defaultMode` | `auto` | Default permission mode |
-| `clawagents.includeContextByDefault` | `true` | Attach active editor context |
+| `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
 | `clawagents.contextMode` | `true` | Context Mode tools (needs `npm install -g context-mode`) |
 
 Sidebar **Settings** also cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace).

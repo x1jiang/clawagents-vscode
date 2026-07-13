@@ -230,7 +230,7 @@ export function App() {
   });
   const [caveman, setCaveman] = useState(false);
   const [autoApproveOpen, setAutoApproveOpen] = useState(false);
-  const [includeContext, setIncludeContext] = useState(true);
+  const [includeContext, setIncludeContext] = useState(false);
   const [busy, setBusy] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [hasTavilyKey, setHasTavilyKey] = useState(false);
@@ -367,6 +367,9 @@ export function App() {
           }
           if (typeof msg.hasGeminiKey === "boolean") {
             setHasGeminiKey(msg.hasGeminiKey);
+          }
+          if (typeof msg.includeContextByDefault === "boolean") {
+            setIncludeContext(msg.includeContextByDefault);
           }
           setSidecar(msg.sidecar);
           setChatId(msg.chatId);
@@ -2846,7 +2849,10 @@ export function App() {
                   </button>
                 </div>
               </div>
-              <label className="check">
+              <label
+                className="check"
+                title="Attach active editor snippet to the model (not shown in chat history; .env and other secret files are omitted)"
+              >
                 <input
                   type="checkbox"
                   checked={includeContext}

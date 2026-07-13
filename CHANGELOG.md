@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.26 — 2026-07-13
+
+- Fix: auto editor Context is no longer written into chat history (only what you typed is shown)
+- Fix: `.env` and other secret-like files are omitted from auto Context / +Sel snippets
+- Context checkbox defaults off (`clawagents.includeContextByDefault`); check it when you want editor snippets
+
 ## 1.0.25 — 2026-07-13
 
 - Skills: require `clawagents>=6.12.7` for dynamic skill-catalog budget (~1.5% of context, floor 4k / ceiling 16k chars) with description-first truncation

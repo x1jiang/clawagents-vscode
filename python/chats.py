@@ -70,8 +70,22 @@ def _apply_aws_settings(settings: dict[str, Any]) -> None:
 _turn_lock = threading.Lock()
 
 
+# Host appends editor snippets under this marker (see webviewProvider.runTask).
+_EDITOR_CONTEXT_MARK = "\n\n---\nEditor context:\n"
+
+
+def display_user_text(content: str) -> str:
+    """User-visible text only — strip auto-injected editor context from the bubble."""
+    text = content or ""
+    idx = text.find(_EDITOR_CONTEXT_MARK)
+    if idx >= 0:
+        return text[:idx].rstrip()
+    return text
+
+
 def _title_from_text(text: str) -> str:
-    line = (text or "").strip().splitlines()[0] if text else "New chat"
+    visible = display_user_text(text)
+    line = visible.strip().splitlines()[0] if visible else "New chat"
     line = re.sub(r"\s+", " ", line)[:60]
     return line or "New chat"
 
@@ -463,7 +477,9 @@ async def run_chat_turn(
     else:
         patch_chat(chat_id, mode=mode)
 
-    append_ui_event(chat_id, {"kind": "user", "text": content})
+    # Chat history shows only what the user typed; full `content` (with optional
+    # editor context) still goes to the agent below.
+    append_ui_event(chat_id, {"kind": "user", "text": display_user_text(content)})
 
     augmented = build_augmented_task(chat_id, content, settings)
     session = JsonlFileSession(chat_id, dir_path=SESSIONS_MEMORY_DIR)

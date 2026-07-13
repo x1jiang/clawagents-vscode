@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -242,8 +242,8 @@
         },
         "clawagents.includeContextByDefault": {
           "type": "boolean",
-          "default": true,
-          "description": "Attach active editor context to each send."
+          "default": false,
+          "description": "When true, the Context checkbox starts checked and attaches active-editor snippets to each send (never shown in chat history; .env and other secret files are omitted)."
         },
         "clawagents.contextMode": {
           "type": "boolean",

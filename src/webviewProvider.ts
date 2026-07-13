@@ -373,6 +373,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       diagnostics,
       stats,
       mcp,
+      includeContextByDefault: this.config.includeContextByDefault,
     });
   }
 
@@ -1486,12 +1487,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 }
 
+function stripEditorContextForDisplay(text: string): string {
+  const mark = "\n\n---\nEditor context:\n";
+  const idx = text.indexOf(mark);
+  return idx >= 0 ? text.slice(0, idx).replace(/\s+$/, "") : text;
+}
+
 function eventsToItems(events: Array<Record<string, unknown>>): unknown[] {
   const items: unknown[] = [];
   for (const ev of events) {
     const kind = ev.kind;
     if (kind === "user") {
-      items.push({ kind: "user", text: String(ev.text || "") });
+      items.push({
+        kind: "user",
+        text: stripEditorContextForDisplay(String(ev.text || "")),
+      });
     } else if (kind === "assistant") {
       items.push({ kind: "assistant", text: String(ev.text || "") });
     } else if (kind === "done") {
