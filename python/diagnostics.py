@@ -6,10 +6,12 @@ import importlib
 import os
 import sys
 from typing import Any
+from urllib.parse import urlparse
 
 from paths import MODEL, WORKSPACE
 from providers import verify_api_key
 from settings_store import load_settings
+from url_trust import is_trusted_base_url
 
 
 def run_diagnostics() -> dict[str, Any]:
@@ -47,6 +49,41 @@ def run_diagnostics() -> dict[str, Any]:
         add("api_key", bool(v["ok"]), v.get("detail", ""))
 
     add("model", True, settings.get("model") or MODEL or "default")
+
+    base_url = str(settings.get("base_url") or "").strip()
+    trusted_custom = bool(
+        base_url
+        and not is_trusted_base_url(base_url)
+        and settings.get("trust_custom_base_url")
+    )
+    if trusted_custom:
+        host = urlparse(base_url if "://" in base_url else f"https://{base_url}").netloc or base_url
+        add("custom_base_url", True, host)
+        wire = str(settings.get("wire_api") or "auto").strip().lower()
+        if wire in ("", "auto"):
+            add(
+                "wire_api",
+                True,
+                "auto — set Wire API to Responses if this gateway 404s on chat/completions",
+            )
+        else:
+            add("wire_api", True, wire)
+        if base_url.lower().startswith("https://") and settings.get("ssl_verify") is not False:
+            add(
+                "ssl_verify",
+                False,
+                "Verify TLS is on for a custom HTTPS gateway — uncheck if the host uses a private CA",
+            )
+        else:
+            add(
+                "ssl_verify",
+                True,
+                "off" if settings.get("ssl_verify") is False else "on",
+            )
+    elif base_url:
+        add("custom_base_url", True, "localhost / loopback")
+    else:
+        add("custom_base_url", True, "none (provider default)")
 
     mcp_path = WORKSPACE / ".clawagents" / "mcp.json"
     add("mcp_config", mcp_path.is_file(), str(mcp_path) if mcp_path.is_file() else "none")

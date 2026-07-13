@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.21 — 2026-07-13
+
+- Harden settings: single source of truth (`DEFAULTS` + `sanitize_patch`); remove duplicate `SettingsBody` so new keys cannot be silently dropped
+- Persist `agent_mode` / `action_mode`; webview verifies patched keys after save
+- Diagnostics warn on custom HTTPS + TLS verify on / Wire API auto; chat preflight if custom gateway has no model
+
 ## 1.0.20 — 2026-07-13
 
 - Fix Settings save: `wire_api`, `reasoning_effort`, and `ssl_verify` were dropped by the API body schema (UI snapped back; chat kept hitting Chat Completions → 404 on Responses-only gateways)

@@ -416,36 +416,6 @@ class AskUserBody(BaseModel):
     skip: bool = False
 
 
-class SettingsBody(BaseModel):
-    model: str | None = None
-    provider: str | None = None
-    base_url: str | None = None
-    default_mode: str | None = None
-    telemetry: bool | None = None
-    trajectory: bool | None = None
-    learn: bool | None = None
-    browser_tools: bool | None = None
-    mcp_enabled: bool | None = None
-    mcp_trust_workspace: bool | None = None
-    context_mode: bool | None = None
-    workspace_system_prompt: str | None = None
-    skill_dirs: list[str] | None = None
-    skill_auto_discover: bool | None = None
-    skill_ignore_dirs: list[str] | None = None
-    skill_exclude: list[str] | None = None
-    allow_full_access: bool | None = None
-    allow_external_skill_dirs: bool | None = None
-    trust_custom_base_url: bool | None = None
-    aws_region: str | None = None
-    aws_profile: str | None = None
-    # OpenAI reasoning / transport — must be on the body or PUT silently drops them.
-    reasoning_effort: str | None = None
-    wire_api: str | None = None
-    ssl_verify: bool | None = None
-
-    model_config = {"extra": "ignore"}
-
-
 class CreateChatBody(BaseModel):
     title: str | None = None
     mode: Mode = "auto"
@@ -663,17 +633,22 @@ def create_app() -> FastAPI:
         return load_settings()
 
     @app.put("/settings")
-    async def put_settings(body: SettingsBody, request: Request):
+    async def put_settings(body: dict[str, Any], request: Request):
         denied = _auth_or_401(request)
         if denied:
             return denied
-        # exclude_unset: partial patches (effort / wire_api only) must not wipe
-        # other keys. Keep explicit False (ssl_verify) via exclude_none=False.
-        from settings_store import DEFAULTS
+        # Single source of truth: DEFAULTS / sanitize_patch — no duplicate Pydantic
+        # schema that can silently drop new keys (wire_api / effort / ssl_verify).
+        from settings_store import sanitize_patch, save_settings as _save
 
-        raw = body.model_dump(exclude_unset=True)
-        patch = {k: v for k, v in raw.items() if k in DEFAULTS}
-        return save_settings(patch)
+        clean, dropped = sanitize_patch(body if isinstance(body, dict) else {})
+        if dropped:
+            import logging
+
+            logging.getLogger("clawagents.vscode").warning(
+                "PUT /settings dropped unknown keys: %s", ", ".join(sorted(dropped))
+            )
+        return _save(clean)
 
     @app.get("/skills")
     async def get_skills(request: Request):

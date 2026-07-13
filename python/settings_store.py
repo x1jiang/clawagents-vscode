@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 from paths import SETTINGS_FILE, atomic_write_json, read_json, under_workspace, workspace_rel
 from url_trust import is_trusted_base_url
+
+logger = logging.getLogger(__name__)
 
 DEFAULTS: dict[str, Any] = {
     "model": "",
@@ -46,7 +49,27 @@ DEFAULTS: dict[str, Any] = {
     "wire_api": "auto",
     # TLS verify for custom base_url (False for private-CA / corporate proxies).
     "ssl_verify": True,
+    # Library agent mode override (empty = use chat mode from the client).
+    "agent_mode": "",
+    # tools (default) | code — forwarded when the installed clawagents supports it.
+    "action_mode": "tools",
 }
+
+KNOWN_KEYS: frozenset[str] = frozenset(DEFAULTS)
+
+
+def sanitize_patch(patch: dict[str, Any] | None) -> tuple[dict[str, Any], list[str]]:
+    """Keep only known settings keys; return (clean_patch, dropped_keys)."""
+    if not isinstance(patch, dict):
+        return {}, []
+    clean: dict[str, Any] = {}
+    dropped: list[str] = []
+    for key, value in patch.items():
+        if key in KNOWN_KEYS:
+            clean[key] = value
+        elif not str(key).startswith("_"):
+            dropped.append(str(key))
+    return clean, dropped
 
 
 def _env_defaults() -> dict[str, Any]:
@@ -68,20 +91,25 @@ def load_settings() -> dict[str, Any]:
         data = {}
     merged = dict(DEFAULTS)
     merged.update(_env_defaults())
-    merged.update({k: v for k, v in data.items() if k in DEFAULTS or k in data})
+    # Only known keys — prevents schema drift / unknown junk from sticking.
+    merged.update({k: v for k, v in data.items() if k in KNOWN_KEYS})
     return merged
 
 
 def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
+    clean, dropped = sanitize_patch(patch)
+    if dropped:
+        logger.warning("settings patch dropped unknown keys: %s", ", ".join(sorted(dropped)))
+
     current = load_settings()
-    current.update(patch)
+    current.update(clean)
 
     base_url = str(current.get("base_url") or "").strip()
     if base_url and not is_trusted_base_url(base_url):
         if not current.get("trust_custom_base_url"):
             # Refuse to persist an untrusted remote endpoint without explicit trust.
             current["base_url"] = ""
-            patch = {**patch, "base_url": ""}
+            clean = {**clean, "base_url": ""}
     elif not base_url:
         current["trust_custom_base_url"] = False
 
@@ -98,5 +126,7 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
                     kept.append(raw.strip())
             current["skill_dirs"] = kept
 
-    atomic_write_json(SETTINGS_FILE, current)
-    return current
+    # Persist only known keys (stable file shape).
+    to_write = {k: current[k] for k in DEFAULTS}
+    atomic_write_json(SETTINGS_FILE, to_write)
+    return load_settings()

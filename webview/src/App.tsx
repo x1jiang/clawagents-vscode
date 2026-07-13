@@ -181,6 +181,38 @@ function normalizeSettingsForSave(settings: Record<string, unknown>): Record<str
   };
 }
 
+function settingsPatchMismatches(
+  patch: Record<string, unknown>,
+  saved: Record<string, unknown>,
+): string[] {
+  // Server may intentionally rewrite base_url / skill_dirs on full saves.
+  // Always verify small patches; on large autosaves only check critical keys.
+  const critical = new Set([
+    "wire_api",
+    "reasoning_effort",
+    "ssl_verify",
+    "model",
+    "provider",
+    "agent_mode",
+    "action_mode",
+  ]);
+  const keys = Object.keys(patch).filter((k) => !k.startsWith("_"));
+  const checkKeys = keys.length <= 5 ? keys : keys.filter((k) => critical.has(k));
+  const failed: string[] = [];
+  for (const key of checkKeys) {
+    const expected = patch[key];
+    const actual = saved[key];
+    const same =
+      Array.isArray(expected) && Array.isArray(actual)
+        ? JSON.stringify(expected) === JSON.stringify(actual)
+        : expected === actual;
+    if (!same) {
+      failed.push(key);
+    }
+  }
+  return failed;
+}
+
 type Panel = "chat" | "history" | "settings" | "diagnostics";
 
 export function App() {
@@ -256,6 +288,8 @@ export function App() {
   const skipSettingsAutosave = useRef(true);
   /** True after the first host settings payload — blocks empty initial autosave. */
   const settingsAutosaveReady = useRef(false);
+  /** Last settings patch we asked the host to persist — verified on `settings` reply. */
+  const pendingSettingsPatch = useRef<Record<string, unknown> | null>(null);
   const historySearchTimer = useRef<number | undefined>();
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
@@ -378,7 +412,20 @@ export function App() {
           if (msg.providers) {
             setProviders(msg.providers as Provider[]);
           }
-          setVerifyMsg((v) => (v === "Saving…" ? "Saved ✓" : v));
+          {
+            const pending = pendingSettingsPatch.current;
+            pendingSettingsPatch.current = null;
+            if (pending) {
+              const failed = settingsPatchMismatches(pending, msg.settings || {});
+              setVerifyMsg(
+                failed.length
+                  ? `Save failed: ${failed.join(", ")} not persisted`
+                  : "Saved ✓",
+              );
+            } else {
+              setVerifyMsg((v) => (v === "Saving…" ? "Saved ✓" : v));
+            }
+          }
           break;
         case "skill_dir_picked": {
           const path = (msg.path || "").trim();
@@ -741,10 +788,12 @@ export function App() {
     }
     window.clearTimeout(settingsSaveTimer.current);
     settingsSaveTimer.current = window.setTimeout(() => {
+      const patch = normalizeSettingsForSave(settings);
+      pendingSettingsPatch.current = patch;
       setVerifyMsg("Saving…");
       post({
         type: "save_settings",
-        settings: normalizeSettingsForSave(settings),
+        settings: patch,
       });
     }, 500);
     return () => window.clearTimeout(settingsSaveTimer.current);
@@ -949,31 +998,39 @@ export function App() {
     // Immediate save for the next turn; skip the debounced effect to avoid a double write.
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
+    const patch = normalizeSettingsForSave(nextSettings);
+    pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
-    post({ type: "save_settings", settings: normalizeSettingsForSave(nextSettings) });
+    post({ type: "save_settings", settings: patch });
   };
 
   const selectEffort = (next: string) => {
     const nextSettings = { ...settings, reasoning_effort: next };
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
+    const patch = { reasoning_effort: next };
+    pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
     // Effort-only patch: avoid trust prompts from an unsaved base_url draft.
-    post({ type: "save_settings", settings: { reasoning_effort: next } });
+    post({ type: "save_settings", settings: patch });
   };
 
   const selectWireApi = (next: string) => {
     skipSettingsAutosave.current = true;
     setSettings((s) => ({ ...s, wire_api: next }));
+    const patch = { wire_api: next };
+    pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
-    post({ type: "save_settings", settings: { wire_api: next } });
+    post({ type: "save_settings", settings: patch });
   };
 
   const selectSslVerify = (next: boolean) => {
     skipSettingsAutosave.current = true;
     setSettings((s) => ({ ...s, ssl_verify: next }));
+    const patch = { ssl_verify: next };
+    pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
-    post({ type: "save_settings", settings: { ssl_verify: next } });
+    post({ type: "save_settings", settings: patch });
   };
 
   const send = () => {
@@ -2366,10 +2423,12 @@ export function App() {
               title="Flush settings now (also autosaves ~0.5s after changes)"
               onClick={() => {
                 window.clearTimeout(settingsSaveTimer.current);
+                const patch = normalizeSettingsForSave(settings);
+                pendingSettingsPatch.current = patch;
                 setVerifyMsg("Saving…");
                 post({
                   type: "save_settings",
-                  settings: normalizeSettingsForSave(settings),
+                  settings: patch,
                 });
               }}
             >

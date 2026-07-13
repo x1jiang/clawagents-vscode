@@ -407,6 +407,32 @@ async def run_chat_turn(
     ensure_dirs()
     settings = load_settings()
 
+    # Pre-flight: custom OpenAI-compatible gateway needs an explicit model id.
+    provider = str(settings.get("provider") or "auto")
+    base_url = str(settings.get("base_url") or "").strip()
+    from url_trust import is_trusted_base_url
+
+    trusted_custom = bool(
+        base_url
+        and not is_trusted_base_url(base_url)
+        and settings.get("trust_custom_base_url")
+    )
+    effective_model = (model or settings.get("model") or "").strip()
+    if effective_model.lower() in ("default",):
+        effective_model = ""
+    if (
+        trusted_custom
+        and provider in ("openai", "auto", "ollama")
+        and not effective_model
+    ):
+        msg = (
+            "Pick a model from the gateway list (header or Settings → Model). "
+            f"Custom base URL is set ({base_url}) but model is empty/default."
+        )
+        on_event({"kind": "error", "text": msg})
+        append_ui_event(chat_id, {"kind": "error", "text": msg})
+        return {"ok": False, "error": msg}
+
     meta = get_chat(chat_id) or create_chat(
         chat_id=chat_id, title=_title_from_text(content), mode=mode
     )
