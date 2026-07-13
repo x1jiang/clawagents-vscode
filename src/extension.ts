@@ -43,7 +43,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // First activation: ensure remote/local Python has clawagents + extras.
   // Also runs again from sidecar ensureStarted when imports fail.
   void (async () => {
-    const out = vscode.window.createOutputChannel("ClawAgents Sidecar");
+    const out = sidecar?.output;
+    if (!out) {
+      return;
+    }
     try {
       await ensureSidecarDeps(config.pythonPath, out);
     } catch (err) {
@@ -105,7 +108,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await provider?.restartSidecar();
     }),
     vscode.commands.registerCommand("clawagents.installPythonDeps", async () => {
-      const out = vscode.window.createOutputChannel("ClawAgents Sidecar");
+      const out = sidecar?.output;
+      if (!out) {
+        return;
+      }
       out.show(true);
       const python = config.pythonPath;
       out.appendLine(`Installing into ${python}: ${SIDECAR_PIP_PACKAGES.join(" ")}`);

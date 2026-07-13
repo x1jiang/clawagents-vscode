@@ -233,6 +233,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   async cancelTask(): Promise<void> {
+    // Stop means stop: drop queued follow-ups too, otherwise the next
+    // queued message starts the agent right back up after the abort.
+    if (this.queue.length > 0) {
+      this.queue = [];
+      this.post({ type: "status", message: "Queue cleared" });
+    }
+    // With an active stream, aborting makes the stream emit `cancelled`;
+    // posting it here too rendered a duplicate "Cancelled" row.
+    const hadStream = this.abort !== undefined;
     this.abort?.abort();
     this.abort = undefined;
     try {
@@ -240,7 +249,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     } catch {
       /* ignore */
     }
-    this.post({ type: "cancelled" });
+    if (!hadStream) {
+      this.post({ type: "cancelled" });
+    }
   }
 
   async restartSidecar(): Promise<void> {
@@ -611,11 +622,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           if (res.ok && (msg.mode === "conversation" || msg.mode === "both") && this.chatId) {
             const chat = await this.gateway.getChat(this.chatId);
             const events = (chat.events as Array<Record<string, unknown>>) || [];
+            // Carry draft + session cost through: the webview's restore
+            // handler overwrites both, and omitting them wiped whatever the
+            // user was typing and zeroed the cost readout.
+            const saved = this.context.workspaceState.get<PersistedState>(STATE_KEY);
             this.post({
               type: "restore",
               items: eventsToItems(events),
+              draft: saved?.draft || "",
               mode: (chat.mode as AgentMode) || this.mode,
               chatId: this.chatId,
+              autoApprove: this.autoApprove,
+              interaction: this.interaction,
+              caveman: this.caveman,
+              sessionCostUsd: sessionCostFromChat(chat),
             });
           }
         } catch (err) {

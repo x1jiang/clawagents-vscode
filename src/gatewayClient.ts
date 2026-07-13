@@ -283,6 +283,10 @@ export class GatewayClient {
       excluded: string[];
       ignored_dirs: string[];
       auto_discover: boolean;
+      /** name → why the skill can't run here (missing binary/env/OS). */
+      unavailable?: Record<string, string>;
+      /** Loader diagnostics (spec violations, oversized/skipped files). */
+      warnings?: string[];
     }>(this.requireHandle(), "GET", "/skills");
   }
 
@@ -396,6 +400,16 @@ export class GatewayClient {
     });
 
     let resolvedChatId = chatId;
+    // Whether the stream delivered a terminal event (done/error/cancelled).
+    // Without one the webview would wait on "Running…" forever if the
+    // sidecar dies mid-stream.
+    let sawTerminal = false;
+    const emit = (msg: HostToWebview) => {
+      if (msg.type === "done" || msg.type === "error" || msg.type === "cancelled") {
+        sawTerminal = true;
+      }
+      handlers.onEvent(msg);
+    };
 
     await new Promise<void>((resolve, reject) => {
       const req = http.request(
@@ -410,6 +424,10 @@ export class GatewayClient {
             "Content-Length": Buffer.byteLength(body),
             Accept: "text/event-stream",
           },
+          // Socket idle timeout (resets on every byte). The sidecar sends a
+          // keep-alive comment every 15s, so 60s of true silence means it is
+          // hung/deadlocked — surface an error instead of spinning forever.
+          timeout: 60_000,
         },
         (res) => {
           if (res.statusCode && res.statusCode >= 400) {
@@ -448,10 +466,10 @@ export class GatewayClient {
                     : data;
                 const mapped = mapAgentEvent(kind, payload);
                 if (mapped) {
-                  handlers.onEvent(mapped);
+                  emit(mapped);
                 }
               } else if (ev.event === "permission_required") {
-                handlers.onEvent({
+                emit({
                   type: "permission_required",
                   requestId: String(data.request_id ?? ""),
                   tool: String(data.tool ?? "tool"),
@@ -460,13 +478,13 @@ export class GatewayClient {
                   reason: data.reason ? String(data.reason) : undefined,
                 });
               } else if (ev.event === "ask_user_required") {
-                handlers.onEvent({
+                emit({
                   type: "ask_user_required",
                   requestId: String(data.request_id ?? ""),
                   question: String(data.question ?? ""),
                 });
               } else if (ev.event === "file_changed") {
-                handlers.onEvent({
+                emit({
                   type: "file_changed",
                   path: String(data.path ?? ""),
                   snapshotId: data.snapshot_id ? String(data.snapshot_id) : undefined,
@@ -474,7 +492,7 @@ export class GatewayClient {
                 });
               } else if (ev.event === "usage") {
                 const usageObj = data as Record<string, unknown>;
-                handlers.onEvent({
+                emit({
                   type: "usage",
                   promptTokens: num(data.prompt_tokens),
                   completionTokens: num(data.completion_tokens),
@@ -490,7 +508,7 @@ export class GatewayClient {
                   data.usage && typeof data.usage === "object"
                     ? (data.usage as Record<string, unknown>)
                     : {};
-                handlers.onEvent({
+                emit({
                   type: "done",
                   status: String(data.status ?? "done"),
                   result: data.result != null ? String(data.result) : undefined,
@@ -501,28 +519,46 @@ export class GatewayClient {
                   sessionCostUsd: num(usageObj.session_cost_usd),
                 });
               } else if (ev.event === "error") {
-                handlers.onEvent({
+                emit({
                   type: "error",
                   message: String(data.error ?? data.message ?? "Stream error"),
                 });
               } else if (ev.event === "started" || ev.event === "queued") {
-                handlers.onEvent({
+                emit({
                   type: "status",
                   message: ev.event === "queued" ? "Queued…" : "Running…",
                 });
               }
             }
           });
-          res.on("end", () => resolve());
+          res.on("end", () => {
+            if (!sawTerminal) {
+              emit({
+                type: "error",
+                message:
+                  "Stream ended without completion — the sidecar may have crashed or restarted. Check Output → ClawAgents Sidecar.",
+              });
+            }
+            resolve();
+          });
           res.on("error", reject);
         },
       );
 
+      req.on("timeout", () => {
+        emit({
+          type: "error",
+          message:
+            "No data from the sidecar for 60s (keep-alives stopped) — it looks hung. Try Restart Sidecar.",
+        });
+        req.destroy();
+        resolve();
+      });
       req.on("error", reject);
       if (handlers.signal) {
         const onAbort = () => {
           req.destroy();
-          handlers.onEvent({ type: "cancelled" });
+          emit({ type: "cancelled" });
           resolve();
         };
         if (handlers.signal.aborted) {

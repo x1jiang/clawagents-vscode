@@ -1039,7 +1039,14 @@ def create_app() -> FastAPI:
         async def _stream():
             try:
                 while True:
-                    msg = await event_queue.get()
+                    # Keep-alive comment every 15s of silence so the client
+                    # can tell a quiet long-running tool from a hung sidecar
+                    # (its idle timeout is a multiple of this interval).
+                    try:
+                        msg = await asyncio.wait_for(event_queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        yield ": ping\n\n"
+                        continue
                     if msg is None:
                         break
                     yield msg

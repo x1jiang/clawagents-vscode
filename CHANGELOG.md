@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.30 — 2026-07-13
+
+- Require `clawagents>=6.12.10` (`disable-model-invocation` + skill loader fixes); pip spec + version gate enforce it
+- Skills: load `~/.clawagents/skills`; Settings preview shows unavailable skills with reasons and loader warnings
+- Fix sidecar restart race (stale exit listener / concurrent starts sharing one spawn)
+- Fix Stop: clearing the queue so follow-ups do not auto-restart
+- Fix chat stuck on "Running…" when SSE ends without done/error (keep-alive + idle timeout)
+- Single "ClawAgents Sidecar" output channel
+
 ## 1.0.29 — 2026-07-13
 
 - Require `clawagents>=6.12.9` (skill loader precedence, safer requires parsing, resource disclosure)

@@ -159,14 +159,28 @@ export function isSafeId(value: string): boolean {
   return SAFE_ID_RE.test(value) && !value.includes("..");
 }
 
-/** Join parts under root; return null if the result escapes root (symlink-aware). */
+/** Join parts under root; return null if the result escapes root.
+ *  Lexical `..` normalization first; when the target exists, its realpath
+ *  must also stay under the root's realpath so a planted symlink inside the
+ *  tree cannot point reads outside it. */
 export function pathUnderRoot(root: string, ...parts: string[]): string | null {
   const base = path.resolve(root);
   const target = path.resolve(base, ...parts);
-  if (target === base || target.startsWith(base + path.sep)) {
-    return target;
+  if (target !== base && !target.startsWith(base + path.sep)) {
+    return null;
   }
-  return null;
+  try {
+    if (fs.existsSync(target)) {
+      const realBase = fs.realpathSync(base);
+      const realTarget = fs.realpathSync(target);
+      if (realTarget !== realBase && !realTarget.startsWith(realBase + path.sep)) {
+        return null;
+      }
+    }
+  } catch {
+    /* realpath failed (racing delete) — fall back to the lexical check */
+  }
+  return target;
 }
 
 /** Empty / loopback / unix-socket-style base URLs are trusted for API keys. */
@@ -231,19 +245,30 @@ export class ExtensionConfig {
 
   async hasAnyApiKey(): Promise<boolean> {
     const env = await this.getApiKeyEnv();
-    if (
-      env.OPENAI_API_KEY ||
-      env.ANTHROPIC_API_KEY ||
-      env.GEMINI_API_KEY ||
-      env.GOOGLE_API_KEY ||
-      env.BEDROCK_API_KEY
-    ) {
+    const llmKeys = [
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY",
+      "BEDROCK_API_KEY",
+    ];
+    if (llmKeys.some((k) => env[k])) {
+      return true;
+    }
+    // The sidecar is spawned with shell-env and workspace-.env keys merged in
+    // (see sidecar.ts), so a key that lives only there still makes chat work —
+    // don't show the "no credential" banner in that case.
+    const dotenv = this.loadWorkspaceDotenv();
+    if (llmKeys.some((k) => (dotenv[k] || process.env[k] || "").trim())) {
       return true;
     }
     return this.hasAwsCredentials();
   }
 
-  /** Native Bedrock can run without BEDROCK_API_KEY when AWS creds exist. */
+  /** Native Bedrock can run without BEDROCK_API_KEY when AWS creds exist.
+   *  Requires actual credential material — a bare region or a `~/.aws/config`
+   *  with only settings is NOT a credential and must not suppress the
+   *  "set a key" banner. */
   hasAwsCredentials(): boolean {
     const dotenv = this.loadWorkspaceDotenv();
     const pick = (k: string) =>
@@ -254,17 +279,10 @@ export class ExtensionConfig {
     if (pick("AWS_PROFILE") || pick("AWS_DEFAULT_PROFILE")) {
       return true;
     }
-    if (pick("AWS_REGION") || pick("AWS_DEFAULT_REGION")) {
-      return true;
-    }
     try {
       const home = process.env.HOME || process.env.USERPROFILE || "";
-      if (home) {
-        const cred = path.join(home, ".aws", "credentials");
-        const cfg = path.join(home, ".aws", "config");
-        if (fs.existsSync(cred) || fs.existsSync(cfg)) {
-          return true;
-        }
+      if (home && fs.existsSync(path.join(home, ".aws", "credentials"))) {
+        return true;
       }
     } catch {
       /* ignore */

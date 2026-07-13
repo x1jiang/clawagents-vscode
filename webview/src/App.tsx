@@ -158,6 +158,10 @@ type SkillsPreview = {
   excluded: string[];
   ignored_dirs: string[];
   auto_discover: boolean;
+  /** name → why the skill can't run here (missing binary/env/OS). */
+  unavailable?: Record<string, string>;
+  /** Loader diagnostics (spec violations, oversized/skipped files). */
+  warnings?: string[];
 };
 
 function asStringList(value: unknown): string[] {
@@ -448,6 +452,8 @@ export function App() {
             excluded: msg.excluded || [],
             ignored_dirs: msg.ignored_dirs || [],
             auto_discover: Boolean(msg.auto_discover),
+            unavailable: msg.unavailable || {},
+            warnings: msg.warnings || [],
           });
           break;
         case "verify_result":
@@ -2256,6 +2262,39 @@ export function App() {
                 );
               })}
             </div>
+
+            {Object.keys(skillsPreview?.unavailable || {}).length > 0 && (
+              <>
+                <div className="skill-subheading">
+                  Unavailable (requirements not met)
+                </div>
+                <div className="skill-list">
+                  {Object.entries(skillsPreview?.unavailable || {}).map(([name, reason]) => (
+                    <div key={`unavail-${name}`} className="skill-item skill-item-excluded">
+                      <div className="skill-item-main">
+                        <div className="skill-item-title">
+                          <strong>{name}</strong>
+                        </div>
+                        <div className="skill-item-desc muted tiny">{reason}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {(skillsPreview?.warnings || []).length > 0 && (
+              <details className="skill-warnings">
+                <summary className="muted tiny">
+                  Loader warnings ({(skillsPreview?.warnings || []).length})
+                </summary>
+                {(skillsPreview?.warnings || []).slice(0, 20).map((w, i) => (
+                  <div key={`skillwarn-${i}`} className="muted tiny">
+                    {w}
+                  </div>
+                ))}
+              </details>
+            )}
           </section>
 
           <section className="settings-section">

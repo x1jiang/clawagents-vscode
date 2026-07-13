@@ -87,8 +87,9 @@ function waitForHealth(baseUrl: string, token: string, timeoutMs: number): Promi
 export class SidecarManager {
   private handle: SidecarHandle | undefined;
   private child: ChildProcess | undefined;
-  private output: vscode.OutputChannel;
+  readonly output: vscode.OutputChannel;
   private lastLog = "";
+  private starting: Promise<SidecarHandle> | undefined;
 
   constructor(
     private readonly extensionPath: string,
@@ -105,7 +106,19 @@ export class SidecarManager {
     if (this.handle && this.child && !this.child.killed) {
       return this.handle;
     }
-    await this.stop();
+    // Concurrent callers (activation + command) must share one spawn —
+    // otherwise two sidecars race for the same handle slot.
+    if (this.starting) {
+      return this.starting;
+    }
+    this.starting = this.doStart().finally(() => {
+      this.starting = undefined;
+    });
+    return this.starting;
+  }
+
+  private async doStart(): Promise<SidecarHandle> {
+    this.stop();
 
     const python = this.config.pythonPath;
     const bridge = path.join(this.extensionPath, "python", "bridge.py");
@@ -189,14 +202,20 @@ export class SidecarManager {
     this.child.stderr?.on("data", (buf: Buffer) => appendLog(buf.toString()));
 
     let exitCode: number | null = null;
+    const spawned = this.child;
     this.child.on("error", (err) => {
       appendLog(`\nspawn error: ${err.message}\n`);
     });
     this.child.on("exit", (code, signal) => {
       exitCode = code;
       this.output.appendLine(`Sidecar exited code=${code} signal=${signal}`);
-      this.handle = undefined;
-      this.child = undefined;
+      // A restart may already have installed a NEW child; a stale exit
+      // listener must not wipe its registration (it would orphan the new
+      // process and trigger duplicate spawns).
+      if (this.child === spawned) {
+        this.handle = undefined;
+        this.child = undefined;
+      }
     });
 
     const baseUrl = `http://127.0.0.1:${port}`;

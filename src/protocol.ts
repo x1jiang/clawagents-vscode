@@ -140,6 +140,8 @@ export type HostToWebview =
       excluded: string[];
       ignored_dirs: string[];
       auto_discover: boolean;
+      unavailable?: Record<string, string>;
+      warnings?: string[];
     }
   | { type: "skill_dir_picked"; path: string }
   | { type: "verify_result"; provider: string; ok: boolean; detail?: string }

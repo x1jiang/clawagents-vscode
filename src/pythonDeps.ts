@@ -4,7 +4,11 @@ import { curatedProcessEnv } from "./envCurate";
 
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
-  "clawagents[gemini,anthropic,bedrock,mcp]>=6.12.1",
+  // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION:
+  // 6.12.10 ships the reworked skill loader (precedence, requires parsing,
+  // resource disclosure, disable-model-invocation) that this extension's
+  // UI relies on.
+  "clawagents[gemini,anthropic,bedrock,mcp]>=6.12.10",
   "fastapi",
   "uvicorn",
   "pydantic",
@@ -12,7 +16,7 @@ export const SIDECAR_PIP_PACKAGES = [
 ] as const;
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 12, 0];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 12, 10];
 
 export type DepProbe = {
   ok: boolean;
@@ -29,10 +33,13 @@ export function versionAtLeast(
   if (!version || version === "?") {
     return false;
   }
+  // Keep segment positions aligned: strip a non-numeric prefix per segment
+  // ("v6" → 6) and map the rest of an unparseable segment to 0 instead of
+  // filtering it out (filtering shifted e.g. "v6.12.1" to [12, 1]).
   const parts = version
     .split(/[.+-]/)
-    .map((p) => parseInt(p, 10))
-    .filter((n) => !Number.isNaN(n));
+    .map((p) => parseInt(p.replace(/^[^\d]*/, ""), 10))
+    .map((n) => (Number.isNaN(n) ? 0 : n));
   for (let i = 0; i < 3; i++) {
     const a = parts[i] ?? 0;
     const b = min[i];
