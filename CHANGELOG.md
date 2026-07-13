@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.25 — 2026-07-13
+
+- Skills: require `clawagents>=6.12.7` for dynamic skill-catalog budget (~1.5% of context, floor 4k / ceiling 16k chars) with description-first truncation
+
 ## 1.0.24 — 2026-07-13
 
 - Skills: require `clawagents>=6.12.6` so `list_skills` is registered (overflow catalog) while full skill bodies still load only via `use_skill`
