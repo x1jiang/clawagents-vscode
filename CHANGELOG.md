@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.27 — 2026-07-13
+
+- Skills: auto-load personal homes (`~/.codex/skills`, `~/.claude/skills`, `~/.agents/skills`) so cohort/workflow skills are available without manual folder registration
+- Require `clawagents>=6.12.8` for per-turn skill ranking + stronger `use_skill` activation
+
 ## 1.0.26 — 2026-07-13
 
 - Fix: auto editor Context is no longer written into chat history (only what you typed is shown)

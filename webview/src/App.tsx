@@ -2296,6 +2296,19 @@ export function App() {
             </label>
             <label
               className="check"
+              title="Automatically load ~/.codex/skills, ~/.claude/skills, and ~/.agents/skills so personal workflow skills (cohort, project startup, etc.) are available."
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(settings.skill_user_homes ?? true)}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, skill_user_homes: e.target.checked }))
+                }
+              />
+              Load personal skill homes (~/.codex/skills, …)
+            </label>
+            <label
+              className="check"
               title="Load skill folders that resolve outside the workspace."
             >
               <input

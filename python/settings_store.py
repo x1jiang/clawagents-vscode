@@ -38,6 +38,8 @@ DEFAULTS: dict[str, Any] = {
     "allow_full_access": False,
     # Opt-in: load skill_dirs that resolve outside the workspace.
     "allow_external_skill_dirs": False,
+    # Load ~/.codex/skills, ~/.claude/skills, ~/.agents/skills automatically.
+    "skill_user_homes": True,
     # Set by the extension after the user confirms a non-localhost base_url.
     "trust_custom_base_url": False,
     # Native Amazon Bedrock (IAM). Empty base_url → AsyncAnthropicBedrock / Converse.

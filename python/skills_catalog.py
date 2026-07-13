@@ -10,6 +10,14 @@ from paths import WORKSPACE, under_workspace
 from settings_store import load_settings
 
 _AUTO_NAMES = ("skills", ".skills", "skill", ".skill", "Skills")
+# Personal skill libraries used by Codex / Claude Code / agents. Loaded when
+# skill_user_homes is true (default) so cohort/workflow skills under
+# ~/.codex/skills are available without manual registration.
+_USER_SKILL_HOMES = (
+    "~/.codex/skills",
+    "~/.claude/skills",
+    "~/.agents/skills",
+)
 
 
 def _norm(raw: str, *, require_under_workspace: bool = False) -> Path | None:
@@ -65,6 +73,18 @@ def resolve_skill_dirs(settings: dict[str, Any] | None = None) -> list[dict[str,
             # User-registered folders may live outside the workspace only when
             # allow_external_skill_dirs is on.
             _add(raw, "registered")
+
+    # Always allow these known personal skill homes (not workspace-scoped).
+    if settings.get("skill_user_homes", True):
+        for home in _USER_SKILL_HOMES:
+            path = _norm(home)
+            if path is None:
+                continue
+            key = str(path)
+            if key in seen or key in ignore:
+                continue
+            seen.add(key)
+            entries.append({"path": key, "origin": "user_home"})
 
     if settings.get("skill_auto_discover", True):
         for name in _AUTO_NAMES:
