@@ -1,8 +1,8 @@
-"""Host-injected API key snapshot for the VS Code sidecar.
+"""Host-injected API keys for the VS Code sidecar.
 
-The extension spawn env (SecretStorage) must beat workspace ``.env``.
-clawagents may call ``load_dotenv(override=True)`` on first agent create;
-we snapshot secrets at sidecar start and re-apply them before each turn.
+Captured once at process start (extension SecretStorage / spawn env).
+Chat turns pass these as explicit ``api_key=`` and do not re-read a
+possibly polluted ``os.environ`` after clawagents loads ``.env``.
 """
 
 from __future__ import annotations
@@ -30,15 +30,46 @@ def normalize_provider_aliases() -> None:
 
 
 def snapshot_spawn_secrets() -> None:
+    """Freeze provider secrets from the spawn environment (call once at start)."""
     _SPAWN_SECRETS.clear()
     for key in _SPAWN_SECRET_KEYS:
-        val = os.environ.get(key)
+        val = (os.environ.get(key) or "").strip()
         if val:
             _SPAWN_SECRETS[key] = val
+    # Keep GEMINI alias in the snapshot too.
+    if "GOOGLE_API_KEY" in _SPAWN_SECRETS and "GEMINI_API_KEY" not in _SPAWN_SECRETS:
+        _SPAWN_SECRETS["GEMINI_API_KEY"] = _SPAWN_SECRETS["GOOGLE_API_KEY"]
     normalize_provider_aliases()
 
 
+def get_secret(key: str) -> str:
+    """Return a spawn-time secret (empty if unset). Never reads live os.environ."""
+    return (_SPAWN_SECRETS.get(key) or "").strip()
+
+
+def resolve_api_key(provider: str, model: str | None = None) -> str | None:
+    """Pick the host-injected key for this provider/model, if any."""
+    p = (provider or "auto").strip().lower()
+    m = (model or "").strip().lower()
+
+    if p == "anthropic" or m.startswith("claude") or m.startswith("anthropic"):
+        key = get_secret("ANTHROPIC_API_KEY")
+        return key or None
+    if p == "gemini" or m.startswith("gemini"):
+        key = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
+        return key or None
+    if p == "bedrock":
+        key = get_secret("BEDROCK_API_KEY") or get_secret("OPENAI_API_KEY")
+        return key or None
+    if p in ("openai", "ollama", "auto") or not p:
+        key = get_secret("OPENAI_API_KEY")
+        return key or None
+    key = get_secret("OPENAI_API_KEY")
+    return key or None
+
+
 def restore_spawn_secrets() -> None:
+    """Optional: re-apply spawn secrets into os.environ (diagnostics / tools)."""
     for key, value in _SPAWN_SECRETS.items():
         os.environ[key] = value
     normalize_provider_aliases()

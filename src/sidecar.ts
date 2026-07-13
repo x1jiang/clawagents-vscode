@@ -162,8 +162,9 @@ export class SidecarManager {
       PYTHONUNBUFFERED: "1",
       CLAW_KEY_SOURCES: JSON.stringify(keySources),
       CLAW_CONTEXT_MODE: this.config.contextMode ? "1" : "0",
-      // SecretStorage / spawn env must beat workspace .env inside clawagents
-      // (load_dotenv default override=True would otherwise clobber the UI key).
+      // Long-lived sidecar: never re-load workspace .env inside clawagents
+      // (would clobber SecretStorage keys). Spawn env already merged keys once.
+      CLAWAGENTS_SKIP_DOTENV: "1",
       CLAWAGENTS_DOTENV_OVERRIDE: "0",
     };
     if (model) {

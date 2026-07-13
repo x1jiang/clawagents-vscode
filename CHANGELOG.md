@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.23 — 2026-07-13
+
+- Cleaner API-key handling: pass host SecretStorage key as explicit `api_key=` every turn; sidecar sets `CLAWAGENTS_SKIP_DOTENV=1` so clawagents never reloads workspace `.env` mid-process (requires `clawagents>=6.12.5`)
+
 ## 1.0.22 — 2026-07-13
 
 - Fix: UI / SecretStorage API keys no longer get overwritten by workspace `.env` on the second chat turn (`CLAWAGENTS_DOTENV_OVERRIDE=0` + spawn-secret restore; requires `clawagents>=6.12.4` for the library-side fix)

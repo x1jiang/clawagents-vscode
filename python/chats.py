@@ -38,11 +38,20 @@ _PROFILE_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "ollama", "bedr
 
 def _bedrock_api_key() -> str:
     """Gateway token for OpenAI-compatible Bedrock proxies."""
-    return (
-        (os.environ.get("BEDROCK_API_KEY") or "").strip()
-        or (os.environ.get("OPENAI_API_KEY") or "").strip()
-        or "bedrock"
-    )
+    try:
+        from spawn_secrets import get_secret
+
+        return (
+            get_secret("BEDROCK_API_KEY")
+            or get_secret("OPENAI_API_KEY")
+            or "bedrock"
+        )
+    except Exception:  # noqa: BLE001
+        return (
+            (os.environ.get("BEDROCK_API_KEY") or "").strip()
+            or (os.environ.get("OPENAI_API_KEY") or "").strip()
+            or "bedrock"
+        )
 
 
 def _apply_aws_settings(settings: dict[str, Any]) -> None:
@@ -361,14 +370,25 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
             kwargs["api_key"] = _bedrock_api_key()
         # else: native IAM — clawagents routes Bedrock model IDs via
         # AsyncAnthropicBedrock / Converse; do not force a gateway api_key.
-    elif provider == "openai" and kwargs.get("base_url"):
-        # OpenAI-compatible endpoint (Ollama, BAG, OpenRouter, …): always pass a key.
-        key = (os.environ.get("OPENAI_API_KEY") or "").strip() or "openai"
-        kwargs["api_key"] = key
     elif provider in _PROFILE_PROVIDERS and not effective_model:
         # No explicit model: route default model/key selection through the
         # builtin profile so the provider choice actually takes effect.
         kwargs["profile"] = provider
+
+    # Always pass the host-injected key explicitly so workspace .env cannot
+    # replace it mid-process via load_dotenv(override=True).
+    if "api_key" not in kwargs:
+        try:
+            from spawn_secrets import resolve_api_key
+
+            key = resolve_api_key(provider, str(effective_model or ""))
+        except Exception:  # noqa: BLE001
+            key = None
+        if key:
+            kwargs["api_key"] = key
+        elif provider == "openai" and kwargs.get("base_url"):
+            kwargs["api_key"] = "openai"
+
     effort = str(settings.get("reasoning_effort") or "").strip()
     if effort:
         kwargs["reasoning_effort"] = effort
@@ -404,15 +424,8 @@ async def run_chat_turn(
     from clawagents.agent import create_claw_agent
     from clawagents.session.backends import JsonlFileSession
 
-    # Host SecretStorage keys must win over workspace .env (clawagents may
-    # load_dotenv with override=True on first create_claw_agent).
-    try:
-        from spawn_secrets import restore_spawn_secrets
-
-        restore_spawn_secrets()
-    except Exception:  # noqa: BLE001
-        pass
-
+    # Keys come from spawn_secrets via _resolve_model_kwargs(api_key=…);
+    # sidecar also sets CLAWAGENTS_SKIP_DOTENV so clawagents won't reload .env.
     ensure_dirs()
     settings = load_settings()
 
