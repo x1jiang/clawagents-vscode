@@ -146,6 +146,21 @@ export function activate(context: vscode.ExtensionContext): void {
       provider = undefined;
     },
   });
+
+  // Reveal Secondary Side Bar + ClawAgents so the flame icon appears in the
+  // same right-side strip as Cursor's built-in Claude / Codex controls.
+  const revealOnStartup = vscode.workspace
+    .getConfiguration("clawagents")
+    .get<boolean>("revealOnStartup", true);
+  if (revealOnStartup) {
+    void (async () => {
+      try {
+        await provider?.openChat();
+      } catch {
+        /* host may not have an auxiliary bar yet */
+      }
+    })();
+  }
 }
 
 export function deactivate(): void {

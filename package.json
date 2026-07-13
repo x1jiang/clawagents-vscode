@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -46,7 +46,7 @@
         {
           "id": "clawagents",
           "title": "ClawAgents",
-          "icon": "media/icon.png"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -57,7 +57,7 @@
           "id": "clawagents.sidebar",
           "name": "ClawAgents",
           "visibility": "visible",
-          "icon": "media/icon.png"
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -65,7 +65,10 @@
       {
         "command": "clawagents.openChat",
         "title": "ClawAgents: Open Chat",
-        "icon": "$(comment-discussion)"
+        "icon": {
+          "light": "media/icon.svg",
+          "dark": "media/icon.svg"
+        }
       },
       {
         "command": "clawagents.toggleChat",
@@ -152,6 +155,13 @@
           "group": "navigation@3"
         }
       ],
+      "editor/title": [
+        {
+          "command": "clawagents.openChat",
+          "group": "navigation@90",
+          "when": "true"
+        }
+      ],
       "editor/context": [
         {
           "command": "clawagents.addSelectionToChat",
@@ -172,6 +182,11 @@
     "configuration": {
       "title": "ClawAgents",
       "properties": {
+        "clawagents.revealOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "On startup, open the right Secondary Side Bar and show ClawAgents so its icon appears next to other AI panels."
+        },
         "clawagents.pythonPath": {
           "type": "string",
           "default": "python3",

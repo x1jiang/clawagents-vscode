@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.9 — 2026-07-12
+
+- Show ClawAgents in the right Secondary Side Bar strip: themeable SVG icon, editor title-bar Open button, reveal panel on startup (`clawagents.revealOnStartup`)
+
 ## 1.0.8 — 2026-07-12
 
 - Settings provider dropdown: hide builtin `Profile: bedrock-gateway` (duplicate of **AWS Bedrock**; gateway mode stays on the Bedrock card)

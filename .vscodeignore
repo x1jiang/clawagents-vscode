@@ -19,6 +19,5 @@ python/**/.pytest_cache/**
 .gitignore
 *.vsix
 PUBLISH.md
-media/icon.svg
 **/.git/**
 **/__pycache__/**
