@@ -40,6 +40,8 @@ DEFAULTS: dict[str, Any] = {
     # Native Amazon Bedrock (IAM). Empty base_url → AsyncAnthropicBedrock / Converse.
     "aws_region": "",
     "aws_profile": "",
+    # OpenAI reasoning effort (none|low|medium|high|xhigh). Empty = provider default.
+    "reasoning_effort": "medium",
 }
 
 

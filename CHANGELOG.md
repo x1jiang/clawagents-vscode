@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.12 — 2026-07-12
+
+- **Effort** selector for GPT-5.5/5.6 and o-series (Light / Medium / High / Extra High / None) — header + Settings; requires `clawagents>=6.12.1`
+
 ## 1.0.11 — 2026-07-12
 
 - **VS Code**: Secondary Side Bar + editor title Open button (same pattern as Claude Code / Codex) so the flame icon appears in the right strip

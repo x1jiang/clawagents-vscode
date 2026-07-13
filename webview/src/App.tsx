@@ -20,6 +20,24 @@ import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
 
+/** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
+const EFFORT_OPTIONS = [
+  { value: "low", label: "Light" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra High" },
+  { value: "none", label: "None" },
+] as const;
+
+function modelSupportsEffort(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m) return false;
+  if (m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) return true;
+  if (m.startsWith("gpt-5.5") || m.startsWith("gpt-5.6")) return true;
+  if (m === "gpt-5" || m.startsWith("gpt-5-")) return true;
+  return false;
+}
+
 type ChatItem =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
@@ -973,6 +991,23 @@ export function App() {
               </option>
             ))}
           </select>
+          {modelSupportsEffort(activeModelId || model) && (
+            <select
+              className="model-select effort-select"
+              value={String(settings.reasoning_effort || "medium")}
+              title="Thinking effort (OpenAI reasoning models)"
+              aria-label="Effort"
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, reasoning_effort: e.target.value }))
+              }
+            >
+              {EFFORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
           {compactPhase && (
             <span className="compact-chip" title="Compaction in progress">
               compact · {compactPhase}
@@ -1286,6 +1321,27 @@ export function App() {
                 ))}
               </select>
             </label>
+            {modelSupportsEffort(String(settings.model || activeModelId || "")) && (
+              <label>
+                Effort
+                <select
+                  value={String(settings.reasoning_effort || "medium")}
+                  onChange={(e) =>
+                    setSettings((s) => ({ ...s, reasoning_effort: e.target.value }))
+                  }
+                >
+                  {EFFORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="settings-hint">
+                  Thinking depth for GPT-5.5/5.6 and o-series. Agent tool turns on
+                  GPT-5.5/5.6 still use Effort=None on Chat Completions (API limit).
+                </span>
+              </label>
+            )}
             <label>
               Base URL (optional — OpenAI-compatible / Ollama / BAG)
               <input

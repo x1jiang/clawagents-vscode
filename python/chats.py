@@ -369,6 +369,9 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         # No explicit model: route default model/key selection through the
         # builtin profile so the provider choice actually takes effect.
         kwargs["profile"] = provider
+    effort = str(settings.get("reasoning_effort") or "").strip()
+    if effort:
+        kwargs["reasoning_effort"] = effort
     return kwargs
 
 

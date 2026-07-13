@@ -4,7 +4,7 @@ import { curatedProcessEnv } from "./envCurate";
 
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
-  "clawagents[gemini,anthropic,bedrock,mcp]>=6.12.0",
+  "clawagents[gemini,anthropic,bedrock,mcp]>=6.12.1",
   "fastapi",
   "uvicorn",
   "pydantic",

@@ -105,6 +105,11 @@ body,
   cursor: pointer;
 }
 
+.effort-select {
+  max-width: 7.5rem;
+  min-width: 4.5rem;
+}
+
 .cost {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
