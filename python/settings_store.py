@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import json
+import threading
 from typing import Any
 
 from paths import SETTINGS_FILE, atomic_write_json, read_json, under_workspace, workspace_rel
@@ -59,6 +61,79 @@ DEFAULTS: dict[str, Any] = {
 
 KNOWN_KEYS: frozenset[str] = frozenset(DEFAULTS)
 
+# These values are approvals, not preferences.  Keeping them in the workspace
+# settings file lets a cloned repository approve its own gateway, MCP commands,
+# or elevated filesystem access.  They therefore live only in this process and
+# are restored by the extension from VS Code SecretStorage at sidecar startup.
+RUNTIME_ONLY_KEYS: frozenset[str] = frozenset(
+    {
+        "trust_custom_base_url",
+        "mcp_trust_workspace",
+        "allow_full_access",
+        "allow_external_skill_dirs",
+    }
+)
+PERSISTED_KEYS: frozenset[str] = KNOWN_KEYS - RUNTIME_ONLY_KEYS
+_runtime_trust_lock = threading.RLock()
+_runtime_trust: dict[str, Any] = {
+    "trusted_custom_base_url": "",
+    "mcp_trust_workspace": False,
+    "allow_full_access": False,
+    "allow_external_skill_dirs": False,
+}
+
+
+def _normalize_base_url(raw: Any) -> str:
+    return str(raw or "").strip().rstrip("/")
+
+
+def set_runtime_trust(
+    patch: dict[str, Any] | None,
+    *,
+    base_url: str | None = None,
+) -> None:
+    """Update authenticated, process-local approvals.
+
+    ``trusted_custom_base_url`` is bound to the exact approved endpoint.  A
+    repository cannot swap ``base_url`` after approval and inherit that grant.
+    """
+    if not isinstance(patch, dict):
+        return
+    with _runtime_trust_lock:
+        if "trusted_custom_base_url" in patch:
+            _runtime_trust["trusted_custom_base_url"] = _normalize_base_url(
+                patch.get("trusted_custom_base_url")
+            )
+        if "trust_custom_base_url" in patch:
+            _runtime_trust["trusted_custom_base_url"] = (
+                _normalize_base_url(base_url)
+                if bool(patch.get("trust_custom_base_url"))
+                else ""
+            )
+        for key in RUNTIME_ONLY_KEYS - {"trust_custom_base_url"}:
+            if key in patch:
+                _runtime_trust[key] = bool(patch.get(key))
+
+
+def runtime_trust_snapshot() -> dict[str, Any]:
+    with _runtime_trust_lock:
+        return dict(_runtime_trust)
+
+
+def _restore_runtime_trust_from_env() -> None:
+    raw = os.environ.get("CLAW_RUNTIME_TRUST", "").strip()
+    if not raw:
+        return
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("ignored invalid CLAW_RUNTIME_TRUST payload")
+        return
+    set_runtime_trust(value if isinstance(value, dict) else None)
+
+
+_restore_runtime_trust_from_env()
+
 
 def sanitize_patch(patch: dict[str, Any] | None) -> tuple[dict[str, Any], list[str]]:
     """Keep only known settings keys; return (clean_patch, dropped_keys)."""
@@ -94,7 +169,15 @@ def load_settings() -> dict[str, Any]:
     merged = dict(DEFAULTS)
     merged.update(_env_defaults())
     # Only known keys — prevents schema drift / unknown junk from sticking.
-    merged.update({k: v for k, v in data.items() if k in KNOWN_KEYS})
+    merged.update({k: v for k, v in data.items() if k in PERSISTED_KEYS})
+    trust = runtime_trust_snapshot()
+    base_url = _normalize_base_url(merged.get("base_url"))
+    merged["trust_custom_base_url"] = bool(
+        base_url
+        and base_url == _normalize_base_url(trust.get("trusted_custom_base_url"))
+    )
+    for key in RUNTIME_ONLY_KEYS - {"trust_custom_base_url"}:
+        merged[key] = bool(trust.get(key, False))
     return merged
 
 
@@ -104,7 +187,16 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
         logger.warning("settings patch dropped unknown keys: %s", ", ".join(sorted(dropped)))
 
     current = load_settings()
-    current.update(clean)
+    effective_base_url = str(clean.get("base_url", current.get("base_url", "")) or "")
+    set_runtime_trust(clean, base_url=effective_base_url)
+    current = load_settings()
+    current.update({k: v for k, v in clean.items() if k in PERSISTED_KEYS})
+    trust = runtime_trust_snapshot()
+    current["trust_custom_base_url"] = bool(
+        _normalize_base_url(current.get("base_url"))
+        and _normalize_base_url(current.get("base_url"))
+        == _normalize_base_url(trust.get("trusted_custom_base_url"))
+    )
 
     base_url = str(current.get("base_url") or "").strip()
     if base_url and not is_trusted_base_url(base_url):
@@ -128,7 +220,8 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
                     kept.append(raw.strip())
             current["skill_dirs"] = kept
 
-    # Persist only known keys (stable file shape).
-    to_write = {k: current[k] for k in DEFAULTS}
+    # Persist preferences only. Security approvals remain in process memory and
+    # are restored from VS Code SecretStorage on the next sidecar start.
+    to_write = {k: current[k] for k in DEFAULTS if k in PERSISTED_KEYS}
     atomic_write_json(SETTINGS_FILE, to_write)
     return load_settings()

@@ -849,6 +849,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
           const settings = await this.gateway.putSettings(incoming);
+          // Trust approvals must never live in the repository-controlled
+          // .clawagents/vscode_settings.json. Persist the effective grants in
+          // workspace-scoped VS Code SecretStorage for sidecar restarts.
+          await this.config.storeRuntimeTrust(settings);
           // Re-fetch providers so custom base_url / TLS changes update the model list.
           let providers: unknown[] = [];
           try {

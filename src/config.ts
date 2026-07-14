@@ -2,6 +2,12 @@ import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
+import {
+  parseRuntimeTrust,
+  RuntimeTrust,
+  runtimeTrustFromSettings,
+  runtimeTrustStorageKey,
+} from "./runtimeTrust";
 
 const SECRET_KEYS = {
   openai: "clawagents.openaiApiKey",
@@ -207,6 +213,25 @@ export function isTrustedBaseUrl(raw: string): boolean {
 
 export class ExtensionConfig {
   constructor(private readonly secrets: vscode.SecretStorage) {}
+
+  private runtimeTrustKey(): string {
+    let root = workspaceRoot() || "<no-workspace>";
+    try {
+      root = fs.realpathSync.native(root);
+    } catch {
+      root = path.resolve(root);
+    }
+    return runtimeTrustStorageKey(root);
+  }
+
+  async getRuntimeTrust(): Promise<RuntimeTrust> {
+    return parseRuntimeTrust(await this.secrets.get(this.runtimeTrustKey()));
+  }
+
+  async storeRuntimeTrust(settings: Record<string, unknown>): Promise<void> {
+    const trust = runtimeTrustFromSettings(settings);
+    await this.secrets.store(this.runtimeTrustKey(), JSON.stringify(trust));
+  }
 
   get pythonPath(): string {
     return resolvePythonExecutable(trustedPythonPathSetting());
@@ -789,4 +814,3 @@ export function wrapCurrentFileRef(): string | undefined {
   const line = editor.selection.active.line + 1;
   return formatFileRef(rel, line);
 }
-

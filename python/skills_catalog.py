@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +25,76 @@ _USER_SKILL_HOMES = (
     "~/.agents/skills",
     "~/.clawagents/skills",
 )
+
+_ScanResult = tuple[list[dict[str, Any]], dict[str, str], list[str], dict[str, str]]
+_scan_cache_lock = threading.RLock()
+_scan_cache: dict[tuple[str, ...], tuple[str, _ScanResult]] = {}
+# path -> (mtime_ns, ctime_ns, size, sha256). Digests are recalculated only
+# when cheap metadata changes; ctime also catches content rewrites that restore
+# the original mtime. Unchanged refreshes avoid reparsing every skill body.
+_skill_file_digests: dict[str, tuple[int, int, int, str]] = {}
+
+
+def clear_skill_catalog_cache() -> None:
+    """Drop reusable snapshots (primarily for tests and explicit refreshes)."""
+    with _scan_cache_lock:
+        _scan_cache.clear()
+        _skill_file_digests.clear()
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(128 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _catalog_fingerprint(dirs: list[str]) -> str:
+    """Build an incremental mtime/content snapshot of candidate skill files."""
+    catalog = hashlib.sha256()
+    seen: set[str] = set()
+    for raw in dirs:
+        root = Path(raw).resolve()
+        catalog.update(f"root\0{root}\0".encode("utf-8", "surrogatepass"))
+        if not root.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames.sort()
+            for filename in sorted(filenames):
+                if not filename.lower().endswith(".md"):
+                    continue
+                path = Path(dirpath) / filename
+                key = str(path.resolve())
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                seen.add(key)
+                cached = _skill_file_digests.get(key)
+                metadata = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+                if cached and cached[:3] == metadata:
+                    file_digest = cached[3]
+                else:
+                    try:
+                        file_digest = _hash_file(path)
+                    except OSError:
+                        continue
+                    _skill_file_digests[key] = (
+                        stat.st_mtime_ns,
+                        stat.st_ctime_ns,
+                        stat.st_size,
+                        file_digest,
+                    )
+                catalog.update(key.encode("utf-8", "surrogatepass"))
+                catalog.update(b"\0")
+                catalog.update(file_digest.encode("ascii"))
+                catalog.update(b"\0")
+
+    stale = [path for path in _skill_file_digests if path not in seen]
+    for path in stale:
+        _skill_file_digests.pop(path, None)
+    return catalog.hexdigest()
 
 
 def _norm(raw: str, *, require_under_workspace: bool = False) -> Path | None:
@@ -111,6 +185,12 @@ def _scan_skills(
     """
     if not dirs:
         return [], {}, [], {}
+    cache_key = tuple(str(Path(d).resolve()) for d in dirs)
+    with _scan_cache_lock:
+        fingerprint = _catalog_fingerprint(dirs)
+        cached = _scan_cache.get(cache_key)
+        if cached and cached[0] == fingerprint:
+            return copy.deepcopy(cached[1])
     try:
         from clawagents.tools.skills import SkillStore
     except Exception:  # noqa: BLE001
@@ -164,7 +244,10 @@ def _scan_skills(
             }
         )
     out.sort(key=lambda s: s["name"].lower())
-    return out, ineligible, warnings, quarantined
+    result: _ScanResult = (out, ineligible, warnings, quarantined)
+    with _scan_cache_lock:
+        _scan_cache[cache_key] = (fingerprint, copy.deepcopy(result))
+    return result
 
 
 def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:

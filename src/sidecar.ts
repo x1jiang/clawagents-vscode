@@ -136,6 +136,7 @@ export class SidecarManager {
     const apiEnv = await this.config.getApiKeyEnv();
     const dotenvEnv = this.config.loadWorkspaceDotenv();
     const model = this.config.model;
+    const runtimeTrust = await this.config.getRuntimeTrust();
 
     // Spawn precedence: curated process.env < workspace .env < SecretStorage keys.
     const keySources: Record<string, string> = {};
@@ -175,6 +176,9 @@ export class SidecarManager {
       PYTHONUNBUFFERED: "1",
       CLAW_KEY_SOURCES: JSON.stringify(keySources),
       CLAW_CONTEXT_MODE: this.config.contextMode ? "1" : "0",
+      // Repository files cannot grant these approvals. They are restored from
+      // workspace-scoped VS Code SecretStorage before the sidecar serves probes.
+      CLAW_RUNTIME_TRUST: JSON.stringify(runtimeTrust),
       // Long-lived sidecar: never re-load workspace .env inside clawagents
       // (would clobber SecretStorage keys). Spawn env already merged keys once.
       CLAWAGENTS_SKIP_DOTENV: "1",
