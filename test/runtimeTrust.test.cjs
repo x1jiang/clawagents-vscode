@@ -16,6 +16,7 @@ buildSync({
   logLevel: "silent",
 });
 const {
+  mergeRuntimeTrust,
   parseRuntimeTrust,
   runtimeTrustFromSettings,
   runtimeTrustStorageKey,
@@ -53,4 +54,50 @@ test("custom gateway approval is bound to the exact effective URL", () => {
     }).trusted_custom_base_url,
     "",
   );
+});
+
+test("unrelated saves preserve prior gateway approval in SecretStorage merge", () => {
+  const previous = {
+    trusted_custom_base_url: "https://approved.example/v1",
+    mcp_trust_workspace: true,
+    allow_full_access: false,
+    allow_external_skill_dirs: false,
+  };
+  const merged = mergeRuntimeTrust(previous, {
+    base_url: "https://swapped.example/v1",
+    trust_custom_base_url: false,
+    mcp_trust_workspace: true,
+    wire_api: "responses",
+  });
+  assert.equal(merged.trusted_custom_base_url, "https://approved.example/v1");
+  assert.equal(merged.mcp_trust_workspace, true);
+});
+
+test("clearing base_url revokes gateway approval", () => {
+  const previous = {
+    trusted_custom_base_url: "https://approved.example/v1",
+    mcp_trust_workspace: false,
+    allow_full_access: false,
+    allow_external_skill_dirs: false,
+  };
+  const merged = mergeRuntimeTrust(
+    previous,
+    { base_url: "", trust_custom_base_url: false },
+    { revokeGatewayTrust: true },
+  );
+  assert.equal(merged.trusted_custom_base_url, "");
+});
+
+test("newly trusted URL replaces the prior approval", () => {
+  const previous = {
+    trusted_custom_base_url: "https://old.example/v1",
+    mcp_trust_workspace: false,
+    allow_full_access: false,
+    allow_external_skill_dirs: false,
+  };
+  const merged = mergeRuntimeTrust(previous, {
+    base_url: "https://new.example/v1/",
+    trust_custom_base_url: true,
+  });
+  assert.equal(merged.trusted_custom_base_url, "https://new.example/v1");
 });

@@ -3,9 +3,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
 import {
+  mergeRuntimeTrust,
   parseRuntimeTrust,
   RuntimeTrust,
-  runtimeTrustFromSettings,
   runtimeTrustStorageKey,
 } from "./runtimeTrust";
 
@@ -228,8 +228,12 @@ export class ExtensionConfig {
     return parseRuntimeTrust(await this.secrets.get(this.runtimeTrustKey()));
   }
 
-  async storeRuntimeTrust(settings: Record<string, unknown>): Promise<void> {
-    const trust = runtimeTrustFromSettings(settings);
+  async storeRuntimeTrust(
+    settings: Record<string, unknown>,
+    options?: { revokeGatewayTrust?: boolean },
+  ): Promise<void> {
+    const previous = await this.getRuntimeTrust();
+    const trust = mergeRuntimeTrust(previous, settings, options);
     await this.secrets.store(this.runtimeTrustKey(), JSON.stringify(trust));
   }
 

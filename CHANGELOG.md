@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.33 — 2026-07-14
+
+- Fix: unrelated Settings autosaves no longer wipe a prior URL-bound gateway approval in SecretStorage / process memory
+- Fix: gateway “Trust and save” modal only appears when Base URL actually changes (not on checkbox / wire_api autosaves)
+
 ## 1.0.32 — 2026-07-14
 
 - Security: workspace files cannot self-grant gateway/MCP/full-access/skill-root trust (SecretStorage + URL-bound gateway trust)

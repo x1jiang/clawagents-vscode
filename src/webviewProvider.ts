@@ -801,13 +801,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               : baseUrl
             : prevBaseUrl;
           const baseUrlChanged = baseUrlProvided && normalizedBase !== prevBaseUrl;
-          // Only prompt when a new/changed custom URL isn't already trusted.
-          // Partial patches (e.g. effort-only) must not clear trust / base_url.
+          const revokeGatewayTrust = baseUrlProvided && !normalizedBase;
+          // Autosave posts the full settings object (always includes base_url).
+          // Only prompt when the URL itself changed — not on checkbox / wire_api
+          // edits against an already-committed untrusted URL.
           if (
-            baseUrlProvided &&
+            baseUrlChanged &&
             normalizedBase &&
-            !isTrustedBaseUrl(normalizedBase) &&
-            (baseUrlChanged || !previous.trust_custom_base_url)
+            !isTrustedBaseUrl(normalizedBase)
           ) {
             const choice = await vscode.window.showWarningMessage(
               `Custom base URL "${normalizedBase}" will receive provider API keys. Only continue if you trust this endpoint.`,
@@ -828,11 +829,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             if (/^https:\/\//i.test(normalizedBase)) {
               incoming.ssl_verify = false;
             }
-          } else if (baseUrlProvided && !normalizedBase) {
+          } else if (revokeGatewayTrust) {
             incoming.trust_custom_base_url = false;
-          } else if (previous.trust_custom_base_url && !baseUrlChanged) {
-            // Preserve trust across partial saves that omit base_url.
-            if (!Object.prototype.hasOwnProperty.call(incoming, "trust_custom_base_url")) {
+          } else {
+            // Gateway trust is host-managed (modal / clear). Drop stale
+            // trust_custom_base_url from full autosave payloads so a mismatched
+            // committed URL cannot revoke the prior URL-bound approval.
+            delete incoming.trust_custom_base_url;
+            if (previous.trust_custom_base_url && !baseUrlChanged) {
               incoming.trust_custom_base_url = true;
             }
           }
@@ -852,7 +856,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           // Trust approvals must never live in the repository-controlled
           // .clawagents/vscode_settings.json. Persist the effective grants in
           // workspace-scoped VS Code SecretStorage for sidecar restarts.
-          await this.config.storeRuntimeTrust(settings);
+          await this.config.storeRuntimeTrust(settings, { revokeGatewayTrust });
           // Re-fetch providers so custom base_url / TLS changes update the model list.
           let providers: unknown[] = [];
           try {

@@ -105,11 +105,12 @@ def set_runtime_trust(
                 patch.get("trusted_custom_base_url")
             )
         if "trust_custom_base_url" in patch:
-            _runtime_trust["trusted_custom_base_url"] = (
-                _normalize_base_url(base_url)
-                if bool(patch.get("trust_custom_base_url"))
-                else ""
-            )
+            if bool(patch.get("trust_custom_base_url")):
+                _runtime_trust["trusted_custom_base_url"] = _normalize_base_url(base_url)
+            elif not _normalize_base_url(base_url):
+                # Explicit clear only when base_url is empty. A mismatched /
+                # untrusted committed URL must not wipe a prior URL-bound grant.
+                _runtime_trust["trusted_custom_base_url"] = ""
         for key in RUNTIME_ONLY_KEYS - {"trust_custom_base_url"}:
             if key in patch:
                 _runtime_trust[key] = bool(patch.get(key))

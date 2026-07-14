@@ -56,3 +56,29 @@ export function runtimeTrustFromSettings(settings: Record<string, unknown>): Run
     allow_external_skill_dirs: settings.allow_external_skill_dirs === true,
   };
 }
+
+/**
+ * Merge sidecar-effective trust into SecretStorage without letting an
+ * unrelated save wipe a prior URL-bound gateway approval.
+ *
+ * `trust_custom_base_url` is false whenever the committed base_url does not
+ * match the approved endpoint (including after a repo swaps the URL). In that
+ * case process memory / SecretStorage must keep the prior approval so the
+ * user can restore the original endpoint without re-prompting — unless they
+ * explicitly cleared base_url (`revokeGatewayTrust`).
+ */
+export function mergeRuntimeTrust(
+  previous: RuntimeTrust,
+  settings: Record<string, unknown>,
+  options?: { revokeGatewayTrust?: boolean },
+): RuntimeTrust {
+  const derived = runtimeTrustFromSettings(settings);
+  return {
+    mcp_trust_workspace: derived.mcp_trust_workspace,
+    allow_full_access: derived.allow_full_access,
+    allow_external_skill_dirs: derived.allow_external_skill_dirs,
+    trusted_custom_base_url: options?.revokeGatewayTrust
+      ? ""
+      : derived.trusted_custom_base_url || previous.trusted_custom_base_url,
+  };
+}

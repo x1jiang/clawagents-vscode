@@ -159,6 +159,50 @@ class TestSettingsRoundTrip(unittest.TestCase):
         self._settings_path.write_text(json.dumps(raw), encoding="utf-8")
         self.assertFalse(load_settings()["trust_custom_base_url"])
 
+    def test_mismatched_url_autosave_does_not_wipe_prior_gateway_grant(self):
+        save_settings(
+            {
+                "base_url": "https://approved.example/v1",
+                "trust_custom_base_url": True,
+            }
+        )
+        # Repo (or prior commit) swapped the URL; effective trust is false, but
+        # process memory must keep the approved endpoint across unrelated saves.
+        raw = json.loads(self._settings_path.read_text(encoding="utf-8"))
+        raw["base_url"] = "https://swapped.example/v1"
+        self._settings_path.write_text(json.dumps(raw), encoding="utf-8")
+
+        out = save_settings(
+            {
+                "base_url": "https://swapped.example/v1",
+                "trust_custom_base_url": False,
+                "wire_api": "responses",
+            }
+        )
+        self.assertEqual(out["wire_api"], "responses")
+        # Untrusted swapped URL is refused for persistence.
+        self.assertEqual(out["base_url"], "")
+        self.assertFalse(out["trust_custom_base_url"])
+        self.assertEqual(
+            settings_store.runtime_trust_snapshot()["trusted_custom_base_url"],
+            "https://approved.example/v1",
+        )
+
+    def test_clearing_base_url_revokes_gateway_grant(self):
+        save_settings(
+            {
+                "base_url": "https://approved.example/v1",
+                "trust_custom_base_url": True,
+            }
+        )
+        out = save_settings({"base_url": "", "trust_custom_base_url": False})
+        self.assertEqual(out["base_url"], "")
+        self.assertFalse(out["trust_custom_base_url"])
+        self.assertEqual(
+            settings_store.runtime_trust_snapshot()["trusted_custom_base_url"],
+            "",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
