@@ -50,6 +50,16 @@ const IMAGE_MIME: Record<string, string> = {
 const MAX_PENDING_IMAGES = 8;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
+/** Document extension → MIME type for chat attachments. PDFs reach the model
+ *  natively; .docx is text-extracted by the core. Legacy .doc is not
+ *  parseable and stays a plain @path ref. */
+const DOC_MIME: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
+const MAX_PENDING_FILES = 4;
+const MAX_FILE_ATTACH_BYTES = 10 * 1024 * 1024;
+
 /** Warn once per session about a non-local base_url from workspace settings. */
 let warnedUntrustedBaseUrl = false;
 
@@ -96,6 +106,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private queue: string[] = [];
   /** Image attachments staged for the next send (base64 stays host-side). */
   private pendingImages: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
+  /** File attachments (PDF/DOCX) staged for the next send — same contract. */
+  private pendingFiles: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   private readonly gateway: GatewayClient;
 
   constructor(
@@ -325,9 +337,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         });
     }
     await this.pushReady();
-    // Re-sync staged image chips: the webview loses its local list on
-    // reload while the images stay staged host-side (and would still send).
+    // Re-sync staged attachment chips: the webview loses its local list on
+    // reload while the attachments stay staged host-side (and would still send).
     this.postImagesPending();
+    this.postFilesPending();
     if (!this.chatId) {
       return;
     }
@@ -606,6 +619,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "clear_images":
         this.pendingImages = [];
         this.postImagesPending();
+        break;
+      case "remove_file":
+        this.pendingFiles = this.pendingFiles.filter((f) => f.id !== msg.id);
+        this.postFilesPending();
+        break;
+      case "clear_files":
+        this.pendingFiles = [];
+        this.postFilesPending();
         break;
       case "open_file":
         await this.openPath(msg.path, msg.line);
@@ -1172,6 +1193,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     const refs: string[] = [];
     const skipped: string[] = [];
     let imagesStaged = 0;
+    let filesStaged = 0;
     for (const raw of uris) {
       const trimmed = (raw || "").trim();
       if (!trimmed || trimmed.startsWith("#")) {
@@ -1207,6 +1229,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           }
           continue;
         }
+        // PDFs/DOCX resolve to document content the model can read directly,
+        // same workspace-confined staging as images.
+        const docMime = DOC_MIME[path.extname(uri.fsPath).toLowerCase()];
+        if (docMime && rel) {
+          const staged = await this.stageFile(uri, docMime);
+          if (staged) {
+            filesStaged++;
+          } else {
+            skipped.push(rel);
+          }
+          continue;
+        }
         if (rel) {
           refs.push(formatFileRef(rel).trimEnd());
         } else {
@@ -1223,6 +1257,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         message: `Attached ${imagesStaged} image${imagesStaged === 1 ? "" : "s"}`,
       });
     }
+    if (filesStaged > 0) {
+      this.postFilesPending();
+      this.post({
+        type: "status",
+        message: `Attached ${filesStaged} document${filesStaged === 1 ? "" : "s"}`,
+      });
+    }
     if (refs.length) {
       this.post({ type: "prepend", text: `${refs.join("\n")}\n` });
       this.post({
@@ -1232,14 +1273,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             ? `Attached ${refs[0].replace(/^@/, "")}`
             : `Attached ${refs.length} files`,
       });
-    } else if (imagesStaged === 0) {
+    } else if (imagesStaged === 0 && filesStaged === 0) {
       this.post({
         type: "status",
         message:
           "Drop workspace files onto the draft (hold Shift), or use +Attach.",
       });
     }
-    if (skipped.length && !refs.length && imagesStaged === 0) {
+    if (skipped.length && !refs.length && imagesStaged === 0 && filesStaged === 0) {
       this.post({
         type: "error",
         message: `Not in workspace: ${skipped.slice(0, 3).join(", ")}`,
@@ -1284,6 +1325,46 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({
       type: "images_pending",
       images: this.pendingImages.map((i) => ({ id: i.id, name: i.name })),
+    });
+  }
+
+  /** Read a document (PDF/DOCX) into the pending-attachment buffer
+   *  (host-side only). Returns true if staged. Enforces count and size caps. */
+  private async stageFile(uri: vscode.Uri, mediaType: string): Promise<boolean> {
+    if (this.pendingFiles.length >= MAX_PENDING_FILES) {
+      this.post({
+        type: "status",
+        message: `File limit reached (${MAX_PENDING_FILES}); attach ignored.`,
+      });
+      return false;
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = await vscode.workspace.fs.readFile(uri);
+    } catch {
+      return false;
+    }
+    if (bytes.byteLength > MAX_FILE_ATTACH_BYTES) {
+      this.post({
+        type: "error",
+        message: `File too large (${Math.round(bytes.byteLength / 1024 / 1024)}MB > 10MB): ${path.basename(uri.fsPath)}`,
+      });
+      return false;
+    }
+    this.pendingFiles.push({
+      id: crypto.randomBytes(6).toString("hex"),
+      name: path.basename(uri.fsPath),
+      data: Buffer.from(bytes).toString("base64"),
+      mediaType,
+    });
+    return true;
+  }
+
+  /** Push file-chip metadata (name/id only — never bytes) to the webview. */
+  private postFilesPending(): void {
+    this.post({
+      type: "files_pending",
+      files: this.pendingFiles.map((f) => ({ id: f.id, name: f.name })),
     });
   }
 
@@ -1502,8 +1583,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         (typeof settings.model === "string" && settings.model
           ? settings.model
           : this.config.model || undefined);
-      // Attach any staged images to THIS turn, then clear them so they don't
-      // leak into a later message.
+      // Attach any staged images/files to THIS turn, then clear them so they
+      // don't leak into a later message.
       const images = this.pendingImages.map((i) => ({
         data: i.data,
         media_type: i.mediaType,
@@ -1511,6 +1592,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (this.pendingImages.length > 0) {
         this.pendingImages = [];
         this.postImagesPending();
+      }
+      const files = this.pendingFiles.map((f) => ({
+        data: f.data,
+        media_type: f.mediaType,
+        name: f.name,
+      }));
+      if (this.pendingFiles.length > 0) {
+        this.pendingFiles = [];
+        this.postFilesPending();
       }
       const newId = await this.gateway.streamChat(
         task,
@@ -1525,6 +1615,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.mode === "read_only" ? "interactive" : this.interaction,
         this.caveman,
         images,
+        files,
       );
       if (newId) {
         this.chatId = newId;

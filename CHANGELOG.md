@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.31 — 2026-07-14
+
+- Image + PDF/DOCX attachments in chat (model sees pixels / document content)
+- Require `clawagents>=6.12.12` (`invoke(images=)` / `invoke(files=)`); pip spec + version gate enforce it
+
 ## 1.0.30 — 2026-07-13
 
 - Require `clawagents>=6.12.10` (`disable-model-invocation` + skill loader fixes); pip spec + version gate enforce it

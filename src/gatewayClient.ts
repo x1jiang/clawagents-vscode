@@ -388,6 +388,7 @@ export class GatewayClient {
     interaction?: InteractionStyle,
     caveman?: boolean,
     images?: Array<{ data: string; media_type: string }>,
+    files?: Array<{ data: string; media_type: string; name: string }>,
   ): Promise<string | undefined> {
     const handle = this.requireHandle();
     const body = JSON.stringify({
@@ -401,6 +402,7 @@ export class GatewayClient {
       interaction: interaction || "interactive",
       caveman: Boolean(caveman),
       images: images && images.length > 0 ? images : undefined,
+      files: files && files.length > 0 ? files : undefined,
     });
 
     let resolvedChatId = chatId;

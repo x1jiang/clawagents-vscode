@@ -332,6 +332,10 @@ class ChatBody(BaseModel):
     # {"data": <base64 or data-URL>, "media_type": "image/png"}. The sidecar
     # forwards them to agent.invoke(images=…); ignored on older clawagents.
     images: list[dict[str, Any]] | None = None
+    # File attachments (PDF/DOCX). Each item is {"data": <base64 or data-URL>,
+    # "media_type": "application/pdf", "name": "report.pdf"}. Forwarded to
+    # agent.invoke(files=…); ignored on older clawagents.
+    files: list[dict[str, Any]] | None = None
 
 
 # File-writing tools (the "Edit" auto-approve category); everything else in
@@ -986,6 +990,7 @@ def create_app() -> FastAPI:
                         ask_user_factory=ask_factory,
                         caveman=bool(body.caveman),
                         images=body.images,
+                        files=body.files,
                     )
                 )
                 # Attach the task canceller to the pre-registered run. If

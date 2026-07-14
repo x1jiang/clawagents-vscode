@@ -452,6 +452,53 @@ def _normalize_images(images: list[dict[str, Any]] | None) -> list[dict[str, Any
     return out
 
 
+# File attachments (PDF/DOCX) are heavier than images — fewer per turn, but a
+# slightly larger per-item cap (14MB b64 ≈ 10MB decoded, the core's own cap).
+_MAX_FILES_PER_TURN = 4
+_MAX_FILE_B64_BYTES = 14 * 1024 * 1024
+
+
+def _safe_attachment_name(name: Any) -> str:
+    """Reduce a client-supplied filename to a safe display basename."""
+    base = str(name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    base = "".join(c for c in base if c >= " " and c != "\x7f").strip()
+    return base[:120] or "attachment"
+
+
+def _normalize_files(files: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Validate + cap file attachments coming from the webview.
+
+    Keeps at most _MAX_FILES_PER_TURN entries with a non-empty base64/data-URL
+    ``data`` string under the size cap; each normalized to
+    {data, media_type, name}. Type policy (pdf/docx/other) lives in the core,
+    which degrades unsupported types to a text note.
+    """
+    if not files or not isinstance(files, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in files:
+        if len(out) >= _MAX_FILES_PER_TURN:
+            break
+        if not isinstance(item, dict):
+            continue
+        data = item.get("data") or item.get("url") or ""
+        if not isinstance(data, str) or not data.strip():
+            continue
+        if len(data) > _MAX_FILE_B64_BYTES:
+            continue
+        media_type = (
+            item.get("media_type") or item.get("mime_type") or "application/pdf"
+        )
+        out.append(
+            {
+                "data": data,
+                "media_type": str(media_type),
+                "name": _safe_attachment_name(item.get("name")),
+            }
+        )
+    return out
+
+
 async def run_chat_turn(
     *,
     chat_id: str,
@@ -464,6 +511,7 @@ async def run_chat_turn(
     ask_user_factory: Callable[[], Any] | None = None,
     caveman: bool = False,
     images: list[dict[str, Any]] | None = None,
+    files: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one multi-turn-aware agent invoke. Called from a worker thread's event loop."""
     from clawagents.agent import create_claw_agent
@@ -774,6 +822,21 @@ async def run_chat_turn(
                     {
                         "message": (
                             "Image attachments need clawagents≥6.12.12; "
+                            "the installed version ignored them."
+                        )
+                    },
+                )
+
+            # File attachments (PDF/DOCX) follow the same capability gate.
+            clean_files = _normalize_files(files)
+            if clean_files and "files" in inspect.signature(agent.invoke).parameters:
+                invoke_kwargs["files"] = clean_files
+            elif clean_files:
+                on_event(
+                    "warn",
+                    {
+                        "message": (
+                            "File attachments need clawagents≥6.12.12; "
                             "the installed version ignored them."
                         )
                     },
