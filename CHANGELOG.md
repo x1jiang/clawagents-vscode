@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.40 — 2026-07-14
+
+- Model picker lists only providers with a saved/valid key (no phantom catalogs)
+- Default model: **gpt-5.6-luna** + medium effort when OpenAI is available, else **gemini-3.5-flash**
+- Stock OpenAI: merge curated models with live `/v1/models` for the saved key
+
 ## 1.0.39 — 2026-07-14
 
 - ATLAS treated as built-in (Settings copy + soft-skip if runtime not ready); still on by default and auto-installed with sidecar deps

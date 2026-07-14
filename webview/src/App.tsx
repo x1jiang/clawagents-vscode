@@ -103,12 +103,18 @@ const LOCAL_DOCUMENT_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
+const PREFERRED_OPENAI_MODEL = "gpt-5.6-luna";
+const PREFERRED_GEMINI_MODEL = "gemini-3.5-flash";
+const PREFERRED_EFFORT = "medium";
+
 /** Shown when the sidecar has not returned a catalog yet (e.g. remote Python missing deps). */
 const FALLBACK_PROVIDERS: Provider[] = [
   {
     id: "openai",
     name: "OpenAI",
     models: [
+      { id: PREFERRED_OPENAI_MODEL, label: "GPT-5.6 Luna" },
+      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
       { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
       { id: "gpt-4o", label: "GPT-4o" },
     ],
@@ -158,6 +164,52 @@ const FALLBACK_PROVIDERS: Provider[] = [
     ],
   },
 ];
+
+function providerIsAvailable(provider: Provider): boolean {
+  return provider.available !== false;
+}
+
+function modelsForKeys(providers: Provider[], selectedProvider: string) {
+  const visibleProviders = providers.filter(providerIsAvailable);
+  const selected =
+    selectedProvider === "auto"
+      ? visibleProviders
+      : visibleProviders.filter((p) => p.id === selectedProvider);
+  const seen = new Set<string>();
+  return selected.flatMap((p) =>
+    (p.models || []).filter((m) => {
+      if (!m?.id || seen.has(m.id)) return false;
+      seen.add(m.id);
+      return m.available !== false;
+    }),
+  );
+}
+
+function pickPreferredModel(providers: Provider[]) {
+  const openai = providers.find((p) => p.id === "openai" && providerIsAvailable(p));
+  if (openai?.models?.some((m) => m.id === PREFERRED_OPENAI_MODEL)) {
+    return { model: PREFERRED_OPENAI_MODEL, effort: PREFERRED_EFFORT };
+  }
+  const gemini = providers.find((p) => p.id === "gemini" && providerIsAvailable(p));
+  if (gemini?.models?.some((m) => m.id === PREFERRED_GEMINI_MODEL)) {
+    return { model: PREFERRED_GEMINI_MODEL };
+  }
+  return { model: modelsForKeys(providers, "auto")[0]?.id || "" };
+}
+
+function applyKeyFlagsToFallback(
+  providers: Provider[],
+  keys: Record<string, boolean>,
+): Provider[] {
+  return providers.map((provider) => ({
+    ...provider,
+    available: keys[provider.id] === true,
+    models: (provider.models || []).map((model) => ({
+      ...model,
+      available: keys[provider.id] === true,
+    })),
+  }));
+}
 
 type SkillsPreview = {
   folders: Array<{ path: string; origin: string }>;
@@ -965,34 +1017,17 @@ export function App() {
   };
 
   const selectedProvider = String(settings.provider || "auto");
-  const providerCatalog = providers.length ? providers : FALLBACK_PROVIDERS;
-  const allModels = useMemo(() => {
-    const seen = new Set<string>();
-    const rows: NonNullable<Provider["models"]> = [];
-    // Header model list: for a concrete provider, show its catalog even if the
-    // live key probe failed (custom gateway keys often fail against api.openai.com).
-    // Auto mode still prefers providers marked available.
-    let lists: Array<NonNullable<Provider["models"]>>;
-    if (selectedProvider === "auto") {
-      const available = providerCatalog.filter((p) => p.available !== false);
-      lists = (available.length ? available : providerCatalog).map((p) => p.models || []);
-    } else {
-      const selected = providerCatalog.find((p) => p.id === selectedProvider);
-      lists = selected ? [selected.models || []] : [[]];
-    }
-    for (const list of lists) {
-      for (const m of list) {
-        if (!m?.id || seen.has(m.id)) {
-          continue;
-        }
-        seen.add(m.id);
-        rows.push(m);
-      }
-    }
-    return rows;
-  }, [providerCatalog, selectedProvider]);
-  const providerModels =
-    providerCatalog.find((p) => p.id === selectedProvider)?.models || allModels;
+  const providerCatalog = providers.length
+    ? providers
+    : applyKeyFlagsToFallback(FALLBACK_PROVIDERS, {
+        openai: hasOpenAIKey,
+        anthropic: hasAnthropicKey,
+        gemini: hasGeminiKey,
+        bedrock: hasBedrockKey || hasAwsCreds,
+      });
+  const allModels = modelsForKeys(providerCatalog, selectedProvider);
+  const providerModels = allModels;
+  const preferredPick = pickPreferredModel(providerCatalog);
 
   const activeModelId =
     (typeof settings.model === "string" && settings.model) ||
@@ -1001,6 +1036,22 @@ export function App() {
   const activeModelMeta = allModels.find((m) => m.id === activeModelId);
   modelRef.current = activeModelId || model;
   modelMetaRef.current = activeModelMeta;
+  useEffect(() => {
+    const savedModel = typeof settings.model === "string" ? settings.model : "";
+    if (savedModel && allModels.some((m) => m.id === savedModel)) return;
+    if (!preferredPick.model) return;
+    const nextSettings: Record<string, unknown> = {
+      ...settings,
+      model: preferredPick.model,
+      ...(preferredPick.effort ? { reasoning_effort: preferredPick.effort } : {}),
+    };
+    skipSettingsAutosave.current = true;
+    setModel(preferredPick.model);
+    setSettings(nextSettings);
+    const patch = normalizeSettingsForSave(nextSettings);
+    pendingSettingsPatch.current = patch;
+    post({ type: "save_settings", settings: patch });
+  }, [allModels, preferredPick, post, settings]);
   const promptTok = usage.promptTokens || 0;
   const completionTok = usage.completionTokens || 0;
   const totalTok =
@@ -1148,13 +1199,13 @@ export function App() {
           <select
             className="model-select"
             value={activeModelId}
-            title="Model for the next turn"
+            title="Only models for providers with a saved key"
             aria-label="Model"
             onChange={(e) => selectModel(e.target.value)}
           >
-            <option value="">default</option>
+            <option value="">{allModels.length ? "default" : "no key — Settings"}</option>
             {activeModelId && !allModels.some((m) => m.id === activeModelId) && (
-              <option value={activeModelId}>{activeModelId}</option>
+              <option value={activeModelId}>{activeModelId} (unavailable)</option>
             )}
             {allModels.map((m) => (
               <option key={m.id} value={m.id}>
@@ -1484,9 +1535,16 @@ export function App() {
               Model
               <select
                 value={String(settings.model || "")}
+                title="Only models for providers with a saved key"
                 onChange={(e) => selectModel(e.target.value)}
               >
-                <option value="">default</option>
+                <option value="">{providerModels.length ? "default" : "no key — Settings"}</option>
+                {settings.model &&
+                  !providerModels.some((m) => m.id === String(settings.model)) && (
+                    <option value={String(settings.model)}>
+                      {String(settings.model)} (unavailable)
+                    </option>
+                  )}
                 {providerModels.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label || m.id}
@@ -1772,7 +1830,7 @@ export function App() {
                         ...s,
                         provider: "openai",
                         base_url: "",
-                        model: String(s.model || "") || "gpt-5.6-sol",
+                        model: String(s.model || "") || PREFERRED_OPENAI_MODEL,
                       }));
                       setProviderSetupMsg("Official OpenAI (api.openai.com) — save API key below.");
                     }}

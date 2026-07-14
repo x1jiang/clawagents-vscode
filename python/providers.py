@@ -20,9 +20,9 @@ _CATALOG: list[dict[str, Any]] = [
         "env_key": "OPENAI_API_KEY",
         "models": [
             # GPT-5.6 family (current flagship ladder)
-            {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol"},
-            {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra"},
             {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna"},
+            {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra"},
+            {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol"},
             {"id": "gpt-5.6", "label": "GPT-5.6 (alias → Sol)"},
             # GPT-5.5
             {"id": "gpt-5.5", "label": "GPT-5.5"},
@@ -287,6 +287,23 @@ def _probe_compatible_endpoint(
     return True, f"Key valid at {host} (no chat models listed)", []
 
 
+def _merge_curated_with_remote(
+    curated: list[dict[str, Any]], remote: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Keep curated labels/order for models confirmed by a live endpoint."""
+    remote_ids = {
+        str(model.get("id") or "").strip()
+        for model in remote
+        if isinstance(model, dict)
+    }
+    merged = [
+        model
+        for model in curated
+        if str(model.get("id") or "").strip() in remote_ids
+    ]
+    return merged or curated
+
+
 def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
     """Build the sidebar provider/model catalog.
 
@@ -296,7 +313,8 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
 
     When Settings ``base_url`` is a trusted OpenAI-compatible endpoint, OpenAI
     (and Bedrock gateway mode) probe/list models from that host instead of
-    api.openai.com.
+    api.openai.com. Stock OpenAI retains curated labels/order while intersecting
+    its catalog with live ``/v1/models`` for the saved key.
     """
     settings_base, ssl_verify = _settings_base_url()
     out: list[dict[str, Any]] = []
@@ -329,6 +347,13 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
                 available = False
             elif not checked.get("ok"):
                 available = True
+            if available and pid == "openai":
+                key = _sanitize_api_key(os.environ.get("OPENAI_API_KEY"))
+                ok, _detail, remote_models = _probe_compatible_endpoint(
+                    "https://api.openai.com/v1", key
+                )
+                if ok and remote_models:
+                    models = _merge_curated_with_remote(models, remote_models)
 
         out.append(
             {
