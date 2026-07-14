@@ -138,9 +138,12 @@ export type HostToWebview =
       ignored_dirs: string[];
       auto_discover: boolean;
       unavailable?: Record<string, string>;
+      /** Skill name → quarantine reason from the sidecar's load-time content scan. */
+      quarantined?: Record<string, string>;
       warnings?: string[];
     }
   | { type: "skill_dir_picked"; path: string }
+  | { type: "images_pending"; images: Array<{ id: string; name: string }> }
   | { type: "verify_result"; provider: string; ok: boolean; detail?: string }
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
@@ -185,6 +188,8 @@ export type WebviewToHost =
     }
   | { type: "attach_uris"; uris: string[] }
   | { type: "pick_attach_files" }
+  | { type: "remove_image"; id: string }
+  | { type: "clear_images" }
   | { type: "open_file"; path: string; line?: number }
   | { type: "diff_snapshot"; path: string; snapshotId?: string; snapshotRel?: string }
   | { type: "restore_snapshot"; snapshotId: string; rel: string }

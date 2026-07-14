@@ -422,6 +422,36 @@ Pattern: [thing] [action] [reason]. [next step].
 """
 
 
+# Bound attachment payloads so a malformed/hostile request can't OOM the
+# sidecar. The core resizes each image down further before sending.
+_MAX_IMAGES_PER_TURN = 8
+_MAX_IMAGE_B64_BYTES = 12 * 1024 * 1024  # ~9 MB decoded
+
+
+def _normalize_images(images: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Validate + cap image attachments coming from the webview.
+
+    Keeps at most _MAX_IMAGES_PER_TURN entries with a non-empty base64/data-URL
+    ``data`` string under the size cap; each normalized to {data, media_type}.
+    """
+    if not images or not isinstance(images, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in images:
+        if len(out) >= _MAX_IMAGES_PER_TURN:
+            break
+        if not isinstance(item, dict):
+            continue
+        data = item.get("data") or item.get("url") or ""
+        if not isinstance(data, str) or not data.strip():
+            continue
+        if len(data) > _MAX_IMAGE_B64_BYTES:
+            continue
+        media_type = item.get("media_type") or item.get("mime_type") or "image/png"
+        out.append({"data": data, "media_type": str(media_type)})
+    return out
+
+
 async def run_chat_turn(
     *,
     chat_id: str,
@@ -433,6 +463,7 @@ async def run_chat_turn(
     cancel_check: Callable[[], bool],
     ask_user_factory: Callable[[], Any] | None = None,
     caveman: bool = False,
+    images: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one multi-turn-aware agent invoke. Called from a worker thread's event loop."""
     from clawagents.agent import create_claw_agent
@@ -726,13 +757,29 @@ async def run_chat_turn(
                 # Sidecar has no stdin — replace CLI ask_user with webview HITL.
                 agent.tools.register(ask_user_factory())
 
-            result = await agent.invoke(
-                augmented,
-                on_event=_on_legacy_event,
-                on_stream_event=_on_stream_event,
-                session=session,
-                features={"session_persistence": True, "file_snapshots": True},
-            )
+            invoke_kwargs: dict[str, Any] = {
+                "on_event": _on_legacy_event,
+                "on_stream_event": _on_stream_event,
+                "session": session,
+                "features": {"session_persistence": True, "file_snapshots": True},
+            }
+            # Image attachments require a newer clawagents (invoke(images=…));
+            # older installs simply ignore them rather than crashing the turn.
+            clean_images = _normalize_images(images)
+            if clean_images and "images" in inspect.signature(agent.invoke).parameters:
+                invoke_kwargs["images"] = clean_images
+            elif clean_images:
+                on_event(
+                    "warn",
+                    {
+                        "message": (
+                            "Image attachments need clawagents≥6.12.12; "
+                            "the installed version ignored them."
+                        )
+                    },
+                )
+
+            result = await agent.invoke(augmented, **invoke_kwargs)
         finally:
             try:
                 os.chdir(prev)

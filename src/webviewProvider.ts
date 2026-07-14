@@ -39,6 +39,17 @@ const DEFAULT_AUTO_APPROVE: AutoApprove = {
   browser: false,
 };
 
+/** Image file extension → MIME type for chat attachments. */
+const IMAGE_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+const MAX_PENDING_IMAGES = 8;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
 /** Warn once per session about a non-local base_url from workspace settings. */
 let warnedUntrustedBaseUrl = false;
 
@@ -83,6 +94,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private caveman = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
   private queue: string[] = [];
+  /** Image attachments staged for the next send (base64 stays host-side). */
+  private pendingImages: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   private readonly gateway: GatewayClient;
 
   constructor(
@@ -312,6 +325,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         });
     }
     await this.pushReady();
+    // Re-sync staged image chips: the webview loses its local list on
+    // reload while the images stay staged host-side (and would still send).
+    this.postImagesPending();
     if (!this.chatId) {
       return;
     }
@@ -583,6 +599,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "remove_image":
+        this.pendingImages = this.pendingImages.filter((i) => i.id !== msg.id);
+        this.postImagesPending();
+        break;
+      case "clear_images":
+        this.pendingImages = [];
+        this.postImagesPending();
+        break;
       case "open_file":
         await this.openPath(msg.path, msg.line);
         break;
@@ -1147,6 +1171,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private async attachUris(uris: string[]): Promise<void> {
     const refs: string[] = [];
     const skipped: string[] = [];
+    let imagesStaged = 0;
     for (const raw of uris) {
       const trimmed = (raw || "").trim();
       if (!trimmed || trimmed.startsWith("#")) {
@@ -1170,6 +1195,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           continue;
         }
         const rel = this.workspaceRelative(uri);
+        // Images resolve to actual pixels (base64 content block) rather than a
+        // text @path ref, but stay workspace-confined like every other attach.
+        const mime = IMAGE_MIME[path.extname(uri.fsPath).toLowerCase()];
+        if (mime && rel) {
+          const staged = await this.stageImage(uri, mime);
+          if (staged) {
+            imagesStaged++;
+          } else {
+            skipped.push(rel);
+          }
+          continue;
+        }
         if (rel) {
           refs.push(formatFileRef(rel).trimEnd());
         } else {
@@ -1178,6 +1215,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       } catch {
         skipped.push(trimmed);
       }
+    }
+    if (imagesStaged > 0) {
+      this.postImagesPending();
+      this.post({
+        type: "status",
+        message: `Attached ${imagesStaged} image${imagesStaged === 1 ? "" : "s"}`,
+      });
     }
     if (refs.length) {
       this.post({ type: "prepend", text: `${refs.join("\n")}\n` });
@@ -1188,19 +1232,59 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             ? `Attached ${refs[0].replace(/^@/, "")}`
             : `Attached ${refs.length} files`,
       });
-    } else {
+    } else if (imagesStaged === 0) {
       this.post({
         type: "status",
         message:
           "Drop workspace files onto the draft (hold Shift), or use +Attach.",
       });
     }
-    if (skipped.length && !refs.length) {
+    if (skipped.length && !refs.length && imagesStaged === 0) {
       this.post({
         type: "error",
         message: `Not in workspace: ${skipped.slice(0, 3).join(", ")}`,
       });
     }
+  }
+
+  /** Read an image file into the pending-attachment buffer (host-side only).
+   *  Returns true if staged. Enforces count and size caps. */
+  private async stageImage(uri: vscode.Uri, mediaType: string): Promise<boolean> {
+    if (this.pendingImages.length >= MAX_PENDING_IMAGES) {
+      this.post({
+        type: "status",
+        message: `Image limit reached (${MAX_PENDING_IMAGES}); attach ignored.`,
+      });
+      return false;
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = await vscode.workspace.fs.readFile(uri);
+    } catch {
+      return false;
+    }
+    if (bytes.byteLength > MAX_IMAGE_BYTES) {
+      this.post({
+        type: "error",
+        message: `Image too large (${Math.round(bytes.byteLength / 1024 / 1024)}MB > 10MB): ${path.basename(uri.fsPath)}`,
+      });
+      return false;
+    }
+    this.pendingImages.push({
+      id: crypto.randomBytes(6).toString("hex"),
+      name: path.basename(uri.fsPath),
+      data: Buffer.from(bytes).toString("base64"),
+      mediaType,
+    });
+    return true;
+  }
+
+  /** Push chip metadata (name/id only — never bytes) to the webview. */
+  private postImagesPending(): void {
+    this.post({
+      type: "images_pending",
+      images: this.pendingImages.map((i) => ({ id: i.id, name: i.name })),
+    });
   }
 
   private workspaceRelative(uri: vscode.Uri): string | undefined {
@@ -1418,6 +1502,16 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         (typeof settings.model === "string" && settings.model
           ? settings.model
           : this.config.model || undefined);
+      // Attach any staged images to THIS turn, then clear them so they don't
+      // leak into a later message.
+      const images = this.pendingImages.map((i) => ({
+        data: i.data,
+        media_type: i.mediaType,
+      }));
+      if (this.pendingImages.length > 0) {
+        this.pendingImages = [];
+        this.postImagesPending();
+      }
       const newId = await this.gateway.streamChat(
         task,
         this.chatId,
@@ -1430,6 +1524,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.autoApprove,
         this.mode === "read_only" ? "interactive" : this.interaction,
         this.caveman,
+        images,
       );
       if (newId) {
         this.chatId = newId;

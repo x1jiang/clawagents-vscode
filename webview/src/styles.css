@@ -509,6 +509,47 @@ summary {
   color: var(--muted);
 }
 
+.image-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.image-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--input-bg);
+  font-size: 11px;
+  color: var(--fg);
+}
+
+.image-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 3px;
+  line-height: 1;
+  border-radius: 8px;
+}
+
+.image-chip-remove:hover {
+  color: var(--fg);
+  background: var(--border);
+}
+
 .compose-row {
   display: grid;
   grid-template-columns: 1fr auto;

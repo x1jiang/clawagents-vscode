@@ -224,6 +224,7 @@ type Panel = "chat" | "history" | "settings" | "diagnostics";
 export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [draft, setDraft] = useState("");
+  const [pendingImages, setPendingImages] = useState<Array<{ id: string; name: string }>>([]);
   const [workspace, setWorkspace] = useState<string | undefined>();
   const [model, setModel] = useState("default");
   const [mode, setMode] = useState<AgentMode>("auto");
@@ -526,6 +527,9 @@ export function App() {
         case "prepend":
           setDraft((d) => msg.text + d);
           textareaRef.current?.focus();
+          break;
+        case "images_pending":
+          setPendingImages(msg.images);
           break;
         case "user_echo":
           setItems((prev) => [...prev, { kind: "user", text: msg.text }]);
@@ -2955,7 +2959,7 @@ export function App() {
                 type="button"
                 className="ghost tiny"
                 disabled={busy}
-                title="Pick files to attach as @path refs"
+                title="Attach files — images are sent as pixels; other files as @path refs"
                 onClick={() => post({ type: "pick_attach_files" })}
               >
                 +Attach
@@ -2979,6 +2983,23 @@ export function App() {
                 New
               </button>
             </div>
+            {pendingImages.length > 0 && (
+              <div className="image-attachments">
+                {pendingImages.map((img) => (
+                  <span key={img.id} className="image-chip" title={img.name}>
+                    <span className="image-chip-name">🖼 {img.name}</span>
+                    <button
+                      type="button"
+                      className="image-chip-remove"
+                      title="Remove image"
+                      onClick={() => post({ type: "remove_image", id: img.id })}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div
               className={`compose-row${dragOver ? " drag-over" : ""}`}
               onDragEnter={(e) => {

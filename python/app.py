@@ -328,6 +328,10 @@ class ChatBody(BaseModel):
     interaction: InteractionStyle = "interactive"
     # Terse caveman-style replies (juliusbrussee/caveman).
     caveman: bool = False
+    # Image attachments for the first user turn. Each item is
+    # {"data": <base64 or data-URL>, "media_type": "image/png"}. The sidecar
+    # forwards them to agent.invoke(images=…); ignored on older clawagents.
+    images: list[dict[str, Any]] | None = None
 
 
 # File-writing tools (the "Edit" auto-approve category); everything else in
@@ -981,6 +985,7 @@ def create_app() -> FastAPI:
                         cancel_check=cancel_ev.is_set,
                         ask_user_factory=ask_factory,
                         caveman=bool(body.caveman),
+                        images=body.images,
                     )
                 )
                 # Attach the task canceller to the pre-registered run. If
