@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.37 — 2026-07-14
+
+- Fix: restore Settings `atlas` default key (required for ATLAS checkbox persistence)
+
 ## 1.0.36 — 2026-07-14
 
 - Require `clawagents>=6.13.1` (ATLAS fail-closed gates)
