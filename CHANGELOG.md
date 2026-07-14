@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.32 — 2026-07-14
+
+- Security: workspace files cannot self-grant gateway/MCP/full-access/skill-root trust (SecretStorage + URL-bound gateway trust)
+- Fix: local image/file attachments stage reliably for remote extension hosts (ack-gated transfer)
+- Skills catalog preview uses an invalidating content snapshot (no rebuild on every refresh)
+- Require `clawagents>=6.12.13` (skill retrieval / paged `use_skill` / intersecting `allowed-tools`)
+
 ## 1.0.31 — 2026-07-14
 
 - Image + PDF/DOCX attachments in chat (model sees pixels / document content)
