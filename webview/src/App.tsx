@@ -160,6 +160,8 @@ type SkillsPreview = {
   auto_discover: boolean;
   /** name → why the skill can't run here (missing binary/env/OS). */
   unavailable?: Record<string, string>;
+  /** name → why the skill was blocked by the content scanner. */
+  quarantined?: Record<string, string>;
   /** Loader diagnostics (spec violations, oversized/skipped files). */
   warnings?: string[];
 };
@@ -453,6 +455,7 @@ export function App() {
             ignored_dirs: msg.ignored_dirs || [],
             auto_discover: Boolean(msg.auto_discover),
             unavailable: msg.unavailable || {},
+            quarantined: msg.quarantined || {},
             warnings: msg.warnings || [],
           });
           break;
@@ -2271,6 +2274,26 @@ export function App() {
                 <div className="skill-list">
                   {Object.entries(skillsPreview?.unavailable || {}).map(([name, reason]) => (
                     <div key={`unavail-${name}`} className="skill-item skill-item-excluded">
+                      <div className="skill-item-main">
+                        <div className="skill-item-title">
+                          <strong>{name}</strong>
+                        </div>
+                        <div className="skill-item-desc muted tiny">{reason}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {Object.keys(skillsPreview?.quarantined || {}).length > 0 && (
+              <>
+                <div className="skill-subheading">
+                  ⚠ Quarantined (failed security scan — not loaded)
+                </div>
+                <div className="skill-list">
+                  {Object.entries(skillsPreview?.quarantined || {}).map(([name, reason]) => (
+                    <div key={`quar-${name}`} className="skill-item skill-item-excluded">
                       <div className="skill-item-main">
                         <div className="skill-item-title">
                           <strong>{name}</strong>

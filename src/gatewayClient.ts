@@ -285,6 +285,8 @@ export class GatewayClient {
       auto_discover: boolean;
       /** name → why the skill can't run here (missing binary/env/OS). */
       unavailable?: Record<string, string>;
+      /** name → why the skill was blocked by the content scanner. */
+      quarantined?: Record<string, string>;
       /** Loader diagnostics (spec violations, oversized/skipped files). */
       warnings?: string[];
     }>(this.requireHandle(), "GET", "/skills");

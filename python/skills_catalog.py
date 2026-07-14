@@ -100,18 +100,21 @@ def resolve_skill_dir_paths(settings: dict[str, Any] | None = None) -> list[str]
     return [e["path"] for e in resolve_skill_dirs(settings)]
 
 
-def _scan_skills(dirs: list[str]) -> tuple[list[dict[str, Any]], dict[str, str], list[str]]:
+def _scan_skills(
+    dirs: list[str],
+) -> tuple[list[dict[str, Any]], dict[str, str], list[str], dict[str, str]]:
     """Load skills from dirs via SkillStore (same rules as the agent).
 
-    Returns (skills, ineligible name→reason, loader warnings). The last two
-    are empty on older clawagents installs that don't expose them.
+    Returns (skills, ineligible name→reason, loader warnings,
+    quarantined name→reason). The trailing fields are empty on older
+    clawagents installs that don't expose them.
     """
     if not dirs:
-        return [], {}, []
+        return [], {}, [], {}
     try:
         from clawagents.tools.skills import SkillStore
     except Exception:  # noqa: BLE001
-        return [], {}, []
+        return [], {}, [], {}
 
     store = SkillStore()
     for d in dirs:
@@ -127,10 +130,11 @@ def _scan_skills(dirs: list[str]) -> tuple[list[dict[str, Any]], dict[str, str],
         except RuntimeError:
             asyncio.run(store.load_all())
     except Exception:  # noqa: BLE001
-        return [], {}, []
+        return [], {}, [], {}
 
     ineligible = dict(getattr(store, "ineligible", {}) or {})
     warnings = list(getattr(store, "warnings", []) or [])
+    quarantined = dict(getattr(store, "quarantined", {}) or {})
 
     # Map skill path → owning root dir for UI badges
     root_paths = [Path(d).resolve() for d in dirs]
@@ -160,7 +164,7 @@ def _scan_skills(dirs: list[str]) -> tuple[list[dict[str, Any]], dict[str, str],
             }
         )
     out.sort(key=lambda s: s["name"].lower())
-    return out, ineligible, warnings
+    return out, ineligible, warnings, quarantined
 
 
 def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -181,7 +185,7 @@ def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
-    skills, ineligible, warnings = _scan_skills(dir_paths)
+    skills, ineligible, warnings, quarantined = _scan_skills(dir_paths)
     exclude = [
         n for n in (settings.get("skill_exclude") or []) if isinstance(n, str) and n.strip()
     ]
@@ -204,6 +208,9 @@ def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "auto_discover": bool(settings.get("skill_auto_discover", True)),
         # name → why the skill can't run here (missing binary/env/OS).
         "unavailable": ineligible,
+        # name → why the skill was blocked by the content scanner
+        # (invisible-Unicode / remote-exec); not loaded into the catalog.
+        "quarantined": quarantined,
         # Loader diagnostics (spec violations, oversized/skipped files).
         "warnings": warnings,
     }
