@@ -2548,13 +2548,9 @@ export function App() {
               ATLAS (smarter failure checks)
             </label>
             <p className="muted tiny" style={{ marginTop: 4 }}>
-              On by default: runtime failure taxonomy (reflect on tool failures / before submit).
-              Uncheck to disable. Needs clawagents≥6.13.1 and{" "}
-              <code>
-                pip install &apos;atlas-skill @
-                git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964&apos;
-              </code>
-              {Boolean(settings.atlas) ? " — enabled for new turns." : " — currently off."}
+              Built-in and on by default — reflects on tool failures and before submit.
+              Uncheck to disable.
+              {Boolean(settings.atlas) ? " Enabled for new turns." : " Currently off."}
               Optional workspace <code>atlas.json</code> for program config.
             </p>
           </section>

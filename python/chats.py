@@ -583,8 +583,8 @@ async def run_chat_turn(
     # Capability probe once — older clawagents wheels omit newer kwargs.
     _agent_params = inspect.signature(create_claw_agent).parameters
 
-    # ATLAS failure-taxonomy (on by default). Needs clawagents with atlas=
-    # support and ``atlas-skill`` from GitHub for the runtime package.
+    # ATLAS failure-taxonomy (built-in, on by default). Runtime package is
+    # auto-installed with sidecar deps; soft-skip if still missing.
     if settings.get("atlas"):
         if "atlas" in _agent_params:
             kwargs["atlas"] = True
@@ -596,11 +596,8 @@ async def run_chat_turn(
                 "warn",
                 {
                     "message": (
-                        "ATLAS is enabled in Settings but this clawagents build "
-                        "does not support atlas=. Upgrade with: "
-                        "pip install -U 'clawagents>=6.13.1' && "
-                        "pip install 'atlas-skill @ "
-                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964'"
+                        "ATLAS needs clawagents≥6.13.1. "
+                        "Run Command Palette → ClawAgents: Install/Upgrade Python Dependencies."
                     ),
                 },
             )
@@ -831,16 +828,25 @@ async def run_chat_turn(
                 )
             except ImportError as exc:
                 if kwargs.get("atlas"):
-                    msg = (
-                        "ATLAS enabled but the optional package is missing. "
-                        "Install with: pip install 'atlas-skill @ "
-                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964' "
-                        f"({exc})"
+                    # Built-in ATLAS: soft-skip so a missing runtime does not
+                    # block the turn (sidecar deps install should catch up).
+                    on_event(
+                        "warn",
+                        {
+                            "message": (
+                                "ATLAS runtime not ready yet — continuing without it. "
+                                "Run ClawAgents: Install/Upgrade Python Dependencies, "
+                                f"then Restart Sidecar. ({exc})"
+                            ),
+                        },
                     )
-                    on_event("error", {"message": msg})
-                    append_ui_event(chat_id, {"kind": "error", "text": msg})
-                    return {"ok": False, "error": msg}
-                raise
+                    kwargs.pop("atlas", None)
+                    kwargs.pop("atlas_config", None)
+                    agent = create_claw_agent(
+                        **{k: v for k, v in kwargs.items() if k in allowed}
+                    )
+                else:
+                    raise
             agent.before_tool = before_tool_factory(mode=mode, grants=GrantStore())
             if ask_user_factory is not None:
                 # Sidecar has no stdin — replace CLI ask_user with webview HITL.
@@ -887,16 +893,28 @@ async def run_chat_turn(
                 result = await agent.invoke(augmented, **invoke_kwargs)
             except ImportError as exc:
                 if kwargs.get("atlas"):
-                    msg = (
-                        "ATLAS failed to start (optional package missing?). "
-                        "Install with: pip install 'atlas-skill @ "
-                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964' "
-                        f"({exc})"
+                    on_event(
+                        "warn",
+                        {
+                            "message": (
+                                "ATLAS failed to start — continuing without it. "
+                                "Run ClawAgents: Install/Upgrade Python Dependencies, "
+                                f"then Restart Sidecar. ({exc})"
+                            ),
+                        },
                     )
-                    on_event("error", {"message": msg})
-                    append_ui_event(chat_id, {"kind": "error", "text": msg})
-                    return {"ok": False, "error": msg}
-                raise
+                    # Rebuild without atlas and retry once.
+                    kwargs.pop("atlas", None)
+                    kwargs.pop("atlas_config", None)
+                    agent = create_claw_agent(
+                        **{k: v for k, v in kwargs.items() if k in allowed}
+                    )
+                    agent.before_tool = before_tool_factory(mode=mode, grants=GrantStore())
+                    if ask_user_factory is not None:
+                        agent.tools.register(ask_user_factory())
+                    result = await agent.invoke(augmented, **invoke_kwargs)
+                else:
+                    raise
         finally:
             try:
                 os.chdir(prev)

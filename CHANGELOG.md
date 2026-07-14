@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.39 — 2026-07-14
+
+- ATLAS treated as built-in (Settings copy + soft-skip if runtime not ready); still on by default and auto-installed with sidecar deps
+
 ## 1.0.38 — 2026-07-14
 
 - Settings: **ATLAS** is on by default (uncheck to disable)

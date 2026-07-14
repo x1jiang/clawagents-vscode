@@ -21,7 +21,7 @@ DEFAULTS: dict[str, Any] = {
     "telemetry": False,
     "trajectory": False,
     "learn": False,
-    # ATLAS failure-taxonomy supervision (on by default; needs atlas-skill).
+    # ATLAS failure-taxonomy supervision (built-in; on by default).
     "atlas": True,
     "browser_tools": False,
     "mcp_enabled": False,

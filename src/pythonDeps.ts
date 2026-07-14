@@ -15,7 +15,7 @@ export const SIDECAR_PIP_PACKAGES = [
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
   "python-dotenv>=1.0.0,<2",
-  // ATLAS is Settings-default-on; without this, turns fail-closed on ImportError.
+  // ATLAS is a built-in sidecar dep (Settings default on).
   ATLAS_SKILL_PIP,
 ] as const;
 

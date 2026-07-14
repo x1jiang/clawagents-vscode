@@ -2,7 +2,7 @@
 #
 # On first start / Restart Sidecar, the extension runs:
 #   python -m pip install -U 'clawagents[gemini,anthropic,bedrock,mcp]>=6.13.1,<7' ...
-#   plus the pinned atlas-skill Git revision (ATLAS is Settings-default-on).
+#   plus the pinned atlas-skill Git revision (built-in ATLAS, Settings default on).
 #
 # Or Command Palette → ClawAgents: Install/Upgrade Python Dependencies
 #
