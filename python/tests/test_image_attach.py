@@ -51,3 +51,8 @@ def test_caps_count():
 def test_rejects_oversized_payload():
     huge = "A" * (_MAX_IMAGE_B64_BYTES + 1)
     assert _normalize_images([{"data": huge}]) == []
+
+
+def test_cap_covers_extension_ten_mib_decoded_limit():
+    ten_mib_as_base64 = ((10 * 1024 * 1024 + 2) // 3) * 4
+    assert _MAX_IMAGE_B64_BYTES >= ten_mib_as_base64

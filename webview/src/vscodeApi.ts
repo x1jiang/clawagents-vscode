@@ -145,6 +145,7 @@ export type HostToWebview =
   | { type: "skill_dir_picked"; path: string }
   | { type: "images_pending"; images: Array<{ id: string; name: string }> }
   | { type: "files_pending"; files: Array<{ id: string; name: string }> }
+  | { type: "attachment_staged"; requestId: string }
   | { type: "verify_result"; provider: string; ok: boolean; detail?: string }
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
@@ -188,6 +189,11 @@ export type WebviewToHost =
       kind: "file" | "selection" | "problems" | "editors" | "terminal" | "git";
     }
   | { type: "attach_uris"; uris: string[] }
+  | {
+      type: "attach_local_files";
+      requestId: string;
+      files: Array<{ name: string; mediaType: string; data: string }>;
+    }
   | { type: "pick_attach_files" }
   | { type: "remove_image"; id: string }
   | { type: "clear_images" }

@@ -18,6 +18,12 @@ import {
   wrapSelectionBlock,
 } from "./config";
 import { GatewayClient } from "./gatewayClient";
+import {
+  decodeLocalAttachment,
+  detectDocumentMediaType,
+  detectImageMediaType,
+  safeLocalAttachmentName,
+} from "./localAttachments";
 import type {
   AgentMode,
   AutoApprove,
@@ -595,6 +601,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "attach_uris":
         await this.attachUris(msg.uris);
+        break;
+      case "attach_local_files":
+        try {
+          await this.attachLocalFiles(msg.files);
+        } finally {
+          if (typeof msg.requestId === "string" && msg.requestId.length <= 100) {
+            this.post({ type: "attachment_staged", requestId: msg.requestId });
+          }
+        }
         break;
       case "pick_attach_files": {
         const uris = await vscode.window.showOpenDialog({
@@ -1284,6 +1299,105 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       this.post({
         type: "error",
         message: `Not in workspace: ${skipped.slice(0, 3).join(", ")}`,
+      });
+    }
+  }
+
+  /** Stage bytes selected, pasted, or dropped in the locally rendered webview.
+   *  This is intentionally separate from URI attachment: in a Remote SSH /
+   *  Codespaces window the extension host cannot read a path on the user's
+   *  desktop, while the webview can read the browser File and transfer it. */
+  private async attachLocalFiles(
+    files: Array<{ name: string; mediaType: string; data: string }>,
+  ): Promise<void> {
+    if (!Array.isArray(files)) {
+      return;
+    }
+    let imagesStaged = 0;
+    let filesStaged = 0;
+    const rejected: string[] = [];
+
+    if (files.length > 1) {
+      rejected.push(`batch contained ${files.length} files (send one at a time)`);
+    }
+
+    for (const item of files.slice(0, 1)) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const name = safeLocalAttachmentName(item.name);
+      if (
+        this.pendingImages.length >= MAX_PENDING_IMAGES &&
+        this.pendingFiles.length >= MAX_PENDING_FILES
+      ) {
+        rejected.push(`${name} (attachment limits reached)`);
+        continue;
+      }
+      const data = decodeLocalAttachment(item.data);
+      if (!data) {
+        rejected.push(`${name} (invalid or over 10MB)`);
+        continue;
+      }
+
+      // Browser MIME/name metadata is client-controlled. Sniff the supported
+      // image formats so a mislabeled paste cannot reach the model as pixels.
+      const imageType = detectImageMediaType(data.bytes);
+      if (imageType) {
+        if (this.pendingImages.length >= MAX_PENDING_IMAGES) {
+          rejected.push(`${name} (image limit ${MAX_PENDING_IMAGES})`);
+          continue;
+        }
+        this.pendingImages.push({
+          id: crypto.randomBytes(6).toString("hex"),
+          name,
+          data: data.base64,
+          mediaType: imageType,
+        });
+        imagesStaged++;
+        continue;
+      }
+
+      const namedDocumentType = DOC_MIME[path.extname(name).toLowerCase()];
+      const documentType = detectDocumentMediaType(data.bytes);
+      if (documentType && documentType === namedDocumentType) {
+        if (this.pendingFiles.length >= MAX_PENDING_FILES) {
+          rejected.push(`${name} (document limit ${MAX_PENDING_FILES})`);
+          continue;
+        }
+        this.pendingFiles.push({
+          id: crypto.randomBytes(6).toString("hex"),
+          name,
+          data: data.base64,
+          mediaType: documentType,
+        });
+        filesStaged++;
+        continue;
+      }
+
+      rejected.push(`${name} (unsupported local file type)`);
+    }
+
+    if (imagesStaged > 0) {
+      this.postImagesPending();
+    }
+    if (filesStaged > 0) {
+      this.postFilesPending();
+    }
+    if (imagesStaged > 0 || filesStaged > 0) {
+      const parts = [
+        imagesStaged > 0
+          ? `${imagesStaged} image${imagesStaged === 1 ? "" : "s"}`
+          : "",
+        filesStaged > 0
+          ? `${filesStaged} document${filesStaged === 1 ? "" : "s"}`
+          : "",
+      ].filter(Boolean);
+      this.post({ type: "status", message: `Attached ${parts.join(" and ")} from this device` });
+    }
+    if (rejected.length > 0) {
+      this.post({
+        type: "error",
+        message: `Could not attach: ${rejected.slice(0, 3).join(", ")}`,
       });
     }
   }

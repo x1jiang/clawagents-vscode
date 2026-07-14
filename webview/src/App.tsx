@@ -90,6 +90,19 @@ type Provider = {
   base_url?: string;
 };
 
+const MAX_LOCAL_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_LOCAL_ATTACHMENTS_PER_PICK = 12;
+const LOCAL_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+const LOCAL_DOCUMENT_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+
 /** Shown when the sidecar has not returned a catalog yet (e.g. remote Python missing deps). */
 const FALLBACK_PROVIDERS: Provider[] = [
   {
@@ -290,6 +303,7 @@ export function App() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const localAttachInputRef = useRef<HTMLInputElement>(null);
   const persistTimer = useRef<number | undefined>();
   const settingsSaveTimer = useRef<number | undefined>();
   /** Skip one effect cycle after applying host-pushed settings (avoid save loops). */
@@ -301,6 +315,8 @@ export function App() {
   const historySearchTimer = useRef<number | undefined>();
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
+  const attachmentRequestsRef = useRef(new Set<string>());
+  const [attachmentUploads, setAttachmentUploads] = useState(0);
 
   const commitRunCost = (u: {
     promptTokens?: number;
@@ -534,6 +550,11 @@ export function App() {
           break;
         case "files_pending":
           setPendingFiles(msg.files);
+          break;
+        case "attachment_staged":
+          if (attachmentRequestsRef.current.delete(msg.requestId)) {
+            setAttachmentUploads(attachmentRequestsRef.current.size);
+          }
           break;
         case "user_echo":
           setItems((prev) => [...prev, { kind: "user", text: msg.text }]);
@@ -1054,6 +1075,13 @@ export function App() {
   };
 
   const send = () => {
+    if (attachmentRequestsRef.current.size > 0) {
+      setItems((previous) => [
+        ...previous,
+        { kind: "status", text: "Finishing attachment upload…" },
+      ]);
+      return;
+    }
     const value = draft.trim();
     if (!value) {
       return;
@@ -1084,6 +1112,17 @@ export function App() {
       interaction: effectiveInteraction,
       caveman,
     });
+  };
+
+  const beginAttachmentRequest = (requestId: string) => {
+    attachmentRequestsRef.current.add(requestId);
+    setAttachmentUploads(attachmentRequestsRef.current.size);
+  };
+
+  const finishAttachmentRequest = (requestId: string) => {
+    if (attachmentRequestsRef.current.delete(requestId)) {
+      setAttachmentUploads(attachmentRequestsRef.current.size);
+    }
   };
 
   return (
@@ -2962,11 +3001,37 @@ export function App() {
               <button
                 type="button"
                 className="ghost tiny"
-                disabled={busy}
-                title="Attach files — images become pixels, PDF/DOCX become document content; other files as @path refs"
-                onClick={() => post({ type: "pick_attach_files" })}
+                disabled={busy || attachmentUploads > 0}
+                title="Attach images, PDF, or DOCX from this device"
+                onClick={() => localAttachInputRef.current?.click()}
               >
                 +Attach
+              </button>
+              <input
+                ref={localAttachInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const files = Array.from(e.currentTarget.files ?? []);
+                  e.currentTarget.value = "";
+                  void attachLocalBrowserFiles(
+                    files,
+                    setItems,
+                    beginAttachmentRequest,
+                    finishAttachmentRequest,
+                  );
+                }}
+              />
+              <button
+                type="button"
+                className="ghost tiny"
+                disabled={busy || attachmentUploads > 0}
+                title="Attach files from the remote workspace"
+                onClick={() => post({ type: "pick_attach_files" })}
+              >
+                +Remote
               </button>
               <button
                 type="button"
@@ -3043,6 +3108,23 @@ export function App() {
                 e.stopPropagation();
                 dragDepth.current = 0;
                 setDragOver(false);
+                if (hasVsCodeUriPayload(e.dataTransfer)) {
+                  const uris = collectDropUris(e.dataTransfer);
+                  if (uris.length > 0) {
+                    post({ type: "attach_uris", uris });
+                    return;
+                  }
+                }
+                const localFiles = collectTransferFiles(e.dataTransfer);
+                if (localFiles.length > 0) {
+                  void attachLocalBrowserFiles(
+                    localFiles,
+                    setItems,
+                    beginAttachmentRequest,
+                    finishAttachmentRequest,
+                  );
+                  return;
+                }
                 const uris = collectDropUris(e.dataTransfer);
                 if (uris.length) {
                   post({ type: "attach_uris", uris });
@@ -3067,7 +3149,20 @@ export function App() {
                 ref={textareaRef}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={`${planAct === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
+                onPaste={(e) => {
+                  const files = collectTransferFiles(e.clipboardData);
+                  if (files.length === 0) {
+                    return;
+                  }
+                  e.preventDefault();
+                  void attachLocalBrowserFiles(
+                    files,
+                    setItems,
+                    beginAttachmentRequest,
+                    finishAttachmentRequest,
+                  );
+                }}
+                placeholder={`${planAct === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
                 rows={3}
                 onKeyDown={(e) => {
                   // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
@@ -3096,9 +3191,9 @@ export function App() {
                   type="button"
                   className="primary send"
                   onClick={send}
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() || attachmentUploads > 0}
                 >
-                  Send
+                  {attachmentUploads > 0 ? "Attaching…" : "Send"}
                 </button>
               )}
             </div>
@@ -3197,7 +3292,145 @@ function normalizeOpenAIUrlClient(raw: string): string {
   }
 }
 
-/** Collect file URIs from a VS Code explorer / OS drag onto the composer. */
+type LocalAttachmentPayload = { name: string; mediaType: string; data: string };
+let localAttachmentRequestSequence = 0;
+
+function nextLocalAttachmentRequestId(): string {
+  localAttachmentRequestSequence += 1;
+  return `local-${Date.now().toString(36)}-${localAttachmentRequestSequence.toString(36)}`;
+}
+
+function hasVsCodeUriPayload(data: DataTransfer): boolean {
+  return Array.from(data.types ?? []).some((type) => {
+    const normalized = type.toLowerCase();
+    return normalized === "application/vnd.code.uri-list" || normalized === "resourceurls";
+  });
+}
+
+function collectTransferFiles(data: DataTransfer): File[] {
+  const files = Array.from(data.files ?? []);
+  if (files.length > 0) {
+    return files;
+  }
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== "file") {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file) {
+      files.push(file);
+    }
+  }
+  return files;
+}
+
+async function attachLocalBrowserFiles(
+  files: File[],
+  setItems: Dispatch<SetStateAction<ChatItem[]>>,
+  onRequestStarted: (requestId: string) => void,
+  onRequestFinished: (requestId: string) => void,
+): Promise<void> {
+  if (files.length === 0) {
+    return;
+  }
+  const limited = files.slice(0, MAX_LOCAL_ATTACHMENTS_PER_PICK);
+  const errors: string[] = [];
+  for (let index = 0; index < limited.length; index += 1) {
+    const requestId = nextLocalAttachmentRequestId();
+    onRequestStarted(requestId);
+    const result = await readLocalAttachment(limited[index], index);
+    if (typeof result === "string") {
+      errors.push(result);
+      onRequestFinished(requestId);
+      continue;
+    }
+    try {
+      // One file per message bounds Remote SSH / Codespaces IPC copies. The
+      // host ACK keeps Send disabled until these bytes are actually staged.
+      post({ type: "attach_local_files", requestId, files: [result] });
+    } catch {
+      errors.push(`${result.name} (could not be transferred)`);
+      onRequestFinished(requestId);
+    }
+  }
+  if (files.length > limited.length) {
+    errors.push(`Only the first ${MAX_LOCAL_ATTACHMENTS_PER_PICK} files were considered`);
+  }
+  if (errors.length > 0) {
+    setItems((previous) => [
+      ...previous,
+      { kind: "error", text: `Could not attach: ${errors.slice(0, 3).join(", ")}` },
+    ]);
+  }
+}
+
+async function readLocalAttachment(
+  file: File,
+  index: number,
+): Promise<LocalAttachmentPayload | string> {
+  const mediaType = localAttachmentMediaType(file);
+  const fallbackName = `pasted-file-${index + 1}${extensionForMediaType(mediaType)}`;
+  const name = (file.name || fallbackName).replace(/^.*[\\/]/, "").slice(0, 120);
+  if (!mediaType) {
+    return `${name || "file"} (use PNG, JPEG, GIF, WebP, PDF, or DOCX)`;
+  }
+  if (file.size === 0) {
+    return `${name} (empty)`;
+  }
+  if (file.size > MAX_LOCAL_ATTACHMENT_BYTES) {
+    return `${name} (${Math.ceil(file.size / 1024 / 1024)}MB > 10MB)`;
+  }
+  try {
+    return { name, mediaType, data: await fileToBase64(file) };
+  } catch {
+    return `${name} (could not be read)`;
+  }
+}
+
+function localAttachmentMediaType(file: File): string {
+  const declared = (file.type || "").toLowerCase();
+  if (LOCAL_IMAGE_TYPES.has(declared) || LOCAL_DOCUMENT_TYPES.has(declared)) {
+    return declared;
+  }
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith(".png")) return "image/png";
+  if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) return "image/jpeg";
+  if (lowerName.endsWith(".gif")) return "image/gif";
+  if (lowerName.endsWith(".webp")) return "image/webp";
+  if (lowerName.endsWith(".pdf")) return "application/pdf";
+  if (lowerName.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  return "";
+}
+
+function extensionForMediaType(mediaType: string): string {
+  if (mediaType === "image/jpeg") return ".jpg";
+  if (mediaType === "image/gif") return ".gif";
+  if (mediaType === "image/webp") return ".webp";
+  if (mediaType === "application/pdf") return ".pdf";
+  if (mediaType.includes("wordprocessingml")) return ".docx";
+  return ".png";
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("File read failed"));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const comma = result.indexOf(",");
+      if (comma < 0 || !result.slice(comma + 1)) {
+        reject(new Error("Invalid file data"));
+        return;
+      }
+      resolve(result.slice(comma + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Collect file URIs from a VS Code explorer drag onto the composer. */
 function collectDropUris(dt: DataTransfer): string[] {
   const found: string[] = [];
   const pushLine = (raw: string) => {
@@ -3244,18 +3477,6 @@ function collectDropUris(dt: DataTransfer): string[] {
       pushPayload(type, dt.getData(type));
     } catch {
       /* ignore */
-    }
-  }
-  if (dt.files?.length) {
-    for (const file of Array.from(dt.files)) {
-      const withPath = file as File & { path?: string };
-      if (withPath.path) {
-        found.push(
-          withPath.path.startsWith("file:")
-            ? withPath.path
-            : `file://${withPath.path}`,
-        );
-      }
     }
   }
   return [...new Set(found)];

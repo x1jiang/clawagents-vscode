@@ -264,6 +264,7 @@
     "build:ext": "node esbuild.mjs",
     "build:webview": "npm run build --prefix webview",
     "typecheck": "tsc --noEmit && tsc --noEmit -p webview",
+    "test": "node --test test/*.test.cjs",
     "watch": "node esbuild.mjs --watch",
     "install:all": "npm install && npm install --prefix webview",
     "package": "npx --yes @vscode/vsce package",

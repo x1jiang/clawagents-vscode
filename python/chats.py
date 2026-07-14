@@ -425,7 +425,9 @@ Pattern: [thing] [action] [reason]. [next step].
 # Bound attachment payloads so a malformed/hostile request can't OOM the
 # sidecar. The core resizes each image down further before sending.
 _MAX_IMAGES_PER_TURN = 8
-_MAX_IMAGE_B64_BYTES = 12 * 1024 * 1024  # ~9 MB decoded
+# The extension accepts 10 MiB decoded images; base64 expands by roughly 4/3.
+# Keep this aligned so an image that gets a UI chip cannot be silently dropped.
+_MAX_IMAGE_B64_BYTES = 14 * 1024 * 1024
 
 
 def _normalize_images(images: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

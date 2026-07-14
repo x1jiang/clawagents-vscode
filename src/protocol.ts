@@ -151,6 +151,7 @@ export type HostToWebview =
   | { type: "images_pending"; images: Array<{ id: string; name: string }> }
   // File attachments (PDF/DOCX) pending for the next send — same contract.
   | { type: "files_pending"; files: Array<{ id: string; name: string }> }
+  | { type: "attachment_staged"; requestId: string }
   | { type: "verify_result"; provider: string; ok: boolean; detail?: string }
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
@@ -192,6 +193,11 @@ export type WebviewToHost =
   | { type: "set_interaction"; interaction: InteractionStyle }
   | { type: "insert_context"; kind: "file" | "selection" | "problems" | "editors" | "terminal" | "git" }
   | { type: "attach_uris"; uris: string[] }
+  | {
+      type: "attach_local_files";
+      requestId: string;
+      files: Array<{ name: string; mediaType: string; data: string }>;
+    }
   | { type: "pick_attach_files" }
   | { type: "remove_image"; id: string }
   | { type: "clear_images" }
