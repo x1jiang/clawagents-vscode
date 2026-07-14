@@ -2549,10 +2549,10 @@ export function App() {
             </label>
             <p className="muted tiny" style={{ marginTop: 4 }}>
               Opt-in runtime failure taxonomy: reflect on tool failures / before submit.
-              Needs clawagents≥6.13 and{" "}
+              Needs clawagents≥6.13.1 and{" "}
               <code>
                 pip install &apos;atlas-skill @
-                git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git&apos;
+                git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964&apos;
               </code>
               {Boolean(settings.atlas) ? " — enabled for new turns." : "."}
               Optional workspace <code>atlas.json</code> for program config.

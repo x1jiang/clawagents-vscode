@@ -46,7 +46,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
 | `clawagents.contextMode` | `true` | Context Mode tools (needs `npm install -g context-mode`) |
 
-Sidebar **Settings** also cover provider, model, base URL, skills, MCP, browser tools, telemetry, and opt-in **ATLAS** failure checks (stored under `.clawagents/` in the workspace). ATLAS needs clawagents≥6.13 plus `atlas-skill` from GitHub.
+Sidebar **Settings** also cover provider, model, base URL, skills, MCP, browser tools, telemetry, and opt-in **ATLAS** failure checks (stored under `.clawagents/` in the workspace). ATLAS needs clawagents≥6.13.1 plus `atlas-skill` from GitHub.
 
 ## Security
 

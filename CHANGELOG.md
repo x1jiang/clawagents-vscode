@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.36 — 2026-07-14
+
+- Require `clawagents>=6.13.1` (ATLAS fail-closed gates)
+- Pin ATLAS install hints to commit `3a917f3e0b993e3bfd77f652b013193aed167964`
+
 ## 1.0.35 — 2026-07-14
 
 - Settings: opt-in **ATLAS (smarter failure checks)** checkbox — forwards `atlas=True` to clawagents≥6.13 when supported; needs `atlas-skill` from GitHub and optional workspace `atlas.json`

@@ -598,9 +598,9 @@ async def run_chat_turn(
                     "message": (
                         "ATLAS is enabled in Settings but this clawagents build "
                         "does not support atlas=. Upgrade with: "
-                        "pip install -U 'clawagents>=6.13' && "
+                        "pip install -U 'clawagents>=6.13.1' && "
                         "pip install 'atlas-skill @ "
-                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git'"
+                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964'"
                     ),
                 },
             )
@@ -834,7 +834,7 @@ async def run_chat_turn(
                     msg = (
                         "ATLAS enabled but the optional package is missing. "
                         "Install with: pip install 'atlas-skill @ "
-                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git' "
+                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964' "
                         f"({exc})"
                     )
                     on_event("error", {"message": msg})
@@ -890,7 +890,7 @@ async def run_chat_turn(
                     msg = (
                         "ATLAS failed to start (optional package missing?). "
                         "Install with: pip install 'atlas-skill @ "
-                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git' "
+                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964' "
                         f"({exc})"
                     )
                     on_event("error", {"message": msg})
