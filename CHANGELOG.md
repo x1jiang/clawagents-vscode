@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.38 — 2026-07-14
+
+- Settings: **ATLAS** is on by default (uncheck to disable)
+- Auto-install pinned `atlas-skill` (and deps probe requires `atlas_runtime`) so default-on does not fail-closed on missing package
+
 ## 1.0.37 — 2026-07-14
 
 - Fix: restore Settings `atlas` default key (required for ATLAS checkbox persistence)

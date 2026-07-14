@@ -2,6 +2,10 @@ import { spawn, spawnSync } from "child_process";
 import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
+/** Pinned ATLAS runtime (atlas_runtime). Keep in lockstep with Settings / README hints. */
+export const ATLAS_SKILL_PIP =
+  "atlas-skill @ git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git@3a917f3e0b993e3bfd77f652b013193aed167964";
+
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
   // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION:
@@ -11,6 +15,8 @@ export const SIDECAR_PIP_PACKAGES = [
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
   "python-dotenv>=1.0.0,<2",
+  // ATLAS is Settings-default-on; without this, turns fail-closed on ImportError.
+  ATLAS_SKILL_PIP,
 ] as const;
 
 /** Minimum clawagents version required by this extension host. */
@@ -22,6 +28,8 @@ export type DepProbe = {
   executable?: string;
   version?: string;
   supportsSkillsExclude?: boolean;
+  /** True when atlas_runtime (atlas-skill) is importable. */
+  supportsAtlas?: boolean;
   detail: string;
 };
 
@@ -69,6 +77,7 @@ export function probeSidecarDepsSync(
           "print(sys.executable)",
           "print(getattr(clawagents, '__version__', '?'))",
           "print('skills_exclude' in inspect.signature(create_claw_agent).parameters)",
+          "print(__import__('importlib.util').util.find_spec('atlas_runtime') is not None)",
         ].join("; "),
       ],
       { encoding: "utf8", timeout: 25_000, env },
@@ -100,6 +109,7 @@ export function probeSidecarDepsSync(
       executable: lines[0],
       version: lines[1],
       supportsSkillsExclude: lines[2] === "True",
+      supportsAtlas: lines[3] === "True",
       detail: lines.join("\n"),
     };
   } catch (err) {
@@ -111,6 +121,7 @@ export function needsPipInstall(probe: DepProbe): boolean {
   return (
     !probe.ok ||
     probe.supportsSkillsExclude === false ||
+    probe.supportsAtlas === false ||
     !versionAtLeast(probe.version, MIN_CLAWAGENTS_VERSION) ||
     versionAtLeast(probe.version, MAX_CLAWAGENTS_VERSION)
   );
@@ -208,7 +219,7 @@ async function ensureSidecarDepsOnce(
 ): Promise<DepProbe> {
   let probe = probeSidecarDepsSync(python, env);
   output.appendLine(
-    `Deps probe: ok=${probe.ok} version=${probe.version || "?"} skills_exclude=${probe.supportsSkillsExclude}`,
+    `Deps probe: ok=${probe.ok} version=${probe.version || "?"} skills_exclude=${probe.supportsSkillsExclude} atlas=${probe.supportsAtlas}`,
   );
   if (!needsPipInstall(probe)) {
     return probe;

@@ -583,8 +583,8 @@ async def run_chat_turn(
     # Capability probe once — older clawagents wheels omit newer kwargs.
     _agent_params = inspect.signature(create_claw_agent).parameters
 
-    # ATLAS failure-taxonomy (opt-in). Needs clawagents with atlas= support
-    # and ``pip install 'clawagents[atlas]'`` for the runtime package.
+    # ATLAS failure-taxonomy (on by default). Needs clawagents with atlas=
+    # support and ``atlas-skill`` from GitHub for the runtime package.
     if settings.get("atlas"):
         if "atlas" in _agent_params:
             kwargs["atlas"] = True
