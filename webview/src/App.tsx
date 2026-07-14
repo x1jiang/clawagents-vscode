@@ -1539,7 +1539,7 @@ export function App() {
                 onChange={(e) => selectModel(e.target.value)}
               >
                 <option value="">{providerModels.length ? "default" : "no key — Settings"}</option>
-                {settings.model &&
+                {Boolean(String(settings.model || "").trim()) &&
                   !providerModels.some((m) => m.id === String(settings.model)) && (
                     <option value={String(settings.model)}>
                       {String(settings.model)} (unavailable)
