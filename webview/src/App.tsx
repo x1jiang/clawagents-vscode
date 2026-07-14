@@ -2539,6 +2539,24 @@ export function App() {
               />
               Learn (PTRL lessons)
             </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.atlas)}
+                onChange={(e) => setSettings((s) => ({ ...s, atlas: e.target.checked }))}
+              />
+              ATLAS (smarter failure checks)
+            </label>
+            <p className="muted tiny" style={{ marginTop: 4 }}>
+              Opt-in runtime failure taxonomy: reflect on tool failures / before submit.
+              Needs clawagents≥6.13 and{" "}
+              <code>
+                pip install &apos;atlas-skill @
+                git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git&apos;
+              </code>
+              {Boolean(settings.atlas) ? " — enabled for new turns." : "."}
+              Optional workspace <code>atlas.json</code> for program config.
+            </p>
           </section>
 
           <div className="panel-actions">

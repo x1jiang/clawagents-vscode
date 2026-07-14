@@ -5,9 +5,8 @@ import { curatedProcessEnv } from "./envCurate";
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
   // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION:
-  // 6.12.13 ships skill retrieval / paged use_skill / intersecting allowed-tools
-  // plus invoke(images=) / invoke(files=) for attachments.
-  "clawagents[gemini,anthropic,bedrock,mcp]>=6.12.13,<7",
+  // 6.13.0 ships ATLAS harness (atlas=) plus prior skill/attachment surfaces.
+  "clawagents[gemini,anthropic,bedrock,mcp]>=6.13.0,<7",
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -15,7 +14,7 @@ export const SIDECAR_PIP_PACKAGES = [
 ] as const;
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 12, 13];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 13, 0];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 
 export type DepProbe = {

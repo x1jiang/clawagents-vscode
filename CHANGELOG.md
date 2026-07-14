@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.35 — 2026-07-14
+
+- Settings: opt-in **ATLAS (smarter failure checks)** checkbox — forwards `atlas=True` to clawagents≥6.13 when supported; needs `atlas-skill` from GitHub and optional workspace `atlas.json`
+
 ## 1.0.34 — 2026-07-14
 
 - Security: permission grants live in user-owned state (not `.clawagents/` in the repo)

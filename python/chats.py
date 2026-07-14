@@ -580,6 +580,31 @@ async def run_chat_turn(
     if settings.get("learn"):
         kwargs["learn"] = True
 
+    # Capability probe once — older clawagents wheels omit newer kwargs.
+    _agent_params = inspect.signature(create_claw_agent).parameters
+
+    # ATLAS failure-taxonomy (opt-in). Needs clawagents with atlas= support
+    # and ``pip install 'clawagents[atlas]'`` for the runtime package.
+    if settings.get("atlas"):
+        if "atlas" in _agent_params:
+            kwargs["atlas"] = True
+            atlas_cfg = Path.cwd() / "atlas.json"
+            if atlas_cfg.is_file():
+                kwargs["atlas_config"] = str(atlas_cfg)
+        else:
+            on_event(
+                "warn",
+                {
+                    "message": (
+                        "ATLAS is enabled in Settings but this clawagents build "
+                        "does not support atlas=. Upgrade with: "
+                        "pip install -U 'clawagents>=6.13' && "
+                        "pip install 'atlas-skill @ "
+                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git'"
+                    ),
+                },
+            )
+
     # Skills: registered folders (+ optional workspace auto-discover).
     # Passing an explicit list disables create_claw_agent's own auto-discover
     # and avoids picking up an app's ./skills when dogfooding ClawAgents.
@@ -596,7 +621,6 @@ async def run_chat_turn(
     exclude.add("openviking")
     # skills_exclude requires a newer clawagents; older installs ignore excludes
     # rather than crashing the whole turn.
-    _agent_params = inspect.signature(create_claw_agent).parameters
     if "skills_exclude" in _agent_params:
         kwargs["skills_exclude"] = sorted(exclude)
     elif exclude:
@@ -801,7 +825,22 @@ async def run_chat_turn(
             # Drop kwargs unsupported by the installed clawagents version
             # (PyPI lag vs extension features).
             allowed = set(inspect.signature(create_claw_agent).parameters)
-            agent = create_claw_agent(**{k: v for k, v in kwargs.items() if k in allowed})
+            try:
+                agent = create_claw_agent(
+                    **{k: v for k, v in kwargs.items() if k in allowed}
+                )
+            except ImportError as exc:
+                if kwargs.get("atlas"):
+                    msg = (
+                        "ATLAS enabled but the optional package is missing. "
+                        "Install with: pip install 'atlas-skill @ "
+                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git' "
+                        f"({exc})"
+                    )
+                    on_event("error", {"message": msg})
+                    append_ui_event(chat_id, {"kind": "error", "text": msg})
+                    return {"ok": False, "error": msg}
+                raise
             agent.before_tool = before_tool_factory(mode=mode, grants=GrantStore())
             if ask_user_factory is not None:
                 # Sidecar has no stdin — replace CLI ask_user with webview HITL.
@@ -844,7 +883,20 @@ async def run_chat_turn(
                     },
                 )
 
-            result = await agent.invoke(augmented, **invoke_kwargs)
+            try:
+                result = await agent.invoke(augmented, **invoke_kwargs)
+            except ImportError as exc:
+                if kwargs.get("atlas"):
+                    msg = (
+                        "ATLAS failed to start (optional package missing?). "
+                        "Install with: pip install 'atlas-skill @ "
+                        "git+https://github.com/multi-agent-systems-failure-taxonomy/ATLAS.git' "
+                        f"({exc})"
+                    )
+                    on_event("error", {"message": msg})
+                    append_ui_event(chat_id, {"kind": "error", "text": msg})
+                    return {"ok": False, "error": msg}
+                raise
         finally:
             try:
                 os.chdir(prev)
