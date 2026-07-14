@@ -7,15 +7,16 @@ export const SIDECAR_PIP_PACKAGES = [
   // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION:
   // 6.12.13 ships skill retrieval / paged use_skill / intersecting allowed-tools
   // plus invoke(images=) / invoke(files=) for attachments.
-  "clawagents[gemini,anthropic,bedrock,mcp]>=6.12.13",
-  "fastapi",
-  "uvicorn",
-  "pydantic",
-  "python-dotenv",
+  "clawagents[gemini,anthropic,bedrock,mcp]>=6.12.13,<7",
+  "fastapi>=0.115.0,<1",
+  "uvicorn>=0.30.0,<1",
+  "pydantic>=2.7.0,<3",
+  "python-dotenv>=1.0.0,<2",
 ] as const;
 
 /** Minimum clawagents version required by this extension host. */
 export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 12, 13];
+export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 
 export type DepProbe = {
   ok: boolean;
@@ -111,7 +112,8 @@ export function needsPipInstall(probe: DepProbe): boolean {
   return (
     !probe.ok ||
     probe.supportsSkillsExclude === false ||
-    !versionAtLeast(probe.version, MIN_CLAWAGENTS_VERSION)
+    !versionAtLeast(probe.version, MIN_CLAWAGENTS_VERSION) ||
+    versionAtLeast(probe.version, MAX_CLAWAGENTS_VERSION)
   );
 }
 
@@ -179,7 +181,28 @@ export async function installSidecarDeps(
 }
 
 /** Ensure deps exist (and support skills_exclude). Auto-installs if needed. */
-export async function ensureSidecarDeps(
+const ensureInFlight = new Map<string, Promise<DepProbe>>();
+
+export function ensureSidecarDeps(
+  python: string,
+  output: { appendLine(s: string): void },
+  env?: NodeJS.ProcessEnv,
+): Promise<DepProbe> {
+  const key = python.trim() || python;
+  const existing = ensureInFlight.get(key);
+  if (existing) {
+    return existing;
+  }
+  const run = ensureSidecarDepsOnce(python, output, env).finally(() => {
+    if (ensureInFlight.get(key) === run) {
+      ensureInFlight.delete(key);
+    }
+  });
+  ensureInFlight.set(key, run);
+  return run;
+}
+
+async function ensureSidecarDepsOnce(
   python: string,
   output: { appendLine(s: string): void },
   env?: NodeJS.ProcessEnv,
@@ -194,7 +217,7 @@ export async function ensureSidecarDeps(
 
   output.appendLine(
     probe.ok
-      ? "clawagents is too old for this extension — upgrading packages…"
+      ? "clawagents version is incompatible with this extension — installing a supported version…"
       : "Missing Python packages — installing automatically…",
   );
 

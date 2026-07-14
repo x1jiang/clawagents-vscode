@@ -24,6 +24,7 @@ import {
   detectImageMediaType,
   safeLocalAttachmentName,
 } from "./localAttachments";
+import { parseWebviewToHost } from "./protocol";
 import type {
   AgentMode,
   AutoApprove,
@@ -170,7 +171,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       ],
     };
     webviewView.webview.html = this.getHtml(webviewView.webview);
-    webviewView.webview.onDidReceiveMessage((msg: WebviewToHost) => {
+    webviewView.webview.onDidReceiveMessage((raw: unknown) => {
+      const msg = parseWebviewToHost(raw);
+      if (!msg) {
+        this.post({ type: "error", message: "Rejected an invalid webview request." });
+        return;
+      }
       void this.handleMessage(msg);
     });
   }

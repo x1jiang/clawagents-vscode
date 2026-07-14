@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import { AWS_ENV_KEYS, ExtensionConfig, workspaceRoot } from "./config";
 import { curatedProcessEnv } from "./envCurate";
 import { ensureSidecarDeps } from "./pythonDeps";
+import { StartGeneration } from "./startGeneration";
 
 export interface SidecarHandle {
   port: number;
@@ -90,6 +91,7 @@ export class SidecarManager {
   readonly output: vscode.OutputChannel;
   private lastLog = "";
   private starting: Promise<SidecarHandle> | undefined;
+  private readonly startGeneration = new StartGeneration();
 
   constructor(
     private readonly extensionPath: string,
@@ -111,18 +113,28 @@ export class SidecarManager {
     if (this.starting) {
       return this.starting;
     }
-    this.starting = this.doStart().finally(() => {
-      this.starting = undefined;
+    const generation = this.startGeneration.begin();
+    let tracked: Promise<SidecarHandle>;
+    tracked = this.doStart(generation).finally(() => {
+      if (this.starting === tracked) {
+        this.starting = undefined;
+      }
     });
-    return this.starting;
+    this.starting = tracked;
+    return tracked;
   }
 
-  private async doStart(): Promise<SidecarHandle> {
-    this.stop();
+  private assertCurrentStart(generation: number): void {
+    this.startGeneration.assertCurrent(generation);
+  }
+
+  private async doStart(generation: number): Promise<SidecarHandle> {
+    this.stopChild();
 
     const python = this.config.pythonPath;
     const bridge = path.join(this.extensionPath, "python", "bridge.py");
     const probe = await ensureSidecarDeps(python, this.output, curatedProcessEnv());
+    this.assertCurrentStart(generation);
     this.output.appendLine(`Python probe (${python}): ${probe.ok ? "ok" : "FAILED"}`);
     this.output.appendLine(`Using interpreter: ${python}`);
     this.output.appendLine(probe.detail || "(no detail)");
@@ -137,6 +149,7 @@ export class SidecarManager {
     const dotenvEnv = this.config.loadWorkspaceDotenv();
     const model = this.config.model;
     const runtimeTrust = await this.config.getRuntimeTrust();
+    this.assertCurrentStart(generation);
 
     // Spawn precedence: curated process.env < workspace .env < SecretStorage keys.
     const keySources: Record<string, string> = {};
@@ -228,13 +241,26 @@ export class SidecarManager {
       await waitForHealth(baseUrl, token, 30_000);
     } catch (err) {
       const tail = this.lastLog.trim().split("\n").slice(-12).join("\n");
-      this.stop();
+      this.terminateChild(spawned);
+      if (this.child === spawned) {
+        this.child = undefined;
+        this.handle = undefined;
+      }
       const base = err instanceof Error ? err.message : String(err);
       throw new Error(
         exitCode != null
           ? `${base} (sidecar exited ${exitCode})\n${tail || probe.detail}`
           : `${base}\n${tail || "No sidecar output. Check Output → ClawAgents Sidecar."}`,
       );
+    }
+    try {
+      this.assertCurrentStart(generation);
+    } catch (err) {
+      this.terminateChild(spawned);
+      if (this.child === spawned) {
+        this.child = undefined;
+      }
+      throw err;
     }
 
     this.handle = {
@@ -246,8 +272,7 @@ export class SidecarManager {
     return this.handle;
   }
 
-  stop(): void {
-    const child = this.child;
+  private terminateChild(child: ChildProcess): void {
     if (child && child.exitCode === null && child.signalCode === null) {
       try {
         child.kill("SIGTERM");
@@ -264,8 +289,21 @@ export class SidecarManager {
         }
       }, 1500);
     }
+  }
+
+  private stopChild(): void {
+    const child = this.child;
+    if (child) {
+      this.terminateChild(child);
+    }
     this.child = undefined;
     this.handle = undefined;
+  }
+
+  stop(): void {
+    this.startGeneration.invalidate();
+    this.starting = undefined;
+    this.stopChild();
   }
 
   dispose(): void {

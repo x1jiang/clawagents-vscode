@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.34 — 2026-07-14
+
+- Security: permission grants live in user-owned state (not `.clawagents/` in the repo)
+- Security: validate webview→host messages before they reach extension authority
+- Sidecar startup: generation-gated restarts; pin `clawagents` / FastAPI deps with upper bounds
+- Checkpoint restore: validate `chat_id` paths; register cancel only after request validation
+
 ## 1.0.33 — 2026-07-14
 
 - Fix: unrelated Settings autosaves no longer wipe a prior URL-bound gateway approval in SecretStorage / process memory

@@ -24,6 +24,7 @@ class GrantPathTests(unittest.TestCase):
         (self.root / "other").mkdir()
         (self.root / "other" / "config.json").write_text("{}", encoding="utf-8")
         os.environ["CLAW_WORKSPACE"] = str(self.root)
+        os.environ["CLAWAGENTS_VSCODE_STATE_DIR"] = str(self.root / "user-state")
         # Fresh module imports so WORKSPACE picks up CLAW_WORKSPACE.
         for mod in ("paths", "grants", "pricing"):
             sys.modules.pop(mod, None)
@@ -103,6 +104,16 @@ class GrantPathTests(unittest.TestCase):
         )
         self.assertEqual(self.store.list(), [])
         self.assertFalse(self.store.match("src/config.json", tool="write_file", scope="write"))
+
+    def test_committed_tool_grant_cannot_approve_execute(self) -> None:
+        workspace_grants = self.root / ".clawagents" / "permission_grants.json"
+        workspace_grants.parent.mkdir(parents=True, exist_ok=True)
+        workspace_grants.write_text(
+            json.dumps([{"path_pattern": "", "scope": "write", "tool": "execute"}]),
+            encoding="utf-8",
+        )
+        self.assertFalse(self.store.match(None, tool="execute", scope="write"))
+        self.assertFalse(self.paths.GRANTS_FILE.is_relative_to(self.root / ".clawagents"))
 
     def test_tool_only_grant(self) -> None:
         self.store.add(path_pattern="", scope="write", tool="execute")

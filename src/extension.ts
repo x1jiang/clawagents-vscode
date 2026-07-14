@@ -40,20 +40,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   trackEditorFocus(context.subscriptions);
 
-  // First activation: ensure remote/local Python has clawagents + extras.
-  // Also runs again from sidecar ensureStarted when imports fail.
-  void (async () => {
-    const out = sidecar?.output;
-    if (!out) {
-      return;
-    }
-    try {
-      await ensureSidecarDeps(config.pythonPath, out);
-    } catch (err) {
-      out.appendLine(err instanceof Error ? err.message : String(err));
-    }
-  })();
-
   const webviewOpts = { webviewOptions: { retainContextWhenHidden: true } };
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("clawagents.sidebar", provider, webviewOpts),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -17,7 +18,15 @@ GATEWAY_API_KEY = os.getenv("GATEWAY_API_KEY", "")
 CLAW_DIR = WORKSPACE / ".clawagents"
 SESSIONS_MEMORY_DIR = CLAW_DIR / "sessions-memory"
 CHATS_DIR = CLAW_DIR / "vscode-chats"
-GRANTS_FILE = CLAW_DIR / "permission_grants.json"
+# Permission grants are approvals, not repository configuration. Keep them in
+# user-owned state keyed by the canonical workspace so a cloned repository
+# cannot grant itself shell or filesystem permissions.
+_VSCODE_STATE_DIR = Path(
+    os.getenv("CLAWAGENTS_VSCODE_STATE_DIR")
+    or (Path.home() / ".clawagents" / "vscode-state")
+).expanduser()
+_WORKSPACE_STATE_KEY = hashlib.sha256(str(WORKSPACE).encode("utf-8")).hexdigest()[:24]
+GRANTS_FILE = _VSCODE_STATE_DIR / "permission-grants" / f"{_WORKSPACE_STATE_KEY}.json"
 SETTINGS_FILE = CLAW_DIR / "vscode_settings.json"
 STATS_FILE = CLAW_DIR / "vscode_stats.json"
 SNAPSHOTS_DIR = CLAW_DIR / "snapshots"

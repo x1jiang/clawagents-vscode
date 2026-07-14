@@ -249,3 +249,125 @@ export type WebviewToHost =
       caveman?: boolean;
     }
   | { type: "queue_send"; text: string };
+
+const NO_PAYLOAD_MESSAGES = new Set([
+  "ready", "cancel", "clear", "new_chat", "regenerate", "pick_attach_files",
+  "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
+  "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
+  "load_stats",
+]);
+const AGENT_MODES = new Set(["ask", "read_only", "auto", "full_access"]);
+const PROVIDERS = new Set(["openai", "anthropic", "gemini", "bedrock", "tavily"]);
+const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function text(value: unknown, max = 1_000_000): value is string {
+  return typeof value === "string" && value.length <= max;
+}
+
+function optionalText(value: unknown, max = 1_000_000): boolean {
+  return value === undefined || text(value, max);
+}
+
+function opaqueId(value: unknown): value is string {
+  return typeof value === "string" && OPAQUE_ID.test(value) && !value.includes("..");
+}
+
+function autoApprove(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!record(value)) return false;
+  return ["edit", "execute", "web", "browser"].every(
+    (key) => value[key] === undefined || typeof value[key] === "boolean",
+  );
+}
+
+/** Decode the untrusted webview message before it reaches extension authority. */
+export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
+  if (!record(value) || typeof value.type !== "string") return undefined;
+  const type = value.type;
+  if (NO_PAYLOAD_MESSAGES.has(type)) return value as WebviewToHost;
+  switch (type) {
+    case "send":
+      return text(value.text) && AGENT_MODES.has(String(value.mode))
+        && typeof value.includeContext === "boolean" && optionalText(value.chatId, 128)
+        && autoApprove(value.autoApprove) && optionalText(value.model, 256)
+        && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
+        && (value.caveman === undefined || typeof value.caveman === "boolean")
+        ? value as WebviewToHost : undefined;
+    case "queue_send":
+      return text(value.text) ? value as WebviewToHost : undefined;
+    case "permission":
+      return opaqueId(value.requestId) && ["allow_once", "allow_always", "deny"].includes(String(value.decision))
+        ? value as WebviewToHost : undefined;
+    case "ask_user_reply":
+      return opaqueId(value.requestId) && optionalText(value.answer)
+        && (value.skip === undefined || typeof value.skip === "boolean")
+        ? value as WebviewToHost : undefined;
+    case "select_chat": case "delete_chat":
+      return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
+    case "search_chats": case "mention_query":
+      return text(value.query, 10_000) ? value as WebviewToHost : undefined;
+    case "set_mode":
+      return AGENT_MODES.has(String(value.mode)) ? value as WebviewToHost : undefined;
+    case "set_interaction":
+      return value.interaction === "interactive" || value.interaction === "auto"
+        ? value as WebviewToHost : undefined;
+    case "insert_context":
+      return ["file", "selection", "problems", "editors", "terminal", "git"].includes(String(value.kind))
+        ? value as WebviewToHost : undefined;
+    case "attach_uris":
+      return Array.isArray(value.uris) && value.uris.length <= 12 && value.uris.every((uri) => text(uri, 16_384))
+        ? value as WebviewToHost : undefined;
+    case "attach_local_files":
+      return opaqueId(value.requestId) && Array.isArray(value.files) && value.files.length <= 12
+        && value.files.every((file) => record(file) && text(file.name, 512)
+          && text(file.mediaType, 128) && text(file.data, 14_000_000))
+        ? value as WebviewToHost : undefined;
+    case "remove_image": case "remove_file":
+      return opaqueId(value.id) ? value as WebviewToHost : undefined;
+    case "open_file":
+      return text(value.path, 32_768)
+        && (value.line === undefined || (Number.isInteger(value.line) && Number(value.line) > 0))
+        ? value as WebviewToHost : undefined;
+    case "diff_snapshot":
+      return text(value.path, 32_768) && optionalText(value.snapshotId, 128) && optionalText(value.snapshotRel, 32_768)
+        ? value as WebviewToHost : undefined;
+    case "restore_snapshot":
+      return opaqueId(value.snapshotId) && text(value.rel, 32_768) ? value as WebviewToHost : undefined;
+    case "restore_checkpoint":
+      return text(value.sha, 256) && ["files", "conversation", "both"].includes(String(value.mode))
+        ? value as WebviewToHost : undefined;
+    case "list_checkpoints":
+      return value.open === undefined || typeof value.open === "boolean" ? value as WebviewToHost : undefined;
+    case "save_settings":
+      return record(value.settings) ? value as WebviewToHost : undefined;
+    case "verify_key":
+      return text(value.provider, 64) ? value as WebviewToHost : undefined;
+    case "set_bedrock_key":
+      return text(value.apiKey, 65_536) ? value as WebviewToHost : undefined;
+    case "set_provider_key":
+      return PROVIDERS.has(String(value.provider)) && text(value.apiKey, 65_536)
+        ? value as WebviewToHost : undefined;
+    case "clear_provider_key":
+      return PROVIDERS.has(String(value.provider)) ? value as WebviewToHost : undefined;
+    case "test_bedrock_gateway":
+      return text(value.baseUrl, 16_384) && optionalText(value.apiKey, 65_536)
+        ? value as WebviewToHost : undefined;
+    case "test_compatible_endpoint":
+      return text(value.baseUrl, 16_384) && optionalText(value.apiKey, 65_536)
+        && (value.style === undefined || value.style === "openai" || value.style === "bag")
+        && optionalText(value.provider, 64) ? value as WebviewToHost : undefined;
+    case "persist":
+      return Array.isArray(value.items) && value.items.length <= 100_000 && text(value.draft)
+        && AGENT_MODES.has(String(value.mode)) && optionalText(value.chatId, 128)
+        && autoApprove(value.autoApprove)
+        && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
+        && (value.caveman === undefined || typeof value.caveman === "boolean")
+        ? value as WebviewToHost : undefined;
+    default:
+      return undefined;
+  }
+}

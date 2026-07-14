@@ -107,23 +107,30 @@ def list_shadow_checkpoints(limit: int = 30) -> list[dict[str, Any]]:
         return [{"error": str(exc)}]
 
 
+def _checkpoint_chat_paths(chat_id: str) -> tuple[Path, Path]:
+    safe_chat_id = safe_id(chat_id, kind="chat_id")
+    session_path = path_under(SESSIONS_MEMORY_DIR, f"{safe_chat_id}.jsonl")
+    if session_path is None:
+        raise ValueError("invalid chat_id")
+    return session_path, chat_ui_log_path(safe_chat_id)
+
+
 def restore_shadow_checkpoint(
     sha: str,
     *,
     mode: str = "files",
     chat_id: str | None = None,
 ) -> dict[str, Any]:
+    session_path = None
+    ui_path = None
+    if chat_id:
+        try:
+            session_path, ui_path = _checkpoint_chat_paths(chat_id)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
     try:
         from clawagents.memory.shadow_checkpoint import restore_checkpoint
 
-        session_path = None
-        ui_path = None
-        if chat_id:
-            session_path = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
-            try:
-                ui_path = chat_ui_log_path(chat_id)
-            except Exception:  # noqa: BLE001
-                ui_path = None
         mode_norm = mode if mode in ("files", "conversation", "both") else "files"
         return restore_checkpoint(
             sha,

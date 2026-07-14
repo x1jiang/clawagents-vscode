@@ -722,6 +722,10 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
+        if body.chat_id:
+            bad = _validate_chat_id(body.chat_id)
+            if bad:
+                return bad
         return restore_shadow_checkpoint(
             body.sha, mode=body.mode or "files", chat_id=body.chat_id
         )
@@ -870,12 +874,6 @@ def create_app() -> FastAPI:
 
         event_queue: asyncio.Queue[str | None] = asyncio.Queue()
         loop = asyncio.get_running_loop()
-        # Per-run cancellation token: registered before any work starts so
-        # POST /cancel can reach this turn even during setup, and isolated so
-        # cancelling (or starting) one turn never affects another.
-        cancel_ev = threading.Event()
-        run_id = _register_run(cancel_ev)
-
         chat_id = body.chat_id or body.session_id
         if not chat_id:
             chat_id = create_chat(mode=body.mode)["id"]
@@ -888,6 +886,11 @@ def create_app() -> FastAPI:
                     create_chat(chat_id=chat_id, mode=body.mode)
                 except ValueError:
                     return _bad_request("invalid chat_id")
+
+        # Register only after request validation. From this point ownership is
+        # transferred to _run(), whose finally block always unregisters it.
+        cancel_ev = threading.Event()
+        run_id = _register_run(cancel_ev)
 
         # Cap full_access unless the user explicitly opted in via Settings.
         effective_mode = body.mode
