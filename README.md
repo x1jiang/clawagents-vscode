@@ -46,7 +46,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
 | `clawagents.contextMode` | `true` | Context Mode tools (needs `npm install -g context-mode`) |
 
-Sidebar **Settings** also cover provider, model, base URL, skills, MCP, browser tools, telemetry, and built-in **ATLAS** failure checks (on by default; stored under `.clawagents/` in the workspace). The sidecar auto-installs the ATLAS runtime with other Python deps.
+Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Opt-in **ATLAS** failure checks live under the composer **Auto-approve** menu (off by default; costly on short tasks). The sidecar can auto-install the ATLAS runtime with other Python deps.
 
 ## Security
 

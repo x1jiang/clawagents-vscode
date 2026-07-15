@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.41 — 2026-07-14
+
+- ATLAS: move toggle to composer **Auto-approve** (compact, like Caveman); **off by default** after A/B cost experiments
+- Settings Advanced only points to the Auto-approve location (no long ATLAS install blurb)
+
 ## 1.0.40 — 2026-07-14
 
 - Model picker lists only providers with a saved/valid key (no phantom catalogs)

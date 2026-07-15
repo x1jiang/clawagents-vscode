@@ -21,8 +21,8 @@ DEFAULTS: dict[str, Any] = {
     "telemetry": False,
     "trajectory": False,
     "learn": False,
-    # ATLAS failure-taxonomy supervision (built-in; on by default).
-    "atlas": True,
+    # ATLAS failure-taxonomy supervision (opt-in; toggle under Auto-approve).
+    "atlas": False,
     "browser_tools": False,
     "mcp_enabled": False,
     # When False, only ~/.clawagents/mcp.json is loaded (not workspace).

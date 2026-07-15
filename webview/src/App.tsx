@@ -2597,19 +2597,9 @@ export function App() {
               />
               Learn (PTRL lessons)
             </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={Boolean(settings.atlas)}
-                onChange={(e) => setSettings((s) => ({ ...s, atlas: e.target.checked }))}
-              />
-              ATLAS (smarter failure checks)
-            </label>
             <p className="muted tiny" style={{ marginTop: 4 }}>
-              Built-in and on by default — reflects on tool failures and before submit.
-              Uncheck to disable.
-              {Boolean(settings.atlas) ? " Enabled for new turns." : " Currently off."}
-              Optional workspace <code>atlas.json</code> for program config.
+              ATLAS failure checks live under the composer{" "}
+              <strong>Auto-approve</strong> menu (opt-in; off by default).
             </p>
           </section>
 
@@ -2908,6 +2898,7 @@ export function App() {
                         .filter(Boolean)
                         .join(", ") || "nothing (asks each time)"}
                   {caveman ? " · Caveman" : ""}
+                  {settings.atlas ? " · ATLAS" : ""}
                 </strong>
               </button>
               {autoApproveOpen && (
@@ -2972,6 +2963,19 @@ export function App() {
                     />
                     Caveman mode <span className="muted tiny">(terse replies)</span>
                   </label>
+                  <label
+                    className="check"
+                    title="ATLAS: extra failure-taxonomy reflections after tool failures and before submit. Adds latency/tokens; keep off unless debugging stubborn multi-step failures. Optional workspace atlas.json."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.atlas)}
+                      onChange={(e) =>
+                        setSettings((s) => ({ ...s, atlas: e.target.checked }))
+                      }
+                    />
+                    ATLAS <span className="muted tiny">(smarter failure checks)</span>
+                  </label>
                   <div className="muted tiny">
                     In <strong>Plan</strong>, only read-only shell (ls/echo/pwd) runs — and
                     interaction is always Interactive.
@@ -2980,6 +2984,7 @@ export function App() {
                     In <strong>Act + Auto</strong>, ask_user is skipped; Auto-approve toggles still
                     apply.
                     <strong> Caveman</strong> makes the agent reply ultra-brief.
+                    <strong> ATLAS</strong> adds reflection gates (costly; opt-in).
                     Enable browser tools under Settings; install{" "}
                     <code>clawagents[browser]</code> + Chromium for Playwright.
                   </div>
