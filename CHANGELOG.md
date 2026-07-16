@@ -1,3 +1,8 @@
+## 1.0.50
+
+- Surface rewind failures (`ok: false`) instead of claiming success
+- Pin sidecar floor to `clawagents>=6.17.6` (P1 security hardening)
+
 ## 1.0.49 — 2026-07-16
 
 - Require `clawagents>=6.17.5` (skill allowed-tools / grep / apply_patch fixes)
