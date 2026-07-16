@@ -1,10 +1,7 @@
-# Publish checklist (Marketplace)
+Publisher **`clawagents`** · version **1.0.48**
 
-Publisher **`clawagents`** · version **1.0.47**
+- [x] Publish `clawagents` **6.17.4** to PyPI first
+- [ ] VSIX: `clawagents-1.0.48.vsix`
+- [ ] Marketplace (needs VSCE_PAT)
 
-- [x] Publish `clawagents` **6.17.3** to PyPI first
-- [x] VSIX: `clawagents-1.0.47.vsix`
-
-```bash
-VSCE_PAT='…' npx @vscode/vsce publish --packagePath ./clawagents-1.0.47.vsix
-```
+VSCE_PAT='…' npx @vscode/vsce publish --packagePath ./clawagents-1.0.48.vsix

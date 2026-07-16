@@ -1,3 +1,9 @@
+## 1.0.48 — 2026-07-16
+
+- Require `clawagents>=6.17.4` (Act mode no longer inherits Goal verifier)
+- Switching Goal→Act/Plan pauses active disk-backed goal; Goal resumes it
+- Compact meter reset (from prior fix in tree)
+
 # Changelog
 
 ## 1.0.47 — 2026-07-16

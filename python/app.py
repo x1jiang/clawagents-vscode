@@ -917,6 +917,43 @@ def create_app() -> FastAPI:
 
         return await compact_chat(chat_id)
 
+    @app.post("/goal/pause")
+    async def goal_pause(request: Request):
+        """Pause disk-backed Goal when UI leaves Goal mode (Act/Plan)."""
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.goal import GoalPauseReason, GoalTracker
+
+            gt = GoalTracker(WORKSPACE)
+            if not gt.is_active():
+                return {"ok": True, "paused": False, "reason": "no active goal"}
+            gt.pause(
+                GoalPauseReason.USER,
+                "Paused because UI is in Act/Plan (not Goal mode)",
+            )
+            return {"ok": True, "paused": True, "goal_id": gt.state.id if gt.state else None}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/goal/resume")
+    async def goal_resume(request: Request):
+        """Resume a Goal paused by leaving Goal mode."""
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.goal import GoalStatus, GoalTracker
+
+            gt = GoalTracker(WORKSPACE)
+            if gt.state is None or gt.state.status != GoalStatus.PAUSED:
+                return {"ok": True, "resumed": False, "reason": "no paused goal"}
+            gt.resume()
+            return {"ok": True, "resumed": True, "goal_id": gt.state.id if gt.state else None}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
     @app.get("/chats")
     async def chats_list(request: Request, q: str | None = None):
         denied = _auth_or_401(request)

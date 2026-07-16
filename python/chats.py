@@ -390,42 +390,198 @@ def build_augmented_task(chat_id: str, content: str, settings: dict[str, Any]) -
 
 
 async def compact_chat(chat_id: str) -> dict[str, Any]:
-    """Manually compact session memory: backup + keep head/tail with a stub summary."""
+    """Manually compact session memory so the next turn starts lighter.
+
+    The context meter shows *last LLM prompt tokens*, not session line count.
+    A prior bug always rewrote history to 7 lines (head2+stub+tail4) and then
+    refused further clicks with ``len(lines) < 8`` — so Compact looked broken
+    right after a successful compact while the meter still showed 100%.
+
+    Strategy:
+    1. If there is room to drop turns → keep head/tail + summary stub (or LLM).
+    2. Else if remaining turns are still fat → truncate oversized tool/user
+       payloads in place (this is what frees context after a Goal blow-up).
+    3. Only skip when both turn count and payload size are already small.
+    """
     import time
 
     ensure_dirs()
     mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
     if not mem.exists():
         return {"compacted": False, "reason": "no session memory"}
-    lines = [ln for ln in mem.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    if len(lines) < 8:
-        return {"compacted": False, "reason": "not enough history to compact"}
+
+    raw = mem.read_text(encoding="utf-8")
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
+    if not lines:
+        return {"compacted": False, "reason": "no session memory"}
+
+    keep_head = 2
+    keep_tail = 4
+    min_keep = keep_head + keep_tail
+    total_chars = sum(len(ln) for ln in lines)
+    # ~4 chars/token rough estimate used elsewhere in clawagents.
+    est_tokens_before = max(1, total_chars // 4)
+
+    parsed: list[dict[str, Any]] = []
+    for ln in lines:
+        try:
+            obj = json.loads(ln)
+            if isinstance(obj, dict):
+                parsed.append(obj)
+            else:
+                parsed.append({"role": "user", "content": str(obj)})
+        except json.JSONDecodeError:
+            parsed.append({"role": "user", "content": ln})
+
+    def _msg_chars(m: dict[str, Any]) -> int:
+        c = m.get("content")
+        n = len(c) if isinstance(c, str) else len(json.dumps(c, ensure_ascii=False))
+        meta = m.get("tool_calls_meta")
+        if meta:
+            n += len(json.dumps(meta, ensure_ascii=False))
+        return n
+
+    def _trim_message(m: dict[str, Any], *, max_content: int) -> dict[str, Any]:
+        out = dict(m)
+        c = out.get("content")
+        if isinstance(c, str) and len(c) > max_content:
+            out["content"] = (
+                c[:max_content]
+                + f"\n…[compact truncated {len(c) - max_content} chars]"
+            )
+        meta = out.get("tool_calls_meta")
+        if isinstance(meta, list):
+            trimmed_meta = []
+            for tc in meta:
+                if not isinstance(tc, dict):
+                    trimmed_meta.append(tc)
+                    continue
+                tc2 = dict(tc)
+                args = tc2.get("arguments")
+                if isinstance(args, str) and len(args) > max_content:
+                    tc2["arguments"] = args[:max_content] + "…"
+                elif isinstance(args, dict):
+                    dumped = json.dumps(args, ensure_ascii=False)
+                    if len(dumped) > max_content:
+                        tc2["arguments"] = dumped[:max_content] + "…"
+                trimmed_meta.append(tc2)
+            out["tool_calls_meta"] = trimmed_meta
+        return out
+
+    can_drop_turns = len(parsed) > min_keep
+    # Fat payloads even with few turns (Goal tool dumps) still need compact.
+    needs_payload_trim = total_chars > 12_000 or any(
+        _msg_chars(m) > 4_000 for m in parsed
+    )
+
+    if not can_drop_turns and not needs_payload_trim:
+        return {
+            "compacted": False,
+            "reason": (
+                "not enough history to compact "
+                f"({len(parsed)} messages, ~{est_tokens_before} tokens). "
+                "Context % is from the last model call — start a new turn or "
+                "New chat to reset the meter."
+            ),
+            "before": len(parsed),
+            "est_tokens_before": est_tokens_before,
+        }
+
     backup = mem.with_suffix(mem.suffix + f".before-compact-{int(time.time())}")
-    backup.write_text(mem.read_text(encoding="utf-8"), encoding="utf-8")
-    head = lines[:2]
-    tail = lines[-4:]
-    summary = {
-        "role": "user",
-        "content": (
+    backup.write_text(raw, encoding="utf-8")
+
+    summary_text = ""
+    settings = load_settings()
+    model = (settings.get("model") or MODEL or "").strip()
+    if can_drop_turns and model and model.lower() not in ("default",):
+        # Best-effort LLM summary (desktop-style); fall back to stub on failure.
+        try:
+            from clawagents.config.config import load_config
+            from clawagents.providers.llm import LLMMessage, create_provider
+
+            convo_bits: list[str] = []
+            for m in parsed:
+                role = str(m.get("role") or "unknown")
+                if role == "system":
+                    continue
+                content = m.get("content")
+                text = content if isinstance(content, str) else json.dumps(content)
+                if not text:
+                    continue
+                convo_bits.append(f"[{role}] {text[:2000]}")
+            transcript = "\n\n".join(convo_bits)
+            if len(transcript) > 60_000:
+                transcript = (
+                    transcript[:30_000] + "\n\n[…middle elided…]\n\n" + transcript[-30_000:]
+                )
+            prompt = (
+                "Summarise this agent session so a fresh turn can continue. "
+                "Preserve open tasks, decisions, file paths, and constraints. "
+                "Drop chit-chat and verbose tool output. 8–15 short bullets.\n\n"
+                f"=== CONVERSATION ===\n{transcript}\n=== END ==="
+            )
+            provider = create_provider(model, load_config())
+            resp = await provider.chat(
+                messages=[LLMMessage(role="user", content=prompt)],
+                tools=None,
+            )
+            summary_text = (resp.content or "").strip()
+        except Exception:  # noqa: BLE001
+            summary_text = ""
+
+    if not summary_text:
+        dropped = max(0, len(parsed) - min_keep) if can_drop_turns else 0
+        summary_text = (
             "[Compacted conversation] Older turns were summarized away. "
-            f"Dropped {len(lines) - len(head) - len(tail)} messages. "
+            f"Dropped {dropped} messages "
+            f"(~{est_tokens_before} tokens before compact). "
             "Continue from the recent context below."
-        ),
-    }
-    kept = head + [json.dumps(summary)] + tail
-    mem.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        )
+
+    if can_drop_turns:
+        head = parsed[:keep_head]
+        tail = parsed[-keep_tail:]
+        # Trim fat tool dumps in the retained tail so compact actually frees context.
+        tail = [_trim_message(m, max_content=2_500) for m in tail]
+        kept_msgs = head + [{"role": "user", "content": summary_text}] + tail
+    else:
+        # Few turns but huge payloads — trim in place, keep every role.
+        kept_msgs = [_trim_message(m, max_content=2_000) for m in parsed]
+        kept_msgs.insert(
+            min(1, len(kept_msgs)),
+            {
+                "role": "user",
+                "content": (
+                    "[Compacted conversation] Truncated oversized tool/user "
+                    f"payloads (~{est_tokens_before} tokens before). "
+                    "Continue from the trimmed context."
+                ),
+            },
+        )
+
+    kept_lines = [json.dumps(m, ensure_ascii=False) for m in kept_msgs]
+    mem.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
+    after_chars = sum(len(ln) for ln in kept_lines)
+    est_tokens_after = max(1, after_chars // 4)
+
     append_ui_event(
         chat_id,
         {
             "kind": "status",
-            "text": f"Compacted session ({len(lines)} → {len(kept)} messages)",
+            "text": (
+                f"Compacted session ({len(parsed)} → {len(kept_msgs)} messages, "
+                f"~{est_tokens_before} → ~{est_tokens_after} tokens)"
+            ),
         },
     )
     return {
         "compacted": True,
-        "before": len(lines),
-        "after": len(kept),
+        "before": len(parsed),
+        "after": len(kept_msgs),
+        "est_tokens_before": est_tokens_before,
+        "est_tokens_after": est_tokens_after,
         "backup": backup.name,
+        "meter_reset": True,
     }
 
 
@@ -664,6 +820,27 @@ async def run_chat_turn(
             "work the plan and report via `update_goal`. Do not claim the goal is "
             "done until the verifier accepts."
         )
+    else:
+        # Leaving Goal (Act/Plan): pause any active disk-backed goal so the next
+        # Goal turn does not immediately re-run a stale verifier contract, and so
+        # Act turns cannot be hijacked by leftover `.clawagents/goal/state.json`.
+        try:
+            from clawagents.goal import GoalPauseReason, GoalTracker
+
+            gt = GoalTracker(WORKSPACE)
+            if gt.is_active():
+                gt.pause(
+                    GoalPauseReason.USER,
+                    "Paused because UI is in Act/Plan (not Goal mode)",
+                )
+                on_event(
+                    {
+                        "kind": "status",
+                        "text": "Paused active Goal — switch back to Goal to resume",
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            pass
     if settings.get("trajectory"):
         kwargs["trajectory"] = True
     if settings.get("learn"):

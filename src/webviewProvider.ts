@@ -662,6 +662,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.goalMode = Boolean(msg.goal);
         if (this.goalMode) {
           this.mode = "auto";
+          void this.gateway.resumeActiveGoal().catch(() => undefined);
+        } else {
+          // Pause disk-backed goal immediately so Act/Plan cannot inherit it.
+          void this.gateway.pauseActiveGoal().catch(() => undefined);
         }
         await this.persistLocal(this.persistState());
         break;
@@ -781,12 +785,26 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             throw new Error("No active chat");
           }
           const res = await this.gateway.compactChat(this.chatId);
+          const compacted = Boolean(res.compacted);
           this.post({
             type: "status",
-            message: res.compacted
-              ? `Compacted ${String(res.before)} → ${String(res.after)} messages`
+            message: compacted
+              ? `Compacted ${String(res.before)} → ${String(res.after)} messages` +
+                (res.est_tokens_before != null && res.est_tokens_after != null
+                  ? ` (~${String(res.est_tokens_before)} → ~${String(res.est_tokens_after)} tokens)`
+                  : "")
               : `Compact skipped: ${String(res.reason || "")}`,
           });
+          if (compacted || res.meter_reset) {
+            // Context % is last LLM prompt size — reset so Compact isn't stuck at 100%.
+            this.post({
+              type: "usage",
+              promptTokens: 0,
+              completionTokens: 0,
+              totalTokens: 0,
+              lastInputTokens: Number(res.est_tokens_after) || 0,
+            });
+          }
         } catch (err) {
           this.post({
             type: "error",

@@ -378,6 +378,14 @@ export class GatewayClient {
     );
   }
 
+  pauseActiveGoal() {
+    return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/goal/pause", {});
+  }
+
+  resumeActiveGoal() {
+    return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/goal/resume", {});
+  }
+
   async streamChat(
     task: string,
     chatId: string | undefined,
