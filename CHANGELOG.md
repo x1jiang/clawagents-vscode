@@ -1,3 +1,7 @@
+## 1.0.52
+
+- Require `clawagents>=6.17.8` (secret rewind filter, webhook DNS pin, full stream breakers)
+
 ## 1.0.51
 
 - Confirm before destructive rewind

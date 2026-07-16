@@ -34,7 +34,7 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.17.7",
+      version: "6.17.8",
       supportsSkillsExclude: true,
     }),
     false,
@@ -42,7 +42,7 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.17.6",
+      version: "6.17.7",
       supportsSkillsExclude: true,
     }),
     true,
@@ -60,7 +60,7 @@ test("dependency versions stay inside the supported major ranges", () => {
       .every((spec) => spec.includes("<")),
   );
   assert.ok(
-    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.17.7")),
+    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.17.8")),
   );
   assert.ok(!deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("atlas")));
 });
@@ -69,7 +69,7 @@ test("concurrent dependency checks share one in-flight promise", async () => {
   const fakePython = path.join(tempDir, "fake-python");
   fs.writeFileSync(
     fakePython,
-    "#!/bin/sh\nprintf '/fake/python\\n6.17.7\\nTrue\\n'\n",
+    "#!/bin/sh\nprintf '/fake/python\\n6.17.8\\nTrue\\n'\n",
     { mode: 0o755 },
   );
   const output = { appendLine() {} };
