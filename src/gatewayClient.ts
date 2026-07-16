@@ -536,6 +536,14 @@ export class GatewayClient {
                   type: "status",
                   message: ev.event === "queued" ? "Queued…" : "Running…",
                 });
+              } else if (ev.event === "stranded_interject") {
+                const prompts = Array.isArray(data.prompts)
+                  ? data.prompts.map((p: unknown) => String(p)).filter(Boolean)
+                  : [];
+                emit({
+                  type: "stranded_interject",
+                  prompts,
+                });
               }
             }
           });
@@ -601,15 +609,19 @@ export class GatewayClient {
     });
   }
 
-  async cancel(): Promise<void> {
+  async cancel(): Promise<{ ok: boolean; stranded_prompts?: string[] }> {
     const handle = this.getHandle();
     if (!handle) {
-      return;
+      return { ok: false };
     }
     try {
-      await requestJson(handle, "POST", "/cancel");
+      return await requestJson<{ ok: boolean; stranded_prompts?: string[] }>(
+        handle,
+        "POST",
+        "/cancel",
+      );
     } catch {
-      /* ignore */
+      return { ok: false };
     }
   }
 

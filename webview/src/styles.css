@@ -1096,6 +1096,20 @@ button.send {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+.mic-btn.active {
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 .checkpoint-panel {
   border-bottom: 1px solid var(--border);
   padding: 10px 12px 12px;

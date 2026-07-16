@@ -175,6 +175,10 @@ export type HostToWebview =
       type: "rewind";
       snapshots: Array<Record<string, unknown>>;
       open?: boolean;
+    }
+  | {
+      type: "stranded_interject";
+      prompts: string[];
     };
 
 export type WebviewToHost =

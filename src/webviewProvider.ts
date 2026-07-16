@@ -277,19 +277,27 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   async cancelTask(): Promise<void> {
-    // Stop means stop: drop queued follow-ups too, otherwise the next
-    // queued message starts the agent right back up after the abort.
-    if (this.queue.length > 0) {
+    // Stop means stop for follow-ups the user explicitly queued via Enter —
+    // but stranded mid-turn interjects (Grok: stranded → queued prompt) are
+    // promoted to the front of the queue so the user's redirect is not lost.
+    const hadQueued = this.queue.length;
+    if (hadQueued > 0) {
       this.queue = [];
       this.post({ type: "status", message: "Queue cleared" });
     }
-    // With an active stream, aborting makes the stream emit `cancelled`;
-    // posting it here too rendered a duplicate "Cancelled" row.
     const hadStream = this.abort !== undefined;
     this.abort?.abort();
     this.abort = undefined;
     try {
-      await this.gateway.cancel();
+      const res = await this.gateway.cancel();
+      const stranded = (res.stranded_prompts || []).map((p) => String(p).trim()).filter(Boolean);
+      if (stranded.length) {
+        this.queue = [...stranded, ...this.queue];
+        this.post({
+          type: "status",
+          message: `Queued stranded redirect${stranded.length > 1 ? "s" : ""} (${this.queue.length})`,
+        });
+      }
     } catch {
       /* ignore */
     }
@@ -1864,7 +1872,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.mode,
         {
           signal,
-          onEvent: (ev) => this.post(ev),
+          onEvent: (ev) => {
+            if (ev.type === "stranded_interject" && ev.prompts?.length) {
+              const prompts = ev.prompts.map((p) => String(p).trim()).filter(Boolean);
+              if (prompts.length) {
+                // Front of queue — send-now semantics for stranded redirects.
+                this.queue = [...prompts, ...this.queue];
+                this.post({
+                  type: "status",
+                  message: `Queued stranded redirect${prompts.length > 1 ? "s" : ""} (${this.queue.length})`,
+                });
+              }
+              return;
+            }
+            this.post(ev);
+          },
         },
         model,
         this.autoApprove,

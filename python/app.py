@@ -92,9 +92,30 @@ def _set_run_context(run_id: str, run_context: Any) -> None:
             run["run_context"] = run_context
 
 
-def _unregister_run(run_id: str) -> None:
+def _unregister_run(run_id: str) -> list[str]:
+    """Remove run; return any stranded interject texts for host queue promotion."""
     with _run_lock:
-        _active_runs.pop(run_id, None)
+        run = _active_runs.pop(run_id, None)
+    if run is None:
+        return []
+    ctx = run.get("run_context")
+    stranded: list[str] = []
+    try:
+        from clawagents.interjection import take_stranded_interjects
+
+        stranded = take_stranded_interjects(ctx)
+        # Also pick up leftovers already parked by the agent loop
+        meta = getattr(ctx, "_metadata", None) if ctx is not None else None
+        if isinstance(meta, dict):
+            parked = meta.pop("stranded_interjects", None)
+            if isinstance(parked, list):
+                for p in parked:
+                    t = str(p).strip()
+                    if t and t not in stranded:
+                        stranded.append(t)
+    except Exception:  # noqa: BLE001
+        pass
+    return stranded
 
 
 def _fire_canceller(cancel_fn: Callable[[], None] | None) -> None:
@@ -116,20 +137,31 @@ def _cancel_run(run_id: str) -> None:
     _fire_canceller(cancel_fn)
 
 
-def _cancel_all_runs() -> None:
+def _cancel_all_runs() -> list[str]:
+    """Cancel every active run; return stranded interject prompts (FIFO)."""
     with _run_lock:
         runs = list(_active_runs.values())
         for run in runs:
             run["ev"].set()
     for run in runs:
         _fire_canceller(run["cancel"])
+    stranded: list[str] = []
+    for run in runs:
+        ctx = run.get("run_context")
+        try:
+            from clawagents.interjection import take_stranded_interjects
+
+            stranded.extend(take_stranded_interjects(ctx))
+        except Exception:  # noqa: BLE001
+            pass
+    return stranded
 
 
 def _interject_runs(text: str, chat_id: str | None = None) -> int:
     """Queue a mid-turn user redirect on matching active run(s).
 
     When ``chat_id`` is set, only that chat's run is targeted. Multiple
-    redirects before a drain are appended (not overwritten).
+    redirects are kept as separate list entries (never merged into one blob).
     """
     msg = (text or "").strip()
     if not msg:
@@ -141,20 +173,26 @@ def _interject_runs(text: str, chat_id: str | None = None) -> int:
         if chat_id and run.get("chat_id") and run.get("chat_id") != chat_id:
             continue
         if chat_id and not run.get("chat_id"):
-            # Prefer explicit targeting: skip untagged runs when chat_id given.
             continue
         ctx = run.get("run_context")
         if ctx is None:
             continue
-        meta = getattr(ctx, "_metadata", None)
-        if not isinstance(meta, dict):
-            continue
-        prev = meta.get("pending_interject")
-        if isinstance(prev, str) and prev.strip():
-            meta["pending_interject"] = prev.rstrip() + "\n" + msg
-        else:
-            meta["pending_interject"] = msg
-        n += 1
+        try:
+            from clawagents.interjection import enqueue_interject
+
+            if enqueue_interject(ctx, msg):
+                n += 1
+        except Exception:  # noqa: BLE001
+            # Fallback: legacy string key
+            meta = getattr(ctx, "_metadata", None)
+            if not isinstance(meta, dict):
+                continue
+            buf = meta.get("pending_interjects")
+            if not isinstance(buf, list):
+                buf = []
+                meta["pending_interjects"] = buf
+            buf.append(msg)
+            n += 1
     return n
 
 
@@ -962,7 +1000,7 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        _cancel_all_runs()
+        stranded = _cancel_all_runs()
         with _permission_lock:
             ids = list(_permission_events.keys())
         for rid in ids:
@@ -972,7 +1010,7 @@ def create_app() -> FastAPI:
             ask_ids = list(_ask_events.keys())
         for rid in ask_ids:
             _ask_waiter.resolve(rid, None)
-        return {"ok": True}
+        return {"ok": True, "stranded_prompts": stranded}
 
     @app.post("/interject")
     async def interject(body: InterjectBody, request: Request):
@@ -1127,6 +1165,9 @@ def create_app() -> FastAPI:
             if kind == "usage":
                 sse("usage", payload)
                 return
+            if kind == "stranded_interject":
+                sse("stranded_interject", payload)
+                return
             sse("agent", {"kind": kind, "data": payload})
             if kind == "tool_started":
                 call_id = str(payload.get("call_id") or "")
@@ -1246,7 +1287,12 @@ def create_app() -> FastAPI:
                 else:
                     sse("error", {"error": str(exc)})
             finally:
-                _unregister_run(run_id)
+                stranded = _unregister_run(run_id)
+                if stranded:
+                    sse(
+                        "stranded_interject",
+                        {"prompts": stranded, "count": len(stranded)},
+                    )
                 close_stream()
 
         run_task = asyncio.create_task(_run())

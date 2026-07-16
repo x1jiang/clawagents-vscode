@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.46 — 2026-07-15
+
+- Require `clawagents>=6.17.1` (circuit-breaker probe-lease, interject synthetic turns)
+- **Voice dictation** — Mic button + ⌃␣ / F8 (Web Speech API → composer draft)
+- Stranded mid-turn redirects promote to the front of the send queue (not dropped on Stop)
+
 ## 1.0.45 — 2026-07-15
 
 - Require `clawagents>=6.17.0` (smart memory, PTY sessions, structured output, doom-loop, session rewind)

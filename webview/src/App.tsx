@@ -19,6 +19,7 @@ import {
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
+import { VoiceDictation, speechRecognitionAvailable } from "./voiceDictation";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -346,6 +347,10 @@ export function App() {
   const [hunksOpen, setHunksOpen] = useState(false);
   const [rewindSnaps, setRewindSnaps] = useState<Array<Record<string, unknown>>>([]);
   const [rewindOpen, setRewindOpen] = useState(false);
+  const [dictating, setDictating] = useState(false);
+  const [dictationInterim, setDictationInterim] = useState("");
+  const voiceRef = useRef<VoiceDictation | null>(null);
+  const draftBaseRef = useRef("");
   /** Forces relative checkpoint labels ("2m ago") to refresh while the panel is open. */
   const [nowTick, setNowTick] = useState(() => Date.now());
   /** Sum of estimated USD for completed runs in this chat (not including the in-flight run). */
@@ -886,6 +891,12 @@ export function App() {
   }, [items]);
 
   useEffect(() => {
+    return () => {
+      voiceRef.current?.stop();
+    };
+  }, []);
+
+  useEffect(() => {
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
       post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman, goal: goalMode });
@@ -1157,6 +1168,80 @@ export function App() {
     setVerifyMsg("Saving…");
     post({ type: "save_settings", settings: patch });
   };
+
+  const toggleDictation = () => {
+    if (!speechRecognitionAvailable()) {
+      setItems((previous) => [
+        ...previous,
+        {
+          kind: "status",
+          text: "Voice dictation needs Web Speech API (Chromium). Try VS Code / Cursor desktop.",
+        },
+      ]);
+      return;
+    }
+    if (!voiceRef.current) {
+      voiceRef.current = new VoiceDictation("en-US");
+    }
+    const voice = voiceRef.current;
+    if (voice.active) {
+      voice.stop();
+      setDictating(false);
+      setDictationInterim("");
+      return;
+    }
+    draftBaseRef.current = draft;
+    setDictationInterim("");
+    voice.start({
+      onStart: () => setDictating(true),
+      onEnd: () => {
+        setDictating(false);
+        setDictationInterim("");
+      },
+      onInterim: (text) => {
+        setDictationInterim(text);
+        const base = draftBaseRef.current;
+        const sep = base && !/\s$/.test(base) ? " " : "";
+        setDraft(base + sep + text);
+      },
+      onFinal: (text) => {
+        const piece = text.trim();
+        if (!piece) return;
+        const base = draftBaseRef.current;
+        const sep = base && !/\s$/.test(base) ? " " : "";
+        const next = `${base}${sep}${piece}`.replace(/\s+/g, " ");
+        draftBaseRef.current = next.endsWith(" ") ? next : `${next} `;
+        setDictationInterim("");
+        setDraft(draftBaseRef.current);
+      },
+      onError: (message) => {
+        setDictating(false);
+        setDictationInterim("");
+        setItems((previous) => [...previous, { kind: "status", text: message }]);
+      },
+    });
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const chord =
+        (e.code === "Space" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) ||
+        e.key === "F8";
+      if (!chord) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        t !== textareaRef.current &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      toggleDictation();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const send = () => {
     if (attachmentRequestsRef.current.size > 0) {
@@ -3412,7 +3497,12 @@ export function App() {
               <textarea
                 ref={textareaRef}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  if (dictating) {
+                    draftBaseRef.current = e.target.value;
+                  }
+                }}
                 onPaste={(e) => {
                   const files = collectTransferFiles(e.clipboardData);
                   if (files.length === 0) {
@@ -3426,7 +3516,7 @@ export function App() {
                     finishAttachmentRequest,
                   );
                 }}
-                placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
+                placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · mic / ⌃␣ / F8 dictate · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
                 rows={3}
                 onKeyDown={(e) => {
                   // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
@@ -3439,13 +3529,39 @@ export function App() {
                     !e.nativeEvent.isComposing
                   ) {
                     e.preventDefault();
+                    if (dictating) {
+                      voiceRef.current?.stop();
+                      setDictating(false);
+                      setDictationInterim("");
+                    }
                     send();
+                  } else if (e.key === "Escape" && dictating) {
+                    e.preventDefault();
+                    voiceRef.current?.stop();
+                    setDictating(false);
+                    setDictationInterim("");
                   } else if (e.key === "Escape" && busy) {
                     e.preventDefault();
                     post({ type: "cancel" });
                   }
                 }}
               />
+              <button
+                type="button"
+                className={`tool-chip mic-btn${dictating ? " active" : ""}`}
+                title={
+                  dictating
+                    ? "Stop dictation (Esc / ⌃␣ / F8)"
+                    : "Voice dictation into prompt (⌃␣ / F8)"
+                }
+                aria-pressed={dictating}
+                onClick={() => toggleDictation()}
+              >
+                {dictating ? "Listening…" : "Mic"}
+                {dictationInterim ? (
+                  <span className="tool-chip-meta">…</span>
+                ) : null}
+              </button>
               {busy ? (
                 <>
                   <button
