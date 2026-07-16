@@ -1,3 +1,7 @@
+## 1.0.49 — 2026-07-16
+
+- Require `clawagents>=6.17.5` (skill allowed-tools / grep / apply_patch fixes)
+
 ## 1.0.48 — 2026-07-16
 
 - Require `clawagents>=6.17.4` (Act mode no longer inherits Goal verifier)
