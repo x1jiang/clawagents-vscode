@@ -10,7 +10,7 @@ For the full **Python + VS Code** release flow (bump, build, tag, GitHub, PyPI),
 - [x] GitHub repo pushed: https://github.com/x1jiang/clawagents-vscode
 - [x] `package.json` repository / bugs / homepage point at that repo
 - [x] **Publish `clawagents` 6.17.0 to PyPI first** (1.0.45 requires `>=6.17.0`)
-- [ ] VSIX built: `clawagents-1.0.45.vsix`
+- [x] VSIX built: `clawagents-1.0.45.vsix`
 
 ## You still need: Azure DevOps PAT (once)
 
