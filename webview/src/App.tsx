@@ -344,6 +344,8 @@ export function App() {
   const [checkpointsOpen, setCheckpointsOpen] = useState(false);
   const [hunks, setHunks] = useState<Array<Record<string, unknown>>>([]);
   const [hunksOpen, setHunksOpen] = useState(false);
+  const [rewindSnaps, setRewindSnaps] = useState<Array<Record<string, unknown>>>([]);
+  const [rewindOpen, setRewindOpen] = useState(false);
   /** Forces relative checkpoint labels ("2m ago") to refresh while the panel is open. */
   const [nowTick, setNowTick] = useState(() => Date.now());
   /** Sum of estimated USD for completed runs in this chat (not including the in-flight run). */
@@ -804,9 +806,12 @@ export function App() {
         }
         case "hunks": {
           setHunks(msg.hunks || []);
-          if (msg.open !== false) {
-            setHunksOpen(true);
-          }
+          if (msg.open !== false) setHunksOpen(true);
+          break;
+        }
+        case "rewind": {
+          setRewindSnaps(msg.snapshots || []);
+          if (msg.open !== false) setRewindOpen(true);
           break;
         }
         case "done": {
@@ -1180,6 +1185,11 @@ export function App() {
       post({ type: "list_hunks", open: true });
       return;
     }
+    if (value === "/rewind") {
+      setDraft("");
+      post({ type: "list_rewind", open: true });
+      return;
+    }
     setDraft("");
     if (busy) {
       post({ type: "interject", text: value });
@@ -1316,6 +1326,17 @@ export function App() {
               Review
               {hunks.length ? (
                 <span className="tool-chip-meta">{hunks.length}</span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className={`tool-chip${rewindOpen ? " active" : ""}`}
+              title="Rewind workspace files to a prior prompt (/rewind)"
+              onClick={() => post({ type: "list_rewind", open: true })}
+            >
+              Rewind
+              {rewindSnaps.length ? (
+                <span className="tool-chip-meta">{rewindSnaps.length}</span>
               ) : null}
             </button>
             <button
@@ -1528,6 +1549,52 @@ export function App() {
                           Open
                         </button>
                       ) : null}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {rewindOpen && (
+        <div className="checkpoint-panel" role="region" aria-label="Session rewind">
+          <div className="checkpoint-panel-head">
+            <div>
+              <strong>Session rewind</strong>
+              <span className="checkpoint-sub">Restore workspace files to a prior prompt</span>
+            </div>
+            <button type="button" className="tool-chip" onClick={() => setRewindOpen(false)}>
+              Close
+            </button>
+          </div>
+          {rewindSnaps.length === 0 ? (
+            <p className="checkpoint-empty">No rewind snapshots yet — send a prompt to create one.</p>
+          ) : (
+            <ul className="checkpoint-list">
+              {rewindSnaps.slice().reverse().slice(0, 40).map((s) => {
+                const idx = Number(s.prompt_index);
+                if (!Number.isFinite(idx)) return null;
+                const preview = String(s.user_text || "").slice(0, 120);
+                const files = Number(s.files || 0);
+                return (
+                  <li key={`rw-${idx}`}>
+                    <div className="checkpoint-main">
+                      <code className="checkpoint-sha">#{idx}</code>
+                      <span className="checkpoint-label" title={preview}>
+                        {preview || "prompt"}
+                      </span>
+                      <span className="checkpoint-when">{files} file(s)</span>
+                    </div>
+                    <div className="checkpoint-actions">
+                      <button
+                        type="button"
+                        className="tool-chip primary"
+                        onClick={() => post({ type: "rewind_to", promptIndex: idx })}
+                      >
+                        Rewind
+                      </button>
                     </div>
                   </li>
                 );

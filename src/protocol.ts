@@ -170,6 +170,11 @@ export type HostToWebview =
       type: "hunks";
       hunks: Array<Record<string, unknown>>;
       open?: boolean;
+    }
+  | {
+      type: "rewind";
+      snapshots: Array<Record<string, unknown>>;
+      open?: boolean;
     };
 
 export type WebviewToHost =
@@ -223,6 +228,8 @@ export type WebviewToHost =
   | { type: "list_hunks"; open?: boolean }
   | { type: "accept_hunk"; hunkId?: string; path?: string }
   | { type: "reject_hunk"; hunkId: string }
+  | { type: "list_rewind"; open?: boolean }
+  | { type: "rewind_to"; promptIndex: number }
   | { type: "interject"; text: string }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
@@ -368,6 +375,11 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost : undefined;
     case "reject_hunk":
       return text(value.hunkId, 256) ? value as WebviewToHost : undefined;
+    case "list_rewind":
+      return value.open === undefined || typeof value.open === "boolean" ? value as WebviewToHost : undefined;
+    case "rewind_to":
+      return typeof value.promptIndex === "number" && Number.isFinite(value.promptIndex) && value.promptIndex >= 0
+        ? value as WebviewToHost : undefined;
     case "interject":
       return text(value.text) && optionalText(value.chatId, 128)
         ? value as WebviewToHost : undefined;

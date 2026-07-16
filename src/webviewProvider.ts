@@ -842,6 +842,34 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "list_rewind":
+        try {
+          const res = await this.gateway.listRewindSnapshots();
+          this.post({
+            type: "rewind",
+            snapshots: res.snapshots || [],
+            open: msg.open !== false,
+          });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "rewind_to":
+        try {
+          await this.gateway.rewindToPrompt(msg.promptIndex);
+          const res = await this.gateway.listRewindSnapshots();
+          this.post({ type: "rewind", snapshots: res.snapshots || [], open: true });
+          this.post({ type: "status", message: `Rewound to prompt ${msg.promptIndex}` });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
       case "restart_sidecar":
         await this.restartSidecar();
         break;

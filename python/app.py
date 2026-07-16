@@ -503,6 +503,10 @@ class HunkActionBody(BaseModel):
     path: str | None = None
 
 
+class RewindBody(BaseModel):
+    prompt_index: int
+
+
 class CompactBody(BaseModel):
     pass
 
@@ -1031,6 +1035,32 @@ def create_app() -> FastAPI:
             if not body.hunk_id:
                 return {"ok": False, "error": "hunk_id required"}
             result = reject_hunk(body.hunk_id, workspace=str(WORKSPACE))
+            return {"ok": bool(result.get("ok")), **result}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/rewind")
+    async def rewind_list(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.memory.hunk_watcher import get_watcher
+
+            rows = get_watcher(str(WORKSPACE)).list_snapshots()
+            return {"ok": True, "snapshots": rows}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "snapshots": []}
+
+    @app.post("/rewind")
+    async def rewind_to(body: RewindBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.memory.hunk_watcher import get_watcher
+
+            result = get_watcher(str(WORKSPACE)).rewind_to_prompt(int(body.prompt_index))
             return {"ok": bool(result.get("ok")), **result}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}

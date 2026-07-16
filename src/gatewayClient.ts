@@ -641,4 +641,18 @@ export class GatewayClient {
       hunk_id: hunkId,
     });
   }
+
+  listRewindSnapshots() {
+    return requestJson<{
+      ok: boolean;
+      snapshots?: Array<Record<string, unknown>>;
+      error?: string;
+    }>(this.requireHandle(), "GET", "/rewind");
+  }
+
+  rewindToPrompt(promptIndex: number) {
+    return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/rewind", {
+      prompt_index: promptIndex,
+    });
+  }
 }

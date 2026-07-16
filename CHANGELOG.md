@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.45 — 2026-07-15
+
+- Require `clawagents>=6.17.0` (smart memory, PTY sessions, structured output, doom-loop, session rewind)
+- **Rewind** panel (`/rewind`) — restore workspace files to a prior prompt snapshot
+- Sidecar `/rewind` list + restore endpoints
+
 ## 1.0.44 — 2026-07-15
 
 - Require `clawagents>=6.16.0` (ATLAS removed; Goal is the only long-horizon path)
