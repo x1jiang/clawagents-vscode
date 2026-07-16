@@ -31,15 +31,49 @@ const deps = require(outputFile);
 test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
 test("dependency versions stay inside the supported major ranges", () => {
-  assert.equal(deps.needsPipInstall({ ok: true, version: "6.12.13", supportsSkillsExclude: true }), false);
-  assert.equal(deps.needsPipInstall({ ok: true, version: "6.12.12", supportsSkillsExclude: true }), true);
-  assert.equal(deps.needsPipInstall({ ok: true, version: "7.0.0", supportsSkillsExclude: true }), true);
-  assert.ok(deps.SIDECAR_PIP_PACKAGES.every((spec) => spec.includes("<")));
+  assert.equal(
+    deps.needsPipInstall({
+      ok: true,
+      version: "6.14.2",
+      supportsSkillsExclude: true,
+      supportsAtlas: true,
+    }),
+    false,
+  );
+  assert.equal(
+    deps.needsPipInstall({
+      ok: true,
+      version: "6.14.1",
+      supportsSkillsExclude: true,
+      supportsAtlas: true,
+    }),
+    true,
+  );
+  assert.equal(
+    deps.needsPipInstall({
+      ok: true,
+      version: "7.0.0",
+      supportsSkillsExclude: true,
+      supportsAtlas: true,
+    }),
+    true,
+  );
+  assert.ok(
+    deps.SIDECAR_PIP_PACKAGES.filter((spec) => !spec.includes("git+"))
+      .every((spec) => spec.includes("<")),
+  );
+  assert.ok(
+    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.14.2")),
+  );
 });
 
 test("concurrent dependency checks share one in-flight promise", async () => {
   const fakePython = path.join(tempDir, "fake-python");
-  fs.writeFileSync(fakePython, "#!/bin/sh\nprintf '/fake/python\\n6.12.13\\nTrue\\n'\n", { mode: 0o755 });
+  fs.writeFileSync(
+    fakePython,
+    "#!/bin/sh\nprintf '/fake/python\\n6.14.2\\nTrue\\nTrue\\n'\n",
+    { mode: 0o755 },
+  );
   const output = { appendLine() {} };
   const first = deps.ensureSidecarDeps(fakePython, output, {});
   const second = deps.ensureSidecarDeps(fakePython, output, {});

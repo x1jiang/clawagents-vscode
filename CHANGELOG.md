@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.42 — 2026-07-15
+
+- Require `clawagents>=6.14.2` (Grok-aligned skill strategy: `when-to-use`, path gates, `$ARGUMENTS` / `${SKILL_DIR}`, hot reload, compaction `invoked_skills`)
+- Settings → Skills: show **Use when** and path-gate globs in the detected-skills list
+
 ## 1.0.41 — 2026-07-14
 
 - ATLAS: move toggle to composer **Auto-approve** (compact, like Caveman); **off by default** after A/B cost experiments

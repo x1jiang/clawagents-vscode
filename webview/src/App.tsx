@@ -216,6 +216,8 @@ type SkillsPreview = {
   skills: Array<{
     name: string;
     description: string;
+    when_to_use?: string;
+    paths?: string[];
     path: string;
     source_dir: string;
     excluded?: boolean;
@@ -2340,6 +2342,17 @@ export function App() {
                       </div>
                       {skill.description ? (
                         <div className="skill-item-desc muted tiny">{skill.description}</div>
+                      ) : null}
+                      {skill.when_to_use ? (
+                        <div className="skill-item-desc muted tiny">
+                          Use when: {skill.when_to_use}
+                        </div>
+                      ) : null}
+                      {skill.paths && skill.paths.length > 0 ? (
+                        <div className="skill-item-desc muted tiny" title={skill.paths.join(", ")}>
+                          Paths: {skill.paths.slice(0, 3).join(", ")}
+                          {skill.paths.length > 3 ? ` (+${skill.paths.length - 3})` : ""}
+                        </div>
                       ) : null}
                       {skill.source_dir ? (
                         <code className="skill-item-src muted tiny" title={skill.path}>

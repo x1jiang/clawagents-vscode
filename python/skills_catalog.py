@@ -239,6 +239,12 @@ def _scan_skills(
             {
                 "name": skill.name,
                 "description": (skill.description or "").strip(),
+                "when_to_use": (getattr(skill, "when_to_use", "") or "").strip(),
+                "paths": [
+                    str(p).strip()
+                    for p in (getattr(skill, "paths", None) or [])
+                    if str(p).strip()
+                ],
                 "path": skill_path,
                 "source_dir": source_dir,
             }

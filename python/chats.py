@@ -595,7 +595,7 @@ async def run_chat_turn(
                 "warn",
                 {
                     "message": (
-                        "ATLAS needs clawagents≥6.13.1. "
+                        "ATLAS needs clawagents≥6.14.2. "
                         "Run Command Palette → ClawAgents: Install/Upgrade Python Dependencies."
                     ),
                 },

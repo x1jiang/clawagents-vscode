@@ -133,6 +133,8 @@ export type HostToWebview =
       skills: Array<{
         name: string;
         description: string;
+        when_to_use?: string;
+        paths?: string[];
         path: string;
         source_dir: string;
         excluded?: boolean;
