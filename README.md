@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.17.1** (auto-installed / upgraded; circuit-breaker, interject turns, voice dictation)
+- **clawagents ≥ 6.17.3** (Tier-2 hooks/hunks/rewind/bwrap secrets + complete→chat fix)
 - A provider credential for at least one model provider
 
 ## Quick start

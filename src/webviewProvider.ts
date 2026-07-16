@@ -867,10 +867,26 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "rewind_to":
         try {
-          await this.gateway.rewindToPrompt(msg.promptIndex);
+          const result = await this.gateway.rewindToPrompt(msg.promptIndex, this.chatId);
           const res = await this.gateway.listRewindSnapshots();
           this.post({ type: "rewind", snapshots: res.snapshots || [], open: true });
-          this.post({ type: "status", message: `Rewound to prompt ${msg.promptIndex}` });
+          const trunc = result.conversation_truncated as
+            | { ok?: boolean; error?: string }
+            | undefined;
+          this.post({
+            type: "status",
+            message:
+              trunc && trunc.ok === false
+                ? `Rewound files to prompt ${msg.promptIndex} (conversation truncate failed)`
+                : `Rewound to prompt ${msg.promptIndex}`,
+          });
+          if (this.chatId && trunc && trunc.ok !== false) {
+            try {
+              await this.pushReady();
+            } catch {
+              /* ignore refresh errors */
+            }
+          }
         } catch (err) {
           this.post({
             type: "error",

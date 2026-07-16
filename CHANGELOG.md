@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.47 — 2026-07-16
+
+- Require `clawagents>=6.17.3` (Tier-2 hook/hunk/rewind/bwrap wiring + complete→chat fix)
+- Rewind passes `chat_id` so conversation truncates with files
+
 ## 1.0.46 — 2026-07-15
 
 - Require `clawagents>=6.17.1` (circuit-breaker probe-lease, interject synthetic turns)

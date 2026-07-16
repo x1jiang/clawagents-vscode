@@ -25,6 +25,7 @@ from chats import (
     run_chat_turn,
     search_chats,
     truncate_after_last_user,
+    truncate_to_prompt_index,
     _decide_by_mode,
 )
 from diagnostics import run_diagnostics
@@ -543,6 +544,7 @@ class HunkActionBody(BaseModel):
 
 class RewindBody(BaseModel):
     prompt_index: int
+    chat_id: str | None = None
 
 
 class CompactBody(BaseModel):
@@ -1099,6 +1101,20 @@ def create_app() -> FastAPI:
             from clawagents.memory.hunk_watcher import get_watcher
 
             result = get_watcher(str(WORKSPACE)).rewind_to_prompt(int(body.prompt_index))
+            if body.chat_id and result.get("ok"):
+                try:
+                    trunc = truncate_to_prompt_index(
+                        body.chat_id,
+                        int(body.prompt_index),
+                        user_text=str(result.get("truncate_to_user_text") or ""),
+                        message_count=result.get("message_count"),
+                    )
+                    result["conversation_truncated"] = trunc
+                except Exception as trunc_exc:  # noqa: BLE001
+                    result["conversation_truncated"] = {
+                        "ok": False,
+                        "error": str(trunc_exc),
+                    }
             return {"ok": bool(result.get("ok")), **result}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}

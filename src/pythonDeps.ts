@@ -5,8 +5,8 @@ import { curatedProcessEnv } from "./envCurate";
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
   // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION:
-  // 6.17.1: circuit-breaker probe-lease, interject synthetic turns, stranded→queue.
-  "clawagents[gemini,anthropic,bedrock,mcp]>=6.17.1,<7",
+  // 6.17.3: Tier-2 hook/hunk/rewind/bwrap wiring + complete→chat fix.
+  "clawagents[gemini,anthropic,bedrock,mcp]>=6.17.3,<7",
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -14,7 +14,7 @@ export const SIDECAR_PIP_PACKAGES = [
 ] as const;
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 17, 1];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 17, 3];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 
 export type DepProbe = {

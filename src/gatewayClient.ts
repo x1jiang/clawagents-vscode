@@ -662,9 +662,10 @@ export class GatewayClient {
     }>(this.requireHandle(), "GET", "/rewind");
   }
 
-  rewindToPrompt(promptIndex: number) {
+  rewindToPrompt(promptIndex: number, chatId?: string) {
     return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/rewind", {
       prompt_index: promptIndex,
+      ...(chatId ? { chat_id: chatId } : {}),
     });
   }
 }

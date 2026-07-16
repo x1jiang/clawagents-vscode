@@ -286,6 +286,76 @@ def _truncate_session_after_last_user(chat_id: str) -> None:
     mem.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
 
 
+def truncate_to_prompt_index(
+    chat_id: str,
+    prompt_index: int,
+    *,
+    user_text: str = "",
+    message_count: int | None = None,
+) -> dict[str, Any]:
+    """Truncate UI + session memory to a rewind snapshot conversation marker."""
+    events = read_ui_events(chat_id)
+    target_user = (user_text or "").strip()
+    kept_events: list[dict[str, Any]] = []
+    if target_user:
+        for i, ev in enumerate(events):
+            if ev.get("kind") == "user" and display_user_text(
+                str(ev.get("text") or "")
+            ).strip() == display_user_text(target_user).strip():
+                kept_events = events[: i + 1]
+                break
+    if not kept_events and message_count is not None and message_count > 0:
+        user_seen = 0
+        for i, ev in enumerate(events):
+            if ev.get("kind") == "user":
+                user_seen += 1
+            if user_seen >= message_count:
+                kept_events = events[: i + 1]
+                break
+    if kept_events:
+        path = chat_ui_log_path(chat_id)
+        with path.open("w", encoding="utf-8") as f:
+            for ev in kept_events:
+                f.write(json.dumps(ev, default=str) + "\n")
+    _truncate_session_to_message_count(chat_id, message_count, user_text=target_user)
+    return {
+        "ok": True,
+        "chat_id": chat_id,
+        "prompt_index": prompt_index,
+        "kept_events": len(kept_events),
+    }
+
+
+def _truncate_session_to_message_count(
+    chat_id: str,
+    message_count: int | None,
+    *,
+    user_text: str = "",
+) -> None:
+    """Drop session memory after rewind snapshot message_count / user_text."""
+    mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
+    if not mem.exists():
+        return
+    lines = [ln for ln in mem.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    kept: list[str] = []
+    target_user = (user_text or "").strip()
+    if target_user:
+        for i, ln in enumerate(lines):
+            try:
+                row = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            if row.get("role") == "user" and display_user_text(
+                str(row.get("content") or "")
+            ).strip() == display_user_text(target_user).strip():
+                kept = lines[: i + 1]
+                break
+    elif message_count is not None and message_count > 0:
+        kept = lines[:message_count]
+    if kept:
+        mem.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+
+
 def _decide_by_mode(mode: str, file_path: str | None) -> str | None:
     if mode == "read_only":
         return "deny"
