@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import { AWS_ENV_KEYS, ExtensionConfig, workspaceRoot } from "./config";
 import { curatedProcessEnv } from "./envCurate";
 import { ensureSidecarDeps } from "./pythonDeps";
+import { pinPythonPathEnv } from "./pythonPathPin";
 import { StartGeneration } from "./startGeneration";
 
 export interface SidecarHandle {
@@ -179,7 +180,9 @@ export class SidecarManager {
         }
       }
     }
-    const env: NodeJS.ProcessEnv = {
+    // Pin PATH so agent shell tools (`python3` / `pip`) hit the same
+    // interpreter as clawagents.pythonPath — not a stale Homebrew/conda install.
+    const env: NodeJS.ProcessEnv = pinPythonPathEnv(python, {
       ...curatedProcessEnv(),
       ...shellKeys,
       ...dotenvEnv,
@@ -196,10 +199,14 @@ export class SidecarManager {
       // (would clobber SecretStorage keys). Spawn env already merged keys once.
       CLAWAGENTS_SKIP_DOTENV: "1",
       CLAWAGENTS_DOTENV_OVERRIDE: "0",
-    };
+    });
     if (model) {
       env.CLAW_MODEL = model;
     }
+    this.output.appendLine(
+      `PATH pin: CLAWAGENTS_PYTHON=${env.CLAWAGENTS_PYTHON || python} ` +
+        `PATH[0]=${(env.PATH || "").split(process.platform === "win32" ? ";" : ":")[0] || "?"}`,
+    );
 
     this.lastLog = "";
     this.output.appendLine(`Starting sidecar: ${python} ${bridge} --port ${port}`);

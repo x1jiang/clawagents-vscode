@@ -1,7 +1,7 @@
-Publisher **`clawagents`** · version **1.0.52**
+Publisher **`clawagents`** · version **1.0.53**
 
-- [x] Publish `clawagents` **6.17.8** to PyPI first
-- [x] VSIX: `clawagents-1.0.52.vsix`
+- [ ] Publish `clawagents` **6.17.9** to PyPI first
+- [ ] VSIX: `clawagents-1.0.53.vsix`
 - [ ] Marketplace (needs VSCE_PAT)
 
-VSCE_PAT='…' npx @vscode/vsce publish --packagePath ./clawagents-1.0.52.vsix
+VSCE_PAT='…' npx @vscode/vsce publish --packagePath ./clawagents-1.0.53.vsix

@@ -1,3 +1,9 @@
+## 1.0.53
+
+- **PATH pin:** sidecar prepends `dirname(clawagents.pythonPath)` so shell `python3`/`pip` match the sidecar (fixes Homebrew/conda drift)
+- **Doctor:** command `ClawAgents: Doctor (Python versions)` + startup warning when PATH Pythons are outdated
+- Require `clawagents>=6.17.9` (doctor reports multi-interpreter drift)
+
 ## 1.0.52
 
 - Require `clawagents>=6.17.8` (secret rewind filter, webhook DNS pin, full stream breakers)

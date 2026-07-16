@@ -7,6 +7,10 @@ import {
   wrapSelectionBlock,
 } from "./config";
 import { ensureSidecarDeps, SIDECAR_PIP_PACKAGES } from "./pythonDeps";
+import {
+  formatDriftWarning,
+  probePathInterpreterDrift,
+} from "./pythonPathPin";
 import { SidecarManager } from "./sidecar";
 import { ClawAgentsWebviewProvider } from "./webviewProvider";
 
@@ -111,6 +115,55 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showErrorMessage(probe.detail.split("\n")[0] || "Install failed");
       }
     }),
+    vscode.commands.registerCommand("clawagents.doctorPython", async () => {
+      const out = sidecar?.output;
+      if (!out) {
+        return;
+      }
+      out.show(true);
+      const python = config.pythonPath;
+      out.appendLine("=== ClawAgents Doctor (Python versions) ===");
+      const probe = await ensureSidecarDeps(python, out);
+      out.appendLine(
+        `Sidecar interpreter: ${python}\n` +
+          `  version=${probe.version || "?"} ok=${probe.ok}\n` +
+          `  executable=${probe.executable || "?"}`,
+      );
+      const drift = probePathInterpreterDrift(python);
+      if (drift.length === 0) {
+        out.appendLine("PATH drift: none (no outdated clawagents on other PATH Pythons).");
+        void vscode.window.showInformationMessage(
+          `ClawAgents doctor OK — sidecar ${probe.version || "?"} @ ${python}`,
+        );
+      } else {
+        for (const hit of drift) {
+          out.appendLine(`PATH drift: ${hit.executable} → clawagents ${hit.version}`);
+          out.appendLine(
+            `  Fix: "${hit.executable}" -m pip install -U ${SIDECAR_PIP_PACKAGES[0]}`,
+          );
+        }
+        const choice = await vscode.window.showWarningMessage(
+          formatDriftWarning(drift, python),
+          "Upgrade PATH Pythons",
+          "Install Sidecar Deps",
+          "Dismiss",
+        );
+        if (choice === "Upgrade PATH Pythons") {
+          for (const hit of drift) {
+            out.appendLine(`Upgrading ${hit.executable}…`);
+            const upgraded = await ensureSidecarDeps(hit.executable, out);
+            out.appendLine(
+              `  → ok=${upgraded.ok} version=${upgraded.version || "?"}`,
+            );
+          }
+          void vscode.window.showInformationMessage(
+            "PATH Python upgrades finished — check ClawAgents Sidecar output.",
+          );
+        } else if (choice === "Install Sidecar Deps") {
+          await vscode.commands.executeCommand("clawagents.installPythonDeps");
+        }
+      }
+    }),
     vscode.commands.registerCommand("clawagents.setApiKey", async () => {
       const saved = await config.promptSetApiKey();
       if (saved) {
@@ -166,6 +219,33 @@ export function activate(context: vscode.ExtensionContext): void {
   if (revealOnStartup) {
     void provider?.openChat();
   }
+
+  // Warn once per window when PATH has outdated clawagents (common macOS
+  // Homebrew/conda vs clawagents.pythonPath mismatch).
+  void (async () => {
+    try {
+      const python = config.pythonPath;
+      const drift = probePathInterpreterDrift(python);
+      if (drift.length === 0) {
+        return;
+      }
+      const key = "clawagents.pathDriftWarned";
+      if (context.workspaceState.get(key) === true) {
+        return;
+      }
+      await context.workspaceState.update(key, true);
+      const choice = await vscode.window.showWarningMessage(
+        formatDriftWarning(drift, python),
+        "Doctor…",
+        "Dismiss",
+      );
+      if (choice === "Doctor…") {
+        await vscode.commands.executeCommand("clawagents.doctorPython");
+      }
+    } catch {
+      /* probe best-effort */
+    }
+  })();
 }
 
 export function deactivate(): void {

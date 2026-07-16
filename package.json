@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.52",
+  "version": "1.0.53",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -134,6 +134,10 @@
       {
         "command": "clawagents.installPythonDeps",
         "title": "ClawAgents: Install/Upgrade Python Dependencies"
+      },
+      {
+        "command": "clawagents.doctorPython",
+        "title": "ClawAgents: Doctor (Python versions)"
       }
     ],
     "keybindings": [
