@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.14.2** (auto-installed / upgraded by the extension; skill strategy + native Bedrock)
+- **clawagents ≥ 6.15.0** (auto-installed / upgraded by the extension; Goal autopilot + native Bedrock)
 - A provider credential for at least one model provider
 
 ## Quick start
