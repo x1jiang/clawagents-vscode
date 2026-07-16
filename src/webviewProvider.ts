@@ -91,6 +91,7 @@ type PersistedState = {
   autoApprove?: AutoApprove;
   interaction?: InteractionStyle;
   caveman?: boolean;
+  goal?: boolean;
 };
 
 
@@ -109,6 +110,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private mode: AgentMode;
   private interaction: InteractionStyle = "interactive";
   private caveman = false;
+  private goalMode = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
   private queue: string[] = [];
   /** Image attachments staged for the next send (base64 stays host-side). */
@@ -139,6 +141,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (typeof saved.caveman === "boolean") {
         this.caveman = saved.caveman;
       }
+      if (typeof saved.goal === "boolean") {
+        this.goalMode = saved.goal;
+      }
     }
     // Plan is always interactive.
     if (this.mode === "read_only") {
@@ -154,6 +159,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       autoApprove: this.autoApprove,
       interaction: this.interaction,
       caveman: this.caveman,
+      goal: this.goalMode,
     };
   }
 
@@ -258,6 +264,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         autoApprove: this.autoApprove,
         interaction: this.interaction,
         caveman: this.caveman,
+        goal: this.goalMode,
         sessionCostUsd: 0,
       });
       await this.persistLocal(this.persistState());
@@ -369,6 +376,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         autoApprove: this.autoApprove,
         interaction: this.interaction,
         caveman: this.caveman,
+        goal: this.goalMode,
         sessionCostUsd: sessionCostFromChat(chat),
       });
     } catch {
@@ -407,6 +415,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       mode: this.mode,
       interaction: this.interaction,
       caveman: this.caveman,
+      goal: this.goalMode,
       hasApiKey: await this.config.hasAnyApiKey(),
       hasTavilyKey: await this.config.hasTavilyKey(),
       hasBedrockKey: Boolean((await this.config.getApiKeyEnv()).BEDROCK_API_KEY),
@@ -448,14 +457,50 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         if (typeof msg.caveman === "boolean") {
           this.caveman = msg.caveman;
         }
+        if (typeof msg.goal === "boolean") {
+          this.goalMode = msg.goal;
+        }
         if (this.mode === "read_only") {
           this.interaction = "interactive";
         }
         await this.runTask(msg.text, msg.includeContext, msg.chatId, msg.model);
         break;
       case "queue_send":
+        // Prefer mid-turn redirect when a run is active; else queue for next turn.
+        try {
+          const res = await this.gateway.interject(msg.text);
+          if (res.ok && (res.applied ?? 0) > 0) {
+            this.post({
+              type: "status",
+              message: "Redirected mid-turn",
+            });
+            break;
+          }
+        } catch {
+          /* fall through to queue */
+        }
         this.queue.push(msg.text);
         this.post({ type: "status", message: `Queued (${this.queue.length})` });
+        break;
+      case "interject":
+        try {
+          const res = await this.gateway.interject(msg.text);
+          this.post({
+            type: "status",
+            message:
+              res.ok && (res.applied ?? 0) > 0
+                ? "Redirected mid-turn"
+                : "No active run to redirect — queued for next turn",
+          });
+          if (!res.ok || !(res.applied ?? 0)) {
+            this.queue.push(msg.text);
+          }
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
         break;
       case "cancel":
         await this.cancelTask();
@@ -502,6 +547,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             autoApprove: this.autoApprove,
             interaction: this.interaction,
             caveman: this.caveman,
+            goal: this.goalMode,
             sessionCostUsd: sessionCostFromChat(chat),
           });
         } catch (err) {
@@ -524,6 +570,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               autoApprove: this.autoApprove,
               interaction: this.interaction,
               caveman: this.caveman,
+              goal: this.goalMode,
               sessionCostUsd: 0,
             });
           }
@@ -582,6 +629,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             autoApprove: this.autoApprove,
             interaction: this.interaction,
             caveman: this.caveman,
+            goal: this.goalMode,
             sessionCostUsd: sessionCostFromChat(chat),
           });
           await this.runTask(res.task, false, this.chatId);
@@ -601,6 +649,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "set_interaction":
         this.interaction =
           this.mode === "read_only" ? "interactive" : msg.interaction;
+        break;
+      case "set_goal":
+        this.goalMode = Boolean(msg.goal);
+        if (this.goalMode) {
+          this.mode = "auto";
+        }
+        await this.persistLocal(this.persistState());
         break;
       case "insert_context":
         await this.insertContext(msg.kind);
@@ -701,6 +756,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               autoApprove: this.autoApprove,
               interaction: this.interaction,
               caveman: this.caveman,
+              goal: this.goalMode,
               sessionCostUsd: sessionCostFromChat(chat),
             });
           }
@@ -738,6 +794,47 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             checkpoints: rows,
             open: msg.open !== false,
           });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "list_hunks":
+        try {
+          const res = await this.gateway.listHunks();
+          this.post({
+            type: "hunks",
+            hunks: res.hunks || [],
+            open: msg.open !== false,
+          });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "accept_hunk":
+        try {
+          await this.gateway.acceptHunk(msg.hunkId, msg.path);
+          const res = await this.gateway.listHunks();
+          this.post({ type: "hunks", hunks: res.hunks || [], open: true });
+          this.post({ type: "status", message: "Hunk accepted" });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "reject_hunk":
+        try {
+          await this.gateway.rejectHunk(msg.hunkId);
+          const res = await this.gateway.listHunks();
+          this.post({ type: "hunks", hunks: res.hunks || [], open: true });
+          this.post({ type: "status", message: "Hunk rejected" });
         } catch (err) {
           this.post({
             type: "error",
@@ -1207,6 +1304,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         if (typeof msg.caveman === "boolean") {
           this.caveman = msg.caveman;
+        }
+        if (typeof msg.goal === "boolean") {
+          this.goalMode = msg.goal;
         }
         if (this.mode === "read_only") {
           this.interaction = "interactive";
@@ -1742,6 +1842,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.autoApprove,
         this.mode === "read_only" ? "interactive" : this.interaction,
         this.caveman,
+        this.goalMode,
         images,
         files,
       );

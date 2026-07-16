@@ -64,7 +64,7 @@ _active_runs: dict[str, dict[str, Any]] = {}
 def _register_run(cancel_ev: threading.Event) -> str:
     run_id = uuid.uuid4().hex
     with _run_lock:
-        _active_runs[run_id] = {"ev": cancel_ev, "cancel": None}
+        _active_runs[run_id] = {"ev": cancel_ev, "cancel": None, "run_context": None}
     return run_id
 
 
@@ -78,6 +78,13 @@ def _set_run_canceller(run_id: str, canceller: Callable[[], None]) -> None:
             fire = run["ev"].is_set()
     if fire:
         _fire_canceller(canceller)
+
+
+def _set_run_context(run_id: str, run_context: Any) -> None:
+    with _run_lock:
+        run = _active_runs.get(run_id)
+        if run is not None:
+            run["run_context"] = run_context
 
 
 def _unregister_run(run_id: str) -> None:
@@ -111,6 +118,25 @@ def _cancel_all_runs() -> None:
             run["ev"].set()
     for run in runs:
         _fire_canceller(run["cancel"])
+
+
+def _interject_all_runs(text: str) -> int:
+    """Queue a mid-turn user redirect on every active run_context."""
+    msg = (text or "").strip()
+    if not msg:
+        return 0
+    n = 0
+    with _run_lock:
+        runs = list(_active_runs.values())
+    for run in runs:
+        ctx = run.get("run_context")
+        if ctx is None:
+            continue
+        meta = getattr(ctx, "_metadata", None)
+        if isinstance(meta, dict):
+            meta["pending_interject"] = msg
+            n += 1
+    return n
 
 
 class PermissionWaiter:
@@ -328,6 +354,8 @@ class ChatBody(BaseModel):
     interaction: InteractionStyle = "interactive"
     # Terse caveman-style replies (juliusbrussee/caveman).
     caveman: bool = False
+    # Goal autopilot (planner→verify→strategist); disables ATLAS on the agent.
+    goal: bool = False
     # Image attachments for the first user turn. Each item is
     # {"data": <base64 or data-URL>, "media_type": "image/png"}. The sidecar
     # forwards them to agent.invoke(images=…); ignored on older clawagents.
@@ -444,6 +472,15 @@ class CheckpointRestoreBody(BaseModel):
     sha: str
     mode: str = "files"
     chat_id: str | None = None
+
+
+class InterjectBody(BaseModel):
+    text: str
+
+
+class HunkActionBody(BaseModel):
+    hunk_id: str | None = None
+    path: str | None = None
 
 
 class CompactBody(BaseModel):
@@ -866,6 +903,61 @@ def create_app() -> FastAPI:
             _ask_waiter.resolve(rid, None)
         return {"ok": True}
 
+    @app.post("/interject")
+    async def interject(body: InterjectBody, request: Request):
+        """Redirect the agent mid-turn without cancelling (Grok-style)."""
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        n = _interject_all_runs(body.text)
+        return {"ok": True, "applied": n}
+
+    @app.get("/hunks")
+    async def hunks_list(request: Request, path: str | None = None):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.memory.attributed_hunks import list_hunks
+
+            rows = list_hunks(workspace=str(WORKSPACE), path=path)
+            return {"ok": True, "hunks": [h.to_dict() for h in rows]}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "hunks": []}
+
+    @app.post("/hunks/accept")
+    async def hunks_accept(body: HunkActionBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.memory.attributed_hunks import accept_all, accept_hunk
+
+            if body.path and not body.hunk_id:
+                result = accept_all(body.path, workspace=str(WORKSPACE))
+            elif body.hunk_id:
+                result = accept_hunk(body.hunk_id, workspace=str(WORKSPACE))
+            else:
+                return {"ok": False, "error": "provide hunk_id or path"}
+            return {"ok": bool(result.get("ok")), **result}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/hunks/reject")
+    async def hunks_reject(body: HunkActionBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            from clawagents.memory.attributed_hunks import reject_hunk
+
+            if not body.hunk_id:
+                return {"ok": False, "error": "hunk_id required"}
+            result = reject_hunk(body.hunk_id, workspace=str(WORKSPACE))
+            return {"ok": bool(result.get("ok")), **result}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
     @app.post("/chat/stream")
     async def chat_stream(body: ChatBody, request: Request):
         denied = _auth_or_401(request)
@@ -992,8 +1084,11 @@ def create_app() -> FastAPI:
                         cancel_check=cancel_ev.is_set,
                         ask_user_factory=ask_factory,
                         caveman=bool(body.caveman),
+                        goal=bool(body.goal),
                         images=body.images,
                         files=body.files,
+                        run_id=run_id,
+                        attach_run_context=_set_run_context,
                     )
                 )
                 # Attach the task canceller to the pre-registered run. If

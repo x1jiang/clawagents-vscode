@@ -512,17 +512,29 @@ async def run_chat_turn(
     cancel_check: Callable[[], bool],
     ask_user_factory: Callable[[], Any] | None = None,
     caveman: bool = False,
+    goal: bool = False,
     images: list[dict[str, Any]] | None = None,
     files: list[dict[str, Any]] | None = None,
+    run_id: str | None = None,
+    attach_run_context: Callable[[str, Any], None] | None = None,
 ) -> dict[str, Any]:
     """Run one multi-turn-aware agent invoke. Called from a worker thread's event loop."""
     from clawagents.agent import create_claw_agent
+    from clawagents.run_context import RunContext
     from clawagents.session.backends import JsonlFileSession
 
     # Keys come from spawn_secrets via _resolve_model_kwargs(api_key=…);
     # sidecar also sets CLAWAGENTS_SKIP_DOTENV so clawagents won't reload .env.
     ensure_dirs()
     settings = load_settings()
+
+    run_context = RunContext()
+    run_context._metadata["workspace"] = str(WORKSPACE)
+    if run_id and attach_run_context is not None:
+        try:
+            attach_run_context(run_id, run_context)
+        except Exception:  # noqa: BLE001
+            pass
 
     # Pre-flight: custom OpenAI-compatible gateway needs an explicit model id.
     provider = str(settings.get("provider") or "auto")
@@ -575,6 +587,13 @@ async def run_chat_turn(
         )
     if caveman:
         instructions.append(CAVEMAN_INSTRUCTION)
+    if goal:
+        instructions.append(
+            "You are in GOAL mode (Grok /goal-style autopilot). For any multi-step "
+            "objective, call `start_goal` first to write a verifier contract, then "
+            "work the plan and report via `update_goal`. Do not claim the goal is "
+            "done until the verifier accepts. Prefer Goal tools over ATLAS."
+        )
     if settings.get("trajectory"):
         kwargs["trajectory"] = True
     if settings.get("learn"):
@@ -583,8 +602,13 @@ async def run_chat_turn(
     # Capability probe once — older clawagents wheels omit newer kwargs.
     _agent_params = inspect.signature(create_claw_agent).parameters
 
+    # Goal autopilot product — preferred long-horizon gate; disables ATLAS.
+    if goal and "goal_mode" in _agent_params:
+        kwargs["goal_mode"] = True
+
     # ATLAS failure-taxonomy (opt-in via Auto-approve). Soft-skip if runtime missing.
-    if settings.get("atlas"):
+    # Ignored when Goal mode is on (goal_mode forces atlas=False in create_claw_agent).
+    if settings.get("atlas") and not goal:
         if "atlas" in _agent_params:
             kwargs["atlas"] = True
             atlas_cfg = Path.cwd() / "atlas.json"
@@ -857,6 +881,8 @@ async def run_chat_turn(
                 "session": session,
                 "features": {"session_persistence": True, "file_snapshots": True},
             }
+            if "run_context" in inspect.signature(agent.invoke).parameters:
+                invoke_kwargs["run_context"] = run_context
             # Image attachments require a newer clawagents (invoke(images=…));
             # older installs simply ignore them rather than crashing the turn.
             clean_images = _normalize_images(images)

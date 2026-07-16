@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.43 — 2026-07-15
+
+- Require `clawagents>=6.15.0` (Goal autopilot product, OS sandbox enforce, deny-wins permissions, prefire compaction, best-of-n)
+- Composer: **Goal** button before Plan (wires `goal_mode`; ATLAS off for that turn)
+- Mid-turn **Redirect** (interject without Stop); draft Enter while busy redirects
+- **Review** panel for attributed hunk accept/reject (`/hunks`)
+
 ## 1.0.42 — 2026-07-15
 
 - Require `clawagents>=6.14.2` (Grok-aligned skill strategy: `when-to-use`, path gates, `$ARGUMENTS` / `${SKILL_DIR}`, hot reload, compaction `invoked_skills`)

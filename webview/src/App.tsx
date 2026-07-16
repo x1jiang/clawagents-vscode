@@ -304,6 +304,7 @@ export function App() {
     browser: false,
   });
   const [caveman, setCaveman] = useState(false);
+  const [goalMode, setGoalMode] = useState(false);
   const [autoApproveOpen, setAutoApproveOpen] = useState(false);
   const [includeContext, setIncludeContext] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -341,6 +342,8 @@ export function App() {
     Array<Record<string, unknown>>
   >([]);
   const [checkpointsOpen, setCheckpointsOpen] = useState(false);
+  const [hunks, setHunks] = useState<Array<Record<string, unknown>>>([]);
+  const [hunksOpen, setHunksOpen] = useState(false);
   /** Forces relative checkpoint labels ("2m ago") to refresh while the panel is open. */
   const [nowTick, setNowTick] = useState(() => Date.now());
   /** Sum of estimated USD for completed runs in this chat (not including the in-flight run). */
@@ -426,6 +429,9 @@ export function App() {
           }
           if (typeof msg.caveman === "boolean") {
             setCaveman(msg.caveman);
+          }
+          if (typeof msg.goal === "boolean") {
+            setGoalMode(msg.goal);
           }
           setHasApiKey(msg.hasApiKey);
           if (typeof msg.hasTavilyKey === "boolean") {
@@ -583,6 +589,9 @@ export function App() {
           }
           if (typeof msg.caveman === "boolean") {
             setCaveman(msg.caveman);
+          }
+          if (typeof msg.goal === "boolean") {
+            setGoalMode(msg.goal);
           }
           if (msg.chatId) {
             setChatId(msg.chatId);
@@ -793,6 +802,13 @@ export function App() {
           }
           break;
         }
+        case "hunks": {
+          setHunks(msg.hunks || []);
+          if (msg.open !== false) {
+            setHunksOpen(true);
+          }
+          break;
+        }
         case "done": {
           setBusy(false);
           streamingRef.current = false;
@@ -867,10 +883,10 @@ export function App() {
   useEffect(() => {
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
-      post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman });
+      post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman, goal: goalMode });
     }, 400);
     return () => window.clearTimeout(persistTimer.current);
-  }, [items, draft, mode, chatId, autoApprove, interaction, caveman]);
+  }, [items, draft, mode, chatId, autoApprove, interaction, caveman, goalMode]);
 
   // Debounced autosave for the Settings panel (checkboxes, skill dirs, etc.).
   useEffect(() => {
@@ -907,15 +923,25 @@ export function App() {
     return () => window.clearTimeout(historySearchTimer.current);
   }, [historyQuery, panel]);
 
-  // Plan / Act is the primary control. Plan = read-only (the agent reasons and
-  // proposes but cannot edit or run); Act = auto, where the granular
-  // auto-approve toggles decide what runs without a prompt.
-  // Interactive / Auto controls whether ask_user waits for you. Plan always
-  // forces Interactive.
-  const planAct: "plan" | "act" = mode === "read_only" ? "plan" : "act";
+  // Goal / Plan / Act is the primary control.
+  // Goal = Act permissions + goal_mode (planner→verify→strategist; ATLAS off).
+  // Plan = read-only. Act = execute with auto-approve toggles.
+  // Interactive / Auto: Plan always forces Interactive.
+  const workMode: "goal" | "plan" | "act" =
+    goalMode ? "goal" : mode === "read_only" ? "plan" : "act";
+  const planAct: "plan" | "act" = workMode === "plan" ? "plan" : "act";
   const effectiveInteraction: InteractionStyle =
     planAct === "plan" ? "interactive" : interaction;
-  const setPlanAct = (next: "plan" | "act") => {
+  const setWorkMode = (next: "goal" | "plan" | "act") => {
+    if (next === "goal") {
+      setGoalMode(true);
+      setMode("auto");
+      post({ type: "set_mode", mode: "auto" });
+      post({ type: "set_goal", goal: true });
+      return;
+    }
+    setGoalMode(false);
+    post({ type: "set_goal", goal: false });
     const nextMode: AgentMode = next === "plan" ? "read_only" : "auto";
     setMode(nextMode);
     post({ type: "set_mode", mode: nextMode });
@@ -1149,9 +1175,14 @@ export function App() {
       post({ type: "list_checkpoints", open: true });
       return;
     }
+    if (value === "/hunks" || value === "/review") {
+      setDraft("");
+      post({ type: "list_hunks", open: true });
+      return;
+    }
     setDraft("");
     if (busy) {
-      post({ type: "queue_send", text: value });
+      post({ type: "interject", text: value });
       return;
     }
     post({
@@ -1164,6 +1195,7 @@ export function App() {
       model: activeModelId || undefined,
       interaction: effectiveInteraction,
       caveman,
+      goal: goalMode,
     });
   };
 
@@ -1273,6 +1305,17 @@ export function App() {
               Checkpoints
               {lastCheckpointLabel ? (
                 <span className="tool-chip-meta">{lastCheckpointLabel}</span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className={`tool-chip${hunksOpen ? " active" : ""}`}
+              title="Attributed hunk accept/reject (/hunks)"
+              onClick={() => post({ type: "list_hunks", open: true })}
+            >
+              Review
+              {hunks.length ? (
+                <span className="tool-chip-meta">{hunks.length}</span>
               ) : null}
             </button>
             <button
@@ -1415,6 +1458,76 @@ export function App() {
                       >
                         Both
                       </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {hunksOpen && (
+        <div className="checkpoint-panel" role="region" aria-label="Hunk review">
+          <div className="checkpoint-panel-head">
+            <div>
+              <strong>Hunk review</strong>
+              <span className="checkpoint-sub">Accept or reject attributed diffs</span>
+            </div>
+            <button
+              type="button"
+              className="tool-chip"
+              onClick={() => setHunksOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+          {hunks.length === 0 ? (
+            <p className="checkpoint-empty">No pending hunks — agent edits will appear here.</p>
+          ) : (
+            <ul className="checkpoint-list">
+              {hunks.slice(0, 40).map((h) => {
+                const id = String(h.id || "");
+                if (!id) return null;
+                const path = String(h.path || "");
+                const header = String(h.header || h.body || "").slice(0, 120);
+                return (
+                  <li key={id}>
+                    <div className="checkpoint-main">
+                      <code className="checkpoint-sha">{id.slice(0, 8)}</code>
+                      <span className="checkpoint-label" title={path}>
+                        {path || "file"}
+                      </span>
+                      {header ? (
+                        <span className="checkpoint-when" title={header}>
+                          {header}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="checkpoint-actions">
+                      <button
+                        type="button"
+                        className="tool-chip primary"
+                        onClick={() => post({ type: "accept_hunk", hunkId: id })}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        className="tool-chip"
+                        onClick={() => post({ type: "reject_hunk", hunkId: id })}
+                      >
+                        Reject
+                      </button>
+                      {path ? (
+                        <button
+                          type="button"
+                          className="tool-chip"
+                          onClick={() => post({ type: "open_file", path })}
+                        >
+                          Open
+                        </button>
+                      ) : null}
                     </div>
                   </li>
                 );
@@ -2990,6 +3103,8 @@ export function App() {
                     ATLAS <span className="muted tiny">(smarter failure checks)</span>
                   </label>
                   <div className="muted tiny">
+                    In <strong>Goal</strong>, the agent runs planner→verify→strategist
+                    (prefer <code>start_goal</code> / <code>update_goal</code>); ATLAS is off.
                     In <strong>Plan</strong>, only read-only shell (ls/echo/pwd) runs — and
                     interaction is always Interactive.
                     In <strong>Act + Interactive</strong>, unchecked Edit/Execute/Web/Browser ask
@@ -2997,7 +3112,7 @@ export function App() {
                     In <strong>Act + Auto</strong>, ask_user is skipped; Auto-approve toggles still
                     apply.
                     <strong> Caveman</strong> makes the agent reply ultra-brief.
-                    <strong> ATLAS</strong> adds reflection gates (costly; opt-in).
+                    <strong> ATLAS</strong> adds reflection gates (costly; opt-in; ignored in Goal).
                     Enable browser tools under Settings; install{" "}
                     <code>clawagents[browser]</code> + Chromium for Playwright.
                   </div>
@@ -3006,13 +3121,24 @@ export function App() {
             </div>
             <div className="toolbar">
               <div className="toolbar-modes">
-                <div className="planact" role="tablist" aria-label="Plan or Act">
+                <div className="planact" role="tablist" aria-label="Goal, Plan, or Act">
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={planAct === "plan"}
-                    className={planAct === "plan" ? "seg active" : "seg"}
-                    onClick={() => setPlanAct("plan")}
+                    aria-selected={workMode === "goal"}
+                    className={workMode === "goal" ? "seg active" : "seg"}
+                    onClick={() => setWorkMode("goal")}
+                    disabled={busy}
+                    title="Goal autopilot — planner → execute → majority verifier (Grok /goal). Disables ATLAS."
+                  >
+                    Goal
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={workMode === "plan"}
+                    className={workMode === "plan" ? "seg active" : "seg"}
+                    onClick={() => setWorkMode("plan")}
                     disabled={busy}
                     title="Read & reason only — proposes changes without editing or running"
                   >
@@ -3021,9 +3147,9 @@ export function App() {
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={planAct === "act"}
-                    className={planAct === "act" ? "seg active" : "seg"}
-                    onClick={() => setPlanAct("act")}
+                    aria-selected={workMode === "act"}
+                    className={workMode === "act" ? "seg active" : "seg"}
+                    onClick={() => setWorkMode("act")}
                     disabled={busy}
                     title="Execute — the auto-approve toggles decide what runs without a prompt"
                   >
@@ -3252,7 +3378,7 @@ export function App() {
                     finishAttachmentRequest,
                   );
                 }}
-                placeholder={`${planAct === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
+                placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
                 rows={3}
                 onKeyDown={(e) => {
                   // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
@@ -3273,9 +3399,25 @@ export function App() {
                 }}
               />
               {busy ? (
-                <button type="button" className="danger send" onClick={() => post({ type: "cancel" })}>
-                  Stop
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="tool-chip send"
+                    title="Send draft as mid-turn redirect without stopping"
+                    disabled={!draft.trim()}
+                    onClick={() => {
+                      const value = draft.trim();
+                      if (!value) return;
+                      setDraft("");
+                      post({ type: "interject", text: value });
+                    }}
+                  >
+                    Redirect
+                  </button>
+                  <button type="button" className="danger send" onClick={() => post({ type: "cancel" })}>
+                    Stop
+                  </button>
+                </>
               ) : (
                 <button
                   type="button"

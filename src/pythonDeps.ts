@@ -9,9 +9,9 @@ export const ATLAS_SKILL_PIP =
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
   // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION:
-  // 6.14.2 ships Grok-aligned skill strategy (when-to-use, path gates, $ARGUMENTS,
-  // hot reload, compaction invoked_skills) plus prior 6.14 / ATLAS surfaces.
-  "clawagents[gemini,anthropic,bedrock,mcp]>=6.14.2,<7",
+  // 6.15.0: goal autopilot, OS sandbox enforce, deny-wins permissions,
+  // prefire compaction, mid-turn interject, best-of-n skill.
+  "clawagents[gemini,anthropic,bedrock,mcp]>=6.15.0,<7",
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -21,7 +21,7 @@ export const SIDECAR_PIP_PACKAGES = [
 ] as const;
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 14, 2];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 15, 0];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 
 export type DepProbe = {

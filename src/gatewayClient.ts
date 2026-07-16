@@ -387,6 +387,7 @@ export class GatewayClient {
     autoApprove?: AutoApprove,
     interaction?: InteractionStyle,
     caveman?: boolean,
+    goal?: boolean,
     images?: Array<{ data: string; media_type: string }>,
     files?: Array<{ data: string; media_type: string; name: string }>,
   ): Promise<string | undefined> {
@@ -401,6 +402,7 @@ export class GatewayClient {
       auto_approve: autoApprove,
       interaction: interaction || "interactive",
       caveman: Boolean(caveman),
+      goal: Boolean(goal),
       images: images && images.length > 0 ? images : undefined,
       files: files && files.length > 0 ? files : undefined,
     });
@@ -609,5 +611,31 @@ export class GatewayClient {
     } catch {
       /* ignore */
     }
+  }
+
+  async interject(text: string): Promise<{ ok: boolean; applied?: number }> {
+    return requestJson(this.requireHandle(), "POST", "/interject", { text });
+  }
+
+  listHunks(path?: string) {
+    const q = path ? `?path=${encodeURIComponent(path)}` : "";
+    return requestJson<{ ok: boolean; hunks?: Array<Record<string, unknown>>; error?: string }>(
+      this.requireHandle(),
+      "GET",
+      `/hunks${q}`,
+    );
+  }
+
+  acceptHunk(hunkId?: string, path?: string) {
+    return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/hunks/accept", {
+      hunk_id: hunkId,
+      path,
+    });
+  }
+
+  rejectHunk(hunkId: string) {
+    return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/hunks/reject", {
+      hunk_id: hunkId,
+    });
   }
 }

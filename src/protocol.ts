@@ -33,6 +33,7 @@ export type HostToWebview =
       mode: AgentMode;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
       hasApiKey: boolean;
       hasTavilyKey?: boolean;
       hasBedrockKey?: boolean;
@@ -123,6 +124,7 @@ export type HostToWebview =
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
       sessionCostUsd?: number;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
@@ -163,6 +165,11 @@ export type HostToWebview =
       checkpoints: Array<Record<string, unknown>>;
       /** When false, refresh the chip only — don't open the panel. Default true. */
       open?: boolean;
+    }
+  | {
+      type: "hunks";
+      hunks: Array<Record<string, unknown>>;
+      open?: boolean;
     };
 
 export type WebviewToHost =
@@ -177,6 +184,7 @@ export type WebviewToHost =
       model?: string;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
     }
   | { type: "cancel" }
   | {
@@ -193,6 +201,7 @@ export type WebviewToHost =
   | { type: "regenerate" }
   | { type: "set_mode"; mode: AgentMode }
   | { type: "set_interaction"; interaction: InteractionStyle }
+  | { type: "set_goal"; goal: boolean }
   | { type: "insert_context"; kind: "file" | "selection" | "problems" | "editors" | "terminal" | "git" }
   | { type: "attach_uris"; uris: string[] }
   | {
@@ -212,6 +221,10 @@ export type WebviewToHost =
   | { type: "restore_checkpoint"; sha: string; mode: "files" | "conversation" | "both" }
   | { type: "compact_chat" }
   | { type: "list_checkpoints"; open?: boolean }
+  | { type: "list_hunks"; open?: boolean }
+  | { type: "accept_hunk"; hunkId?: string; path?: string }
+  | { type: "reject_hunk"; hunkId: string }
+  | { type: "interject"; text: string }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
   | { type: "save_settings"; settings: Record<string, unknown> }
@@ -249,6 +262,7 @@ export type WebviewToHost =
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
     }
   | { type: "queue_send"; text: string };
 
@@ -298,6 +312,7 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         && autoApprove(value.autoApprove) && optionalText(value.model, 256)
         && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
         && (value.caveman === undefined || typeof value.caveman === "boolean")
+        && (value.goal === undefined || typeof value.goal === "boolean")
         ? value as WebviewToHost : undefined;
     case "queue_send":
       return text(value.text) ? value as WebviewToHost : undefined;
@@ -317,6 +332,8 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
     case "set_interaction":
       return value.interaction === "interactive" || value.interaction === "auto"
         ? value as WebviewToHost : undefined;
+    case "set_goal":
+      return typeof value.goal === "boolean" ? value as WebviewToHost : undefined;
     case "insert_context":
       return ["file", "selection", "problems", "editors", "terminal", "git"].includes(String(value.kind))
         ? value as WebviewToHost : undefined;
@@ -344,6 +361,15 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost : undefined;
     case "list_checkpoints":
       return value.open === undefined || typeof value.open === "boolean" ? value as WebviewToHost : undefined;
+    case "list_hunks":
+      return value.open === undefined || typeof value.open === "boolean" ? value as WebviewToHost : undefined;
+    case "accept_hunk":
+      return optionalText(value.hunkId, 256) && optionalText(value.path, 32_768)
+        ? value as WebviewToHost : undefined;
+    case "reject_hunk":
+      return text(value.hunkId, 256) ? value as WebviewToHost : undefined;
+    case "interject":
+      return text(value.text) ? value as WebviewToHost : undefined;
     case "save_settings":
       return record(value.settings) ? value as WebviewToHost : undefined;
     case "verify_key":
@@ -368,6 +394,7 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         && autoApprove(value.autoApprove)
         && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
         && (value.caveman === undefined || typeof value.caveman === "boolean")
+        && (value.goal === undefined || typeof value.goal === "boolean")
         ? value as WebviewToHost : undefined;
     default:
       return undefined;

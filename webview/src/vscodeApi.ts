@@ -31,6 +31,7 @@ export type HostToWebview =
       mode: AgentMode;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
       hasApiKey: boolean;
       hasTavilyKey?: boolean;
       hasBedrockKey?: boolean;
@@ -120,6 +121,7 @@ export type HostToWebview =
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
       sessionCostUsd?: number;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
@@ -156,6 +158,11 @@ export type HostToWebview =
       type: "checkpoints";
       checkpoints: Array<Record<string, unknown>>;
       open?: boolean;
+    }
+  | {
+      type: "hunks";
+      hunks: Array<Record<string, unknown>>;
+      open?: boolean;
     };
 
 export type WebviewToHost =
@@ -170,6 +177,7 @@ export type WebviewToHost =
       model?: string;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
     }
   | { type: "cancel" }
   | {
@@ -186,6 +194,7 @@ export type WebviewToHost =
   | { type: "regenerate" }
   | { type: "set_mode"; mode: AgentMode }
   | { type: "set_interaction"; interaction: InteractionStyle }
+  | { type: "set_goal"; goal: boolean }
   | {
       type: "insert_context";
       kind: "file" | "selection" | "problems" | "editors" | "terminal" | "git";
@@ -207,6 +216,10 @@ export type WebviewToHost =
   | { type: "restore_checkpoint"; sha: string; mode: "files" | "conversation" | "both" }
   | { type: "compact_chat" }
   | { type: "list_checkpoints"; open?: boolean }
+  | { type: "list_hunks"; open?: boolean }
+  | { type: "accept_hunk"; hunkId?: string; path?: string }
+  | { type: "reject_hunk"; hunkId: string }
+  | { type: "interject"; text: string }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
   | { type: "save_settings"; settings: Record<string, unknown> }
@@ -244,6 +257,7 @@ export type WebviewToHost =
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;
+      goal?: boolean;
     }
   | { type: "queue_send"; text: string };
 
