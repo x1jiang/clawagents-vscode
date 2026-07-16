@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.15.0** (auto-installed / upgraded by the extension; Goal autopilot + native Bedrock)
+- **clawagents ≥ 6.16.0** (auto-installed / upgraded by the extension; Goal autopilot + native Bedrock)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -46,7 +46,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
 | `clawagents.contextMode` | `true` | Context Mode tools (needs `npm install -g context-mode`) |
 
-Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Opt-in **ATLAS** failure checks live under the composer **Auto-approve** menu (off by default; costly on short tasks). The sidecar can auto-install the ATLAS runtime with other Python deps.
+Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
 
 ## Security
 

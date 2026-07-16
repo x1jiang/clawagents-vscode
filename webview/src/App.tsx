@@ -924,7 +924,7 @@ export function App() {
   }, [historyQuery, panel]);
 
   // Goal / Plan / Act is the primary control.
-  // Goal = Act permissions + goal_mode (planner→verify→strategist; ATLAS off).
+  // Goal = Act permissions + goal_mode (planner→verify→strategist).
   // Plan = read-only. Act = execute with auto-approve toggles.
   // Interactive / Auto: Plan always forces Interactive.
   const workMode: "goal" | "plan" | "act" =
@@ -2723,10 +2723,6 @@ export function App() {
               />
               Learn (PTRL lessons)
             </label>
-            <p className="muted tiny" style={{ marginTop: 4 }}>
-              ATLAS failure checks live under the composer{" "}
-              <strong>Auto-approve</strong> menu (opt-in; off by default).
-            </p>
           </section>
 
           <div className="panel-actions">
@@ -3024,7 +3020,6 @@ export function App() {
                         .filter(Boolean)
                         .join(", ") || "nothing (asks each time)"}
                   {caveman ? " · Caveman" : ""}
-                  {settings.atlas ? " · ATLAS" : ""}
                 </strong>
               </button>
               {autoApproveOpen && (
@@ -3089,22 +3084,9 @@ export function App() {
                     />
                     Caveman mode <span className="muted tiny">(terse replies)</span>
                   </label>
-                  <label
-                    className="check"
-                    title="ATLAS: extra failure-taxonomy reflections after tool failures and before submit. Adds latency/tokens; keep off unless debugging stubborn multi-step failures. Optional workspace atlas.json."
-                  >
-                    <input
-                      type="checkbox"
-                      checked={Boolean(settings.atlas)}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, atlas: e.target.checked }))
-                      }
-                    />
-                    ATLAS <span className="muted tiny">(smarter failure checks)</span>
-                  </label>
                   <div className="muted tiny">
                     In <strong>Goal</strong>, the agent runs planner→verify→strategist
-                    (prefer <code>start_goal</code> / <code>update_goal</code>); ATLAS is off.
+                    (prefer <code>start_goal</code> / <code>update_goal</code>).
                     In <strong>Plan</strong>, only read-only shell (ls/echo/pwd) runs — and
                     interaction is always Interactive.
                     In <strong>Act + Interactive</strong>, unchecked Edit/Execute/Web/Browser ask
@@ -3112,7 +3094,6 @@ export function App() {
                     In <strong>Act + Auto</strong>, ask_user is skipped; Auto-approve toggles still
                     apply.
                     <strong> Caveman</strong> makes the agent reply ultra-brief.
-                    <strong> ATLAS</strong> adds reflection gates (costly; opt-in; ignored in Goal).
                     Enable browser tools under Settings; install{" "}
                     <code>clawagents[browser]</code> + Chromium for Playwright.
                   </div>
@@ -3129,7 +3110,7 @@ export function App() {
                     className={workMode === "goal" ? "seg active" : "seg"}
                     onClick={() => setWorkMode("goal")}
                     disabled={busy}
-                    title="Goal autopilot — planner → execute → majority verifier (Grok /goal). Disables ATLAS."
+                    title="Goal autopilot — planner → execute → majority verifier (Grok /goal)."
                   >
                     Goal
                   </button>

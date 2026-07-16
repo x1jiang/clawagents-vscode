@@ -61,10 +61,15 @@ _run_lock = threading.Lock()
 _active_runs: dict[str, dict[str, Any]] = {}
 
 
-def _register_run(cancel_ev: threading.Event) -> str:
+def _register_run(cancel_ev: threading.Event, *, chat_id: str | None = None) -> str:
     run_id = uuid.uuid4().hex
     with _run_lock:
-        _active_runs[run_id] = {"ev": cancel_ev, "cancel": None, "run_context": None}
+        _active_runs[run_id] = {
+            "ev": cancel_ev,
+            "cancel": None,
+            "run_context": None,
+            "chat_id": chat_id,
+        }
     return run_id
 
 
@@ -120,8 +125,12 @@ def _cancel_all_runs() -> None:
         _fire_canceller(run["cancel"])
 
 
-def _interject_all_runs(text: str) -> int:
-    """Queue a mid-turn user redirect on every active run_context."""
+def _interject_runs(text: str, chat_id: str | None = None) -> int:
+    """Queue a mid-turn user redirect on matching active run(s).
+
+    When ``chat_id`` is set, only that chat's run is targeted. Multiple
+    redirects before a drain are appended (not overwritten).
+    """
     msg = (text or "").strip()
     if not msg:
         return 0
@@ -129,13 +138,23 @@ def _interject_all_runs(text: str) -> int:
     with _run_lock:
         runs = list(_active_runs.values())
     for run in runs:
+        if chat_id and run.get("chat_id") and run.get("chat_id") != chat_id:
+            continue
+        if chat_id and not run.get("chat_id"):
+            # Prefer explicit targeting: skip untagged runs when chat_id given.
+            continue
         ctx = run.get("run_context")
         if ctx is None:
             continue
         meta = getattr(ctx, "_metadata", None)
-        if isinstance(meta, dict):
+        if not isinstance(meta, dict):
+            continue
+        prev = meta.get("pending_interject")
+        if isinstance(prev, str) and prev.strip():
+            meta["pending_interject"] = prev.rstrip() + "\n" + msg
+        else:
             meta["pending_interject"] = msg
-            n += 1
+        n += 1
     return n
 
 
@@ -354,7 +373,7 @@ class ChatBody(BaseModel):
     interaction: InteractionStyle = "interactive"
     # Terse caveman-style replies (juliusbrussee/caveman).
     caveman: bool = False
-    # Goal autopilot (planner→verify→strategist); disables ATLAS on the agent.
+    # Goal autopilot (planner→verify→strategist).
     goal: bool = False
     # Image attachments for the first user turn. Each item is
     # {"data": <base64 or data-URL>, "media_type": "image/png"}. The sidecar
@@ -476,6 +495,7 @@ class CheckpointRestoreBody(BaseModel):
 
 class InterjectBody(BaseModel):
     text: str
+    chat_id: str | None = None
 
 
 class HunkActionBody(BaseModel):
@@ -489,6 +509,18 @@ class CompactBody(BaseModel):
 
 class VerifyBody(BaseModel):
     provider: str
+
+
+def _workspace_rel_path_or_400(path: str | None) -> Response | str | None:
+    """Return None when path is absent; validated relative path; or a 400 Response."""
+    if path is None or path == "":
+        return None
+    raw = str(path).strip()
+    if not raw:
+        return None
+    if Path(raw).is_absolute() or ".." in Path(raw).parts:
+        return _bad_request("path must be workspace-relative without '..'")
+    return raw
 
 
 def _make_before_tool(
@@ -623,6 +655,41 @@ def _make_before_tool(
             ),
         )
 
+    def ask_handler(tool_name: str, args: dict[str, Any], message: str = "") -> bool:
+        """Route PermissionEngine 'ask' rules into the same approval UI."""
+        if cancel_check():
+            return False
+        file_path = args.get("path") or args.get("file_path") or args.get("target_path")
+        file_path = file_path if isinstance(file_path, str) else None
+        command = args.get("command") if isinstance(args.get("command"), str) else None
+        if command is None and isinstance(args.get("code"), str):
+            command = args["code"]
+        if command is None and isinstance(args.get("url"), str):
+            command = args["url"]
+        category = _tool_category(tool_name) if tool_name in gated_tools else "execute"
+        # Respect Auto-approve for ask rules too (sudo/env write still gated by
+        # category toggles).
+        if _pre_approved(category, file_path):
+            return True
+        request_id = _waiter.create({"tool": tool_name, "file_path": file_path})
+        sse_fn(
+            "permission_required",
+            {
+                "request_id": request_id,
+                "tool": tool_name,
+                "file_path": file_path,
+                "command": command,
+                "reason": message
+                or (
+                    f"Permission rule asks for approval to run '{tool_name}'. "
+                    f"Enable auto-approve for {category} to skip this next time."
+                ),
+            },
+        )
+        decision = _waiter.wait(request_id, timeout=600.0)
+        return decision in ("allow_once", "allow_always")
+
+    before_tool.ask_handler = ask_handler  # type: ignore[attr-defined]
     return before_tool
 
 
@@ -909,7 +976,11 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        n = _interject_all_runs(body.text)
+        if body.chat_id:
+            bad = _validate_chat_id(body.chat_id)
+            if bad:
+                return bad
+        n = _interject_runs(body.text, chat_id=body.chat_id)
         return {"ok": True, "applied": n}
 
     @app.get("/hunks")
@@ -917,10 +988,13 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
+        path_or_err = _workspace_rel_path_or_400(path)
+        if isinstance(path_or_err, Response):
+            return path_or_err
         try:
             from clawagents.memory.attributed_hunks import list_hunks
 
-            rows = list_hunks(workspace=str(WORKSPACE), path=path)
+            rows = list_hunks(workspace=str(WORKSPACE), path=path_or_err)
             return {"ok": True, "hunks": [h.to_dict() for h in rows]}
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc), "hunks": []}
@@ -930,11 +1004,14 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
+        path_or_err = _workspace_rel_path_or_400(body.path)
+        if isinstance(path_or_err, Response):
+            return path_or_err
         try:
             from clawagents.memory.attributed_hunks import accept_all, accept_hunk
 
-            if body.path and not body.hunk_id:
-                result = accept_all(body.path, workspace=str(WORKSPACE))
+            if path_or_err and not body.hunk_id:
+                result = accept_all(path_or_err, workspace=str(WORKSPACE))
             elif body.hunk_id:
                 result = accept_hunk(body.hunk_id, workspace=str(WORKSPACE))
             else:
@@ -982,7 +1059,7 @@ def create_app() -> FastAPI:
         # Register only after request validation. From this point ownership is
         # transferred to _run(), whose finally block always unregisters it.
         cancel_ev = threading.Event()
-        run_id = _register_run(cancel_ev)
+        run_id = _register_run(cancel_ev, chat_id=chat_id)
 
         # Cap full_access unless the user explicitly opted in via Settings.
         effective_mode = body.mode

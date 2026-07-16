@@ -1,9 +1,16 @@
 # Changelog
 
+## 1.0.44 — 2026-07-15
+
+- Require `clawagents>=6.16.0` (ATLAS removed; Goal is the only long-horizon path)
+- Remove ATLAS UI, settings, and `atlas-skill` pip dep
+- Permission `ask` rules route to the approval UI; interject targets `chat_id` and appends (no overwrite-drop)
+- Hunk path traversal hardened (workspace-relative only)
+
 ## 1.0.43 — 2026-07-15
 
 - Require `clawagents>=6.15.0` (Goal autopilot product, OS sandbox enforce, deny-wins permissions, prefire compaction, best-of-n)
-- Composer: **Goal** button before Plan (wires `goal_mode`; ATLAS off for that turn)
+- Composer: **Goal** button before Plan (wires `goal_mode`)
 - Mid-turn **Redirect** (interject without Stop); draft Enter while busy redirects
 - **Review** panel for attributed hunk accept/reject (`/hunks`)
 

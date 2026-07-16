@@ -214,7 +214,6 @@ export type WebviewToHost =
   | { type: "clear_images" }
   | { type: "remove_file"; id: string }
   | { type: "clear_files" }
-  | { type: "mention_query"; query: string }
   | { type: "open_file"; path: string; line?: number }
   | { type: "diff_snapshot"; path: string; snapshotId?: string; snapshotRel?: string }
   | { type: "restore_snapshot"; snapshotId: string; rel: string }
@@ -325,7 +324,7 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
-    case "search_chats": case "mention_query":
+    case "search_chats":
       return text(value.query, 10_000) ? value as WebviewToHost : undefined;
     case "set_mode":
       return AGENT_MODES.has(String(value.mode)) ? value as WebviewToHost : undefined;
@@ -364,12 +363,14 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
     case "list_hunks":
       return value.open === undefined || typeof value.open === "boolean" ? value as WebviewToHost : undefined;
     case "accept_hunk":
-      return optionalText(value.hunkId, 256) && optionalText(value.path, 32_768)
+      return optionalText(value.hunkId, 256)
+        && (value.path === undefined || (text(value.path, 32_768) && !String(value.path).includes("..") && !String(value.path).startsWith("/")))
         ? value as WebviewToHost : undefined;
     case "reject_hunk":
       return text(value.hunkId, 256) ? value as WebviewToHost : undefined;
     case "interject":
-      return text(value.text) ? value as WebviewToHost : undefined;
+      return text(value.text) && optionalText(value.chatId, 128)
+        ? value as WebviewToHost : undefined;
     case "save_settings":
       return record(value.settings) ? value as WebviewToHost : undefined;
     case "verify_key":

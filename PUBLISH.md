@@ -1,6 +1,6 @@
 # Publish checklist (Marketplace)
 
-Publisher **`clawagents`** · source https://github.com/x1jiang/clawagents-vscode · version **1.0.43**
+Publisher **`clawagents`** · source https://github.com/x1jiang/clawagents-vscode · version **1.0.44**
 
 For the full **Python + VS Code** release flow (bump, build, tag, GitHub, PyPI), see [`../RELEASE.md`](../RELEASE.md).
 
@@ -9,8 +9,8 @@ For the full **Python + VS Code** release flow (bump, build, tag, GitHub, PyPI),
 - [x] Publisher created on Marketplace
 - [x] GitHub repo pushed: https://github.com/x1jiang/clawagents-vscode
 - [x] `package.json` repository / bugs / homepage point at that repo
-- [x] **Publish `clawagents` 6.15.0 to PyPI first** (1.0.43 requires `>=6.15.0`)
-- [x] VSIX built: `clawagents-1.0.43.vsix`
+- [x] **Publish `clawagents` 6.16.0 to PyPI first** (1.0.44 requires `>=6.16.0`)
+- [x] VSIX built: `clawagents-1.0.44.vsix`
 
 ## You still need: Azure DevOps PAT (once)
 
@@ -28,7 +28,7 @@ From `clawagents_vscode`:
 
 ```bash
 # Option A — env var (no interactive login store)
-VSCE_PAT='paste-token-here' npx @vscode/vsce publish --packagePath ./clawagents-1.0.43.vsix
+VSCE_PAT='paste-token-here' npx @vscode/vsce publish --packagePath ./clawagents-1.0.44.vsix
 
 # Option B — login once, then publish
 npx @vscode/vsce login clawagents   # paste PAT when prompted
@@ -45,7 +45,7 @@ https://marketplace.visualstudio.com/items?itemName=clawagents.clawagents
 3. Publish:
 
 ```bash
-npx ovsx publish ./clawagents-1.0.43.vsix -p "$OVSX_PAT"
+npx ovsx publish ./clawagents-1.0.44.vsix -p "$OVSX_PAT"
 ```
 
 ## After publish

@@ -592,7 +592,7 @@ async def run_chat_turn(
             "You are in GOAL mode (Grok /goal-style autopilot). For any multi-step "
             "objective, call `start_goal` first to write a verifier contract, then "
             "work the plan and report via `update_goal`. Do not claim the goal is "
-            "done until the verifier accepts. Prefer Goal tools over ATLAS."
+            "done until the verifier accepts."
         )
     if settings.get("trajectory"):
         kwargs["trajectory"] = True
@@ -602,28 +602,9 @@ async def run_chat_turn(
     # Capability probe once — older clawagents wheels omit newer kwargs.
     _agent_params = inspect.signature(create_claw_agent).parameters
 
-    # Goal autopilot product — preferred long-horizon gate; disables ATLAS.
+    # Goal autopilot — long-horizon completion path.
     if goal and "goal_mode" in _agent_params:
         kwargs["goal_mode"] = True
-
-    # ATLAS failure-taxonomy (opt-in via Auto-approve). Soft-skip if runtime missing.
-    # Ignored when Goal mode is on (goal_mode forces atlas=False in create_claw_agent).
-    if settings.get("atlas") and not goal:
-        if "atlas" in _agent_params:
-            kwargs["atlas"] = True
-            atlas_cfg = Path.cwd() / "atlas.json"
-            if atlas_cfg.is_file():
-                kwargs["atlas_config"] = str(atlas_cfg)
-        else:
-            on_event(
-                "warn",
-                {
-                    "message": (
-                        "ATLAS needs clawagents≥6.14.2. "
-                        "Run Command Palette → ClawAgents: Install/Upgrade Python Dependencies."
-                    ),
-                },
-            )
 
     # Skills: registered folders (+ optional workspace auto-discover).
     # Passing an explicit list disables create_claw_agent's own auto-discover
@@ -845,32 +826,19 @@ async def run_chat_turn(
             # Drop kwargs unsupported by the installed clawagents version
             # (PyPI lag vs extension features).
             allowed = set(inspect.signature(create_claw_agent).parameters)
-            try:
-                agent = create_claw_agent(
-                    **{k: v for k, v in kwargs.items() if k in allowed}
-                )
-            except ImportError as exc:
-                if kwargs.get("atlas"):
-                    # Built-in ATLAS: soft-skip so a missing runtime does not
-                    # block the turn (sidecar deps install should catch up).
-                    on_event(
-                        "warn",
-                        {
-                            "message": (
-                                "ATLAS runtime not ready yet — continuing without it. "
-                                "Run ClawAgents: Install/Upgrade Python Dependencies, "
-                                f"then Restart Sidecar. ({exc})"
-                            ),
-                        },
-                    )
-                    kwargs.pop("atlas", None)
-                    kwargs.pop("atlas_config", None)
-                    agent = create_claw_agent(
-                        **{k: v for k, v in kwargs.items() if k in allowed}
-                    )
-                else:
-                    raise
-            agent.before_tool = before_tool_factory(mode=mode, grants=GrantStore())
+            agent = create_claw_agent(
+                **{k: v for k, v in kwargs.items() if k in allowed}
+            )
+            bt = before_tool_factory(mode=mode, grants=GrantStore())
+            agent.before_tool = bt
+            # Route declarative permission "ask" into the VS Code approval UI.
+            ask_h = getattr(bt, "ask_handler", None)
+            pe = getattr(agent, "_permission_engine", None)
+            if pe is None:
+                pe = getattr(agent.tools, "_permission_engine", None)
+            if pe is not None and callable(ask_h):
+                pe.ask_handler = ask_h
+                agent.tools._permission_engine = pe  # type: ignore[attr-defined]
             if ask_user_factory is not None:
                 # Sidecar has no stdin — replace CLI ask_user with webview HITL.
                 agent.tools.register(ask_user_factory())
@@ -914,32 +882,7 @@ async def run_chat_turn(
                     },
                 )
 
-            try:
-                result = await agent.invoke(augmented, **invoke_kwargs)
-            except ImportError as exc:
-                if kwargs.get("atlas"):
-                    on_event(
-                        "warn",
-                        {
-                            "message": (
-                                "ATLAS failed to start — continuing without it. "
-                                "Run ClawAgents: Install/Upgrade Python Dependencies, "
-                                f"then Restart Sidecar. ({exc})"
-                            ),
-                        },
-                    )
-                    # Rebuild without atlas and retry once.
-                    kwargs.pop("atlas", None)
-                    kwargs.pop("atlas_config", None)
-                    agent = create_claw_agent(
-                        **{k: v for k, v in kwargs.items() if k in allowed}
-                    )
-                    agent.before_tool = before_tool_factory(mode=mode, grants=GrantStore())
-                    if ask_user_factory is not None:
-                        agent.tools.register(ask_user_factory())
-                    result = await agent.invoke(augmented, **invoke_kwargs)
-                else:
-                    raise
+            result = await agent.invoke(augmented, **invoke_kwargs)
         finally:
             try:
                 os.chdir(prev)

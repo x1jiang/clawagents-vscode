@@ -34,18 +34,16 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.15.0",
+      version: "6.16.0",
       supportsSkillsExclude: true,
-      supportsAtlas: true,
     }),
     false,
   );
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.14.2",
+      version: "6.15.0",
       supportsSkillsExclude: true,
-      supportsAtlas: true,
     }),
     true,
   );
@@ -54,7 +52,6 @@ test("dependency versions stay inside the supported major ranges", () => {
       ok: true,
       version: "7.0.0",
       supportsSkillsExclude: true,
-      supportsAtlas: true,
     }),
     true,
   );
@@ -63,15 +60,16 @@ test("dependency versions stay inside the supported major ranges", () => {
       .every((spec) => spec.includes("<")),
   );
   assert.ok(
-    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.15.0")),
+    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.16.0")),
   );
+  assert.ok(!deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("atlas")));
 });
 
 test("concurrent dependency checks share one in-flight promise", async () => {
   const fakePython = path.join(tempDir, "fake-python");
   fs.writeFileSync(
     fakePython,
-    "#!/bin/sh\nprintf '/fake/python\\n6.15.0\\nTrue\\nTrue\\n'\n",
+    "#!/bin/sh\nprintf '/fake/python\\n6.16.0\\nTrue\\n'\n",
     { mode: 0o755 },
   );
   const output = { appendLine() {} };

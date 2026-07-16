@@ -468,7 +468,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "queue_send":
         // Prefer mid-turn redirect when a run is active; else queue for next turn.
         try {
-          const res = await this.gateway.interject(msg.text);
+          const res = await this.gateway.interject(msg.text, this.chatId);
           if (res.ok && (res.applied ?? 0) > 0) {
             this.post({
               type: "status",
@@ -484,7 +484,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "interject":
         try {
-          const res = await this.gateway.interject(msg.text);
+          const res = await this.gateway.interject(msg.text, this.chatId);
           this.post({
             type: "status",
             message:

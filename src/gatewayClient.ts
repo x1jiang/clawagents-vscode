@@ -613,8 +613,11 @@ export class GatewayClient {
     }
   }
 
-  async interject(text: string): Promise<{ ok: boolean; applied?: number }> {
-    return requestJson(this.requireHandle(), "POST", "/interject", { text });
+  async interject(text: string, chatId?: string): Promise<{ ok: boolean; applied?: number }> {
+    return requestJson(this.requireHandle(), "POST", "/interject", {
+      text,
+      ...(chatId ? { chat_id: chatId } : {}),
+    });
   }
 
   listHunks(path?: string) {
