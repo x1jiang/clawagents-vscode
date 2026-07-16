@@ -113,6 +113,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private goalMode = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
   private queue: string[] = [];
+  /** True while Stop is clearing/promoting stranded redirects. */
+  private cancelling = false;
   /** Image attachments staged for the next send (base64 stays host-side). */
   private pendingImages: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   /** File attachments (PDF/DOCX) staged for the next send — same contract. */
@@ -184,6 +186,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         return;
       }
       void this.handleMessage(msg);
+    });
+    webviewView.onDidChangeVisibility(() => {
+      if (!webviewView.visible) {
+        this.post({ type: "view_hidden" } as HostToWebview);
+      }
     });
   }
 
@@ -277,9 +284,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   async cancelTask(): Promise<void> {
-    // Stop means stop for follow-ups the user explicitly queued via Enter —
-    // but stranded mid-turn interjects (Grok: stranded → queued prompt) are
-    // promoted to the front of the queue so the user's redirect is not lost.
+    // Stop clears user-queued follow-ups, but stranded mid-turn interjects
+    // are promoted afterward. Gate stream finally so it cannot drain the
+    // queue before promotion lands (or auto-start an unrelated prompt).
+    this.cancelling = true;
     const hadQueued = this.queue.length;
     if (hadQueued > 0) {
       this.queue = [];
@@ -290,19 +298,33 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.abort = undefined;
     try {
       const res = await this.gateway.cancel();
-      const stranded = (res.stranded_prompts || []).map((p) => String(p).trim()).filter(Boolean);
+      const stranded = (res.stranded_prompts || [])
+        .map((p) => String(p).trim())
+        .filter(Boolean);
       if (stranded.length) {
-        this.queue = [...stranded, ...this.queue];
+        // Dedupe against anything SSE already promoted.
+        const seen = new Set(this.queue);
+        const unique = stranded.filter((p) => !seen.has(p));
+        this.queue = [...unique, ...this.queue];
         this.post({
           type: "status",
-          message: `Queued stranded redirect${stranded.length > 1 ? "s" : ""} (${this.queue.length})`,
+          message: `Queued stranded redirect${this.queue.length > 1 ? "s" : ""} (${this.queue.length})`,
         });
       }
     } catch {
       /* ignore */
+    } finally {
+      this.cancelling = false;
     }
     if (!hadStream) {
       this.post({ type: "cancelled" });
+    }
+    // If idle after cancel, start the stranded redirect immediately.
+    if (!this.abort && this.queue.length > 0) {
+      const next = this.queue.shift();
+      if (next) {
+        void this.runTask(next, this.config.includeContextByDefault, this.chatId);
+      }
     }
   }
 
@@ -1951,6 +1973,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     } finally {
       this.abort = undefined;
+      // cancelTask owns queue drain while Stop is in flight.
+      if (this.cancelling) {
+        return;
+      }
       const next = this.queue.shift();
       if (next) {
         void this.runTask(next, includeContext, this.chatId);

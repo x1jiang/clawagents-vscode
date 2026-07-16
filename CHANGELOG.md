@@ -1,3 +1,10 @@
+## 1.0.51
+
+- Confirm before destructive rewind
+- Stop stranded-redirect race; stop mic when sidebar hidden
+- Voice: navigator language + cloud-STT disclosure; fix interim typing dup
+- Require `clawagents>=6.17.7`
+
 ## 1.0.50
 
 - Surface rewind failures (`ok: false`) instead of claiming success

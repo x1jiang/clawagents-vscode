@@ -53,6 +53,7 @@ export type HostToWebview =
       includeContextByDefault?: boolean;
     }
   | { type: "status"; message: string }
+  | { type: "view_hidden" }
   | { type: "user_echo"; text: string }
   | { type: "assistant_delta"; delta: string }
   | { type: "assistant_message"; text: string }

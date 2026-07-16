@@ -897,6 +897,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const onMsg = (ev: MessageEvent) => {
+      const data = ev.data;
+      if (data && data.type === "view_hidden") {
+        if (voiceRef.current?.active) {
+          voiceRef.current.stop();
+          setDictating(false);
+          setDictationInterim("");
+        }
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  useEffect(() => {
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
       post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman, goal: goalMode });
@@ -1181,7 +1196,7 @@ export function App() {
       return;
     }
     if (!voiceRef.current) {
-      voiceRef.current = new VoiceDictation("en-US");
+      voiceRef.current = new VoiceDictation(navigator.language || "en-US");
     }
     const voice = voiceRef.current;
     if (voice.active) {
@@ -1676,7 +1691,12 @@ export function App() {
                       <button
                         type="button"
                         className="tool-chip primary"
-                        onClick={() => post({ type: "rewind_to", promptIndex: idx })}
+                        onClick={() => {
+                          const ok = window.confirm(
+                            `Rewind to prompt ${idx}?\n\nThis overwrites up to ${files || "many"} workspace files with the snapshot from that turn. Your later edits will be lost.`,
+                          );
+                          if (ok) post({ type: "rewind_to", promptIndex: idx });
+                        }}
                       >
                         Rewind
                       </button>
@@ -3498,9 +3518,18 @@ export function App() {
                 ref={textareaRef}
                 value={draft}
                 onChange={(e) => {
-                  setDraft(e.target.value);
+                  const v = e.target.value;
+                  setDraft(v);
                   if (dictating) {
-                    draftBaseRef.current = e.target.value;
+                    const interim = dictationInterim;
+                    let base = v;
+                    if (interim) {
+                      const sep = " ";
+                      const suffix = sep + interim;
+                      if (base.endsWith(suffix)) base = base.slice(0, -suffix.length);
+                      else if (base.endsWith(interim)) base = base.slice(0, -interim.length);
+                    }
+                    draftBaseRef.current = base;
                   }
                 }}
                 onPaste={(e) => {
@@ -3552,7 +3581,7 @@ export function App() {
                 title={
                   dictating
                     ? "Stop dictation (Esc / ⌃␣ / F8)"
-                    : "Voice dictation into prompt (⌃␣ / F8)"
+                    : "Voice dictation (Web Speech; may use cloud STT). Often unavailable in VS Code/Cursor. ⌃␣ / F8"
                 }
                 aria-pressed={dictating}
                 onClick={() => toggleDictation()}

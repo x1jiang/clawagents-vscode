@@ -1,4 +1,8 @@
-/** Browser Web Speech API dictation → composer draft. */
+/** Browser Web Speech API dictation → composer draft.
+ *
+ * Chromium often routes recognition to a cloud STT backend (commonly Google).
+ * Electron/VS Code webviews frequently fail with network errors when CSP blocks that path.
+ */
 
 export type DictationCallbacks = {
   onInterim?: (text: string) => void;
@@ -38,8 +42,9 @@ export class VoiceDictation {
   private running = false;
   private lang: string;
 
-  constructor(lang = "en-US") {
-    this.lang = lang;
+  constructor(lang?: string) {
+    const nav = (typeof navigator !== "undefined" && navigator.language) || "en-US";
+    this.lang = lang || nav;
   }
 
   get active(): boolean {
@@ -78,7 +83,9 @@ export class VoiceDictation {
       cb.onError?.(
         code === "not-allowed"
           ? "Microphone permission denied — allow mic access for VS Code / Cursor."
-          : `Dictation error: ${code}`,
+          : code === "network"
+            ? "Dictation unavailable here (Web Speech needs a network STT backend; often blocked in VS Code/Cursor). Audio may be sent to a cloud provider when it works."
+            : `Dictation error: ${code}`,
       );
     };
     rec.onresult = (ev) => {
