@@ -219,6 +219,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push({
     dispose: () => {
+      provider?.dispose();
       sidecar?.dispose();
       sidecar = undefined;
       provider = undefined;

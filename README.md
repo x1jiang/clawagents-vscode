@@ -20,7 +20,7 @@ clawagents[gemini,anthropic,bedrock,mcp]>=6.20.1  fastapi  uvicorn  pydantic  py
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
 
-3. Add credentials: Command Palette → **ClawAgents: Set Provider Credential** (includes **Tavily** for `web_search`), or put keys in a workspace `.env`. For browser tools: Settings → **Enable browser tools**, then `pip install 'clawagents[browser]' && playwright install chromium`.
+3. Add credentials: Command Palette → **ClawAgents: Set API Key** (OpenAI / Anthropic / Gemini / Bedrock / Tavily), or put keys in a workspace `.env`. For browser tools: Settings → **Enable browser tools**, then `pip install 'clawagents[browser]' && playwright install chromium`.
 
 4. Open the right **Secondary Side Bar** and click **ClawAgents**, or run **ClawAgents: Open Chat** (`⌘⇧'` / `Ctrl+Shift+'`).
 

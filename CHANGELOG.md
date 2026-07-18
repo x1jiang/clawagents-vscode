@@ -1,5 +1,14 @@
 ## Unreleased
 
+## 1.0.80
+
+- **Bug report fallback:** when no SMTP/mailto recipient is set, open a GitHub issue draft (never empty `mailto:?`). Harden: validate email shape; never use `EMAIL_SENDER` as To; bound GitHub draft URL length; safe `openExternal`.
+- **Send gated on API key:** composer Send / Enter and slash-free turns require a provider key; slash commands still work; Enter defers to `send()` (no double-gate).
+- **`autoOpenChangedFiles` polish:** debounce multi-file edits; quiet failures go to Sidecar log; `preserveFocus`; skip secret/`..` paths; dispose clears timer.
+- Starter chips send current `autoApprove` / interaction / caveman / goal (no stale host state).
+- README: **ClawAgents: Set API Key** (was a non-existent “Set Provider Credential”).
+- Require `clawagents>=6.20.7` (centralized secret-path module).
+
 ## 1.0.79
 
 - Require `clawagents>=6.20.6` (dead handoffs, Mantle multi-path, DX/efficiency).

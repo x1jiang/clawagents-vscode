@@ -1986,6 +1986,24 @@ export function App() {
     if (!value) {
       return;
     }
+    // Slash commands work without a provider key; chat turns do not.
+    const isSlash =
+      value === "/compact" ||
+      value === "/checkpoints" ||
+      value === "/hunks" ||
+      value === "/review" ||
+      value === "/rewind";
+    if (!hasApiKey && !busy && !isSlash) {
+      setItems((previous) => [
+        ...previous,
+        {
+          kind: "status",
+          text: "Add a provider API key first — open Settings or run ClawAgents: Set API Key.",
+        },
+      ]);
+      setPanel("settings");
+      return;
+    }
     if (value === "/compact") {
       setDraft("");
       setCompactPhase("start");
@@ -3845,13 +3863,19 @@ export function App() {
                         disabled={busy || !hasApiKey}
                         onClick={() => {
                           setDraft(q);
+                          // Include current auto-approve / interaction so a chip
+                          // click before the persist debounce cannot use stale host state.
                           post({
                             type: "send",
                             text: q,
                             mode,
                             includeContext,
                             chatId,
+                            autoApprove,
                             model: activeModelId || undefined,
+                            interaction: effectiveInteraction,
+                            caveman,
+                            goal: goalMode,
                           });
                         }}
                       >
@@ -4254,6 +4278,7 @@ export function App() {
                       if (dictating) {
                         post({ type: "dictation_toggle", target: "composer" });
                       }
+                      // send() owns API-key gating + slash-command exemptions
                       send();
                     } else if (e.key === "Escape" && dictating) {
                       e.preventDefault();
@@ -4323,13 +4348,15 @@ export function App() {
                       type="button"
                       className="icon-btn primary send"
                       title={
-                        attachmentUploads > 0
-                          ? "Attaching files…"
-                          : "Send (Enter)"
+                        !hasApiKey
+                          ? "Add a provider API key in Settings first"
+                          : attachmentUploads > 0
+                            ? "Attaching files…"
+                            : "Send (Enter)"
                       }
                       aria-label={attachmentUploads > 0 ? "Attaching files" : "Send"}
                       onClick={send}
-                      disabled={!draft.trim() || attachmentUploads > 0}
+                      disabled={!draft.trim() || attachmentUploads > 0 || !hasApiKey}
                     >
                       {attachmentUploads > 0 ? <IconSpinner /> : <IconSend />}
                     </button>

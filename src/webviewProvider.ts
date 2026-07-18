@@ -103,6 +103,31 @@ function sessionCostFromChat(chat: Record<string, unknown> | undefined): number 
   return typeof v === "number" ? v : undefined;
 }
 
+/** Align with clawagents.security.secret_paths — never auto-open credentials. */
+function looksLikeSecretPath(filePath: string): boolean {
+  const base = path.basename(filePath || "").toLowerCase();
+  if (!base) {
+    return false;
+  }
+  if (base === ".env" || base.startsWith(".env.")) {
+    return true;
+  }
+  if (/\.(pem|key|p12|pfx)$/i.test(base)) {
+    return true;
+  }
+  if (base === "id_rsa" || base === "id_ed25519") {
+    return true;
+  }
+  if (base.includes("credentials") || base.includes("secrets")) {
+    return true;
+  }
+  return false;
+}
+
+function pathHasDotDot(filePath: string): boolean {
+  return (filePath || "").split(/[/\\]/).some((p) => p === "..");
+}
+
 export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = SIDEBAR_ID;
 
@@ -125,6 +150,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   /** Serialize settings saves — concurrent autosaves + live /providers probes
    *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
   private saveSettingsChain: Promise<void> = Promise.resolve();
+  /** Debounced auto-open of agent-edited files (avoid focus thrash). */
+  private autoOpenPending: string[] = [];
+  private autoOpenTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -1968,14 +1996,23 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async openPath(filePath: string, line?: number): Promise<void> {
+  private async openPath(
+    filePath: string,
+    line?: number,
+    opts?: { quiet?: boolean },
+  ): Promise<void> {
+    const quiet = Boolean(opts?.quiet);
+    const fail = (message: string) => {
+      if (quiet) {
+        this.sidecar.output.appendLine(`autoOpen: ${message}`);
+        return;
+      }
+      this.post({ type: "error", message });
+    };
     try {
       const folders = vscode.workspace.workspaceFolders ?? [];
       if (!folders.length) {
-        this.post({
-          type: "error",
-          message: "Open a workspace folder before opening paths from chat.",
-        });
+        fail("Open a workspace folder before opening paths from chat.");
         return;
       }
       let uri: vscode.Uri;
@@ -1991,25 +2028,64 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         return resolved === root || resolved.startsWith(root + path.sep);
       });
       if (!inWorkspace) {
-        this.post({
-          type: "error",
-          message: `Refusing to open path outside the workspace: ${filePath}`,
-        });
+        fail(`Refusing to open path outside the workspace: ${filePath}`);
         return;
       }
       const doc = await vscode.workspace.openTextDocument(uri);
-      const editor = await vscode.window.showTextDocument(doc, { preview: true });
+      const editor = await vscode.window.showTextDocument(doc, {
+        preview: true,
+        // Preserve focus for auto-open convenience; user-initiated opens still
+        // focus the editor (quiet=false).
+        preserveFocus: quiet,
+      });
       if (line && line > 0) {
         const pos = new vscode.Position(line - 1, 0);
         editor.selection = new vscode.Selection(pos, pos);
         editor.revealRange(new vscode.Range(pos, pos));
       }
     } catch (err) {
-      this.post({
-        type: "error",
-        message: `Could not open ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
-      });
+      fail(
+        `Could not open ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
+  }
+
+  /** Coalesce multi-file edits into one quiet open of the latest path. */
+  private scheduleAutoOpenChangedFile(filePath: string): void {
+    const p = (filePath || "").trim();
+    if (!p || looksLikeSecretPath(p) || pathHasDotDot(p)) {
+      if (p) {
+        this.sidecar.output.appendLine(`autoOpen: skipped ${p}`);
+      }
+      return;
+    }
+    if (!this.autoOpenPending.includes(p)) {
+      this.autoOpenPending.push(p);
+    }
+    // Keep only the most recent paths if the agent thrash-writes.
+    if (this.autoOpenPending.length > 24) {
+      this.autoOpenPending.splice(0, this.autoOpenPending.length - 24);
+    }
+    if (this.autoOpenTimer) {
+      clearTimeout(this.autoOpenTimer);
+    }
+    this.autoOpenTimer = setTimeout(() => {
+      this.autoOpenTimer = undefined;
+      const batch = this.autoOpenPending.splice(0);
+      // Prefer last non-secret path (secrets can still sneak in via rename).
+      const last = [...batch].reverse().find((x) => !looksLikeSecretPath(x));
+      if (last) {
+        void this.openPath(last, undefined, { quiet: true });
+      }
+    }, 450);
+  }
+
+  dispose(): void {
+    if (this.autoOpenTimer) {
+      clearTimeout(this.autoOpenTimer);
+      this.autoOpenTimer = undefined;
+    }
+    this.autoOpenPending.length = 0;
   }
 
   private async diffSnapshot(
@@ -2175,7 +2251,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                   .getConfiguration("clawagents")
                   .get<boolean>("autoOpenChangedFiles", false)
               ) {
-                void this.openPath(ev.path);
+                this.scheduleAutoOpenChangedFile(ev.path);
               }
               return;
             }

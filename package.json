@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.79",
+  "version": "1.0.80",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -288,12 +288,12 @@
         "clawagents.bugReportEmailTo": {
           "type": "string",
           "default": "",
-          "description": "Optional bug-report recipient (CLAWAGENTS_BUG_REPORT_EMAIL) for SMTP and mailto fallback."
+          "description": "Optional bug-report mailto recipient (CLAWAGENTS_BUG_REPORT_EMAIL). When empty, the fallback opens a GitHub issue draft instead of an empty mailto."
         },
         "clawagents.autoOpenChangedFiles": {
           "type": "boolean",
           "default": false,
-          "description": "Automatically open files the agent writes or edits."
+          "description": "Automatically open the latest file the agent writes or edits (debounced; failures stay in the Sidecar output log, not chat)."
         }
       }
     }

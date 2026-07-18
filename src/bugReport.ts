@@ -141,14 +141,29 @@ export function formatBugReportBody(
   return lines.join("\n");
 }
 
+/** Public tracker — used when no SMTP / mailto recipient is configured. */
+const DEFAULT_BUG_REPORT_ISSUES =
+  "https://github.com/x1jiang/clawagents-vscode/issues/new";
+
+/** Loose email shape — reject empty / obviously invalid To: values. */
+const EMAIL_LIKE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function resolveMailtoRecipient(): string {
   const cfg = vscode.workspace.getConfiguration("clawagents");
-  return (
+  // Do NOT use EMAIL_SENDER here — that is SMTP From, not the bug-report To.
+  const raw =
     cfg.get<string>("bugReportEmailTo", "")?.trim() ||
     process.env.CLAWAGENTS_BUG_REPORT_EMAIL?.trim() ||
-    process.env.EMAIL_SENDER?.trim() ||
-    ""
-  );
+    "";
+  return EMAIL_LIKE.test(raw) ? raw : "";
+}
+
+async function openExternalSafe(uri: string): Promise<boolean> {
+  try {
+    return await vscode.env.openExternal(vscode.Uri.parse(uri));
+  } catch {
+    return false;
+  }
 }
 
 export async function submitBugReportFallback(options: {
@@ -158,24 +173,58 @@ export async function submitBugReportFallback(options: {
 }): Promise<{ ok: boolean; detail: string }> {
   const meta = buildBugReportMeta();
   const body = formatBugReportBody(options.text, meta, options.screenshots);
-  await vscode.env.clipboard.writeText(body);
+  try {
+    await vscode.env.clipboard.writeText(body);
+  } catch {
+    /* clipboard may fail in remote/headless — still try to open a draft */
+  }
 
-  const subjectShort = options.text.slice(0, 72).replace(/\n/g, " ").trim() || "bug report";
-  const subject = encodeURIComponent(`[ClawAgents-bug-report] ${subjectShort}`);
-  const bodyEnc = encodeURIComponent(body.slice(0, 1800));
-  const to = encodeURIComponent(resolveMailtoRecipient());
-  const mailto = to
-    ? `mailto:${to}?subject=${subject}&body=${bodyEnc}`
-    : `mailto:?subject=${subject}&body=${bodyEnc}`;
-  await vscode.env.openExternal(vscode.Uri.parse(mailto));
-
+  const subjectShort =
+    options.text.slice(0, 72).replace(/\n/g, " ").trim() || "bug report";
   const shotNote =
     options.screenshots.length > 0
-      ? ` Attach ${options.screenshots.length} screenshot(s) manually in your mail client.`
+      ? ` Attach ${options.screenshots.length} screenshot(s) manually.`
       : "";
+  const clipNote = " Report copied to clipboard.";
+
+  const toRaw = resolveMailtoRecipient();
+  if (toRaw) {
+    const subject = encodeURIComponent(`[ClawAgents-bug-report] ${subjectShort}`);
+    const bodyEnc = encodeURIComponent(body.slice(0, 1800));
+    const to = encodeURIComponent(toRaw);
+    const opened = await openExternalSafe(
+      `mailto:${to}?subject=${subject}&body=${bodyEnc}`,
+    );
+    return {
+      ok: true,
+      detail: opened
+        ? `SMTP unavailable (${options.smtpError}).${clipNote} Opened in your mail client.${shotNote}`
+        : `SMTP unavailable (${options.smtpError}).${clipNote} Could not open mail client — paste from clipboard.${shotNote}`,
+    };
+  }
+
+  // No recipient configured — open a GitHub issue draft (actually delivers).
+  // Never claim success for mailto:? with an empty To:.
+  // Keep URL under common browser limits (~8k); full text stays on clipboard.
+  const title = encodeURIComponent(`[bug] ${subjectShort}`);
+  const footer = `\n\n---\n_Filed via ClawAgents bug-report fallback (${options.smtpError})_`;
+  let issueBody = encodeURIComponent(`${body.slice(0, 4000)}${footer}`);
+  let issueUrl = `${DEFAULT_BUG_REPORT_ISSUES}?title=${title}&body=${issueBody}`;
+  if (issueUrl.length > 7500) {
+    issueBody = encodeURIComponent(
+      `${body.slice(0, 1200)}${footer}\n\n_(Full report is on the clipboard — paste below.)_`,
+    );
+    issueUrl = `${DEFAULT_BUG_REPORT_ISSUES}?title=${title}&body=${issueBody}`;
+  }
+  if (issueUrl.length > 7500) {
+    issueUrl = `${DEFAULT_BUG_REPORT_ISSUES}?title=${title}`;
+  }
+  const opened = await openExternalSafe(issueUrl);
   return {
     ok: true,
-    detail: `SMTP unavailable (${options.smtpError}). Report copied to clipboard and opened in your mail client.${shotNote}`,
+    detail: opened
+      ? `SMTP unavailable (${options.smtpError}).${clipNote} Opened as a GitHub issue draft.${shotNote}`
+      : `SMTP unavailable (${options.smtpError}).${clipNote} Open ${DEFAULT_BUG_REPORT_ISSUES} and paste.${shotNote}`,
   };
 }
 
