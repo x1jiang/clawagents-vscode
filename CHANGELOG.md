@@ -1,3 +1,13 @@
+## 1.0.59
+
+- **Pick mic, then dictate:** Mic opens a microphone QuickPick, sets it as the system input, then starts OS dictation.
+  - **macOS:** Bundled `bin/darwin-*/mac_audio_input` (CoreAudio; no Xcode CLT). Then **Edit → Start Dictation…** (Fn Fn). Optional fallbacks: Homebrew `SwitchAudioSource`, or `swift` + source script.
+  - **Windows:** Voice typing (**Win+H**). Mic list/switch via optional `AudioDeviceCmdlets` (else ffmpeg list + Sound settings link).
+
+## 1.0.58
+
+- **Mic → Apple Dictation:** Mic triggers macOS **Edit → Start Dictation…** (same as Fn Fn). Text goes into the focused composer/bug-report box. No ffmpeg, Whisper, or OpenAI key. May need Accessibility allowed for Cursor once.
+
 ## 1.0.57
 
 - Auto-install falls back to the GitHub release wheel when PyPI lacks `clawagents>=6.19.0` (fixes sidecar fail after fresh VSIX)

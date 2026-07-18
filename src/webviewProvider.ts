@@ -25,6 +25,7 @@ import {
   safeLocalAttachmentName,
 } from "./localAttachments";
 import { captureBugScreenshot, sendBugReportEmail } from "./bugReport";
+import { hostDictation } from "./hostDictation";
 import { parseWebviewToHost } from "./protocol";
 import type {
   AgentMode,
@@ -127,6 +128,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     private readonly sidecar: SidecarManager,
     private readonly config: ExtensionConfig,
   ) {
+    hostDictation.configure(context.extensionPath, context.globalState);
     this.gateway = new GatewayClient(() => this.sidecar.current);
     this.mode = this.config.defaultMode;
     // Chats live under the workspace's .clawagents dir, so the pointer to
@@ -1423,6 +1425,46 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           void vscode.window.showInformationMessage("Bug report emailed.");
         } else {
           void vscode.window.showErrorMessage(`Bug report failed: ${result.detail}`);
+        }
+        break;
+      }
+      case "dictation_toggle": {
+        const target = msg.target === "bug_report" ? "bug_report" : "composer";
+        const result = await hostDictation.toggle(
+          this.config,
+          this.sidecar.output,
+          target,
+          async () => {
+            this.post({ type: "dictation_focus", target });
+            await new Promise((r) => setTimeout(r, 220));
+          },
+        );
+        if (result.kind === "started") {
+          this.post({
+            type: "dictation_state",
+            recording: true,
+            target: result.target,
+            detail:
+              result.detail ||
+              "Dictation on — speak, then Mic / Esc to stop",
+          });
+        } else if (result.kind === "stopped" || result.kind === "cancelled") {
+          this.post({
+            type: "dictation_state",
+            recording: false,
+            target: result.target,
+          });
+        } else {
+          this.post({
+            type: "dictation_state",
+            recording: false,
+            target: result.target,
+          });
+          this.post({
+            type: "dictation_error",
+            target: result.target,
+            detail: result.detail,
+          });
         }
         break;
       }

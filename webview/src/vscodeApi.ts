@@ -160,6 +160,26 @@ export type HostToWebview =
       screenshot?: { name: string; mediaType: string; data: string };
       detail?: string;
     }
+  | {
+      type: "dictation_state";
+      recording: boolean;
+      target: "composer" | "bug_report";
+      detail?: string;
+    }
+  | {
+      type: "dictation_focus";
+      target: "composer" | "bug_report";
+    }
+  | {
+      type: "dictation_result";
+      target: "composer" | "bug_report";
+      text: string;
+    }
+  | {
+      type: "dictation_error";
+      target: "composer" | "bug_report";
+      detail: string;
+    }
   | { type: "sidecar"; state: "stopped" | "starting" | "running" | "error"; detail?: string }
   | {
       type: "checkpoints";
@@ -283,6 +303,10 @@ export type WebviewToHost =
       type: "bug_report_submit";
       text: string;
       screenshots: Array<{ name: string; mediaType: string; data: string }>;
+    }
+  | {
+      type: "dictation_toggle";
+      target?: "composer" | "bug_report";
     };
 
 interface VsCodeApi {

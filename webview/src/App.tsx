@@ -19,7 +19,6 @@ import {
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
-import { VoiceDictation, speechRecognitionAvailable } from "./voiceDictation";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -348,9 +347,6 @@ export function App() {
   const [rewindSnaps, setRewindSnaps] = useState<Array<Record<string, unknown>>>([]);
   const [rewindOpen, setRewindOpen] = useState(false);
   const [dictating, setDictating] = useState(false);
-  const [dictationInterim, setDictationInterim] = useState("");
-  const voiceRef = useRef<VoiceDictation | null>(null);
-  const draftBaseRef = useRef("");
   /** Forces relative checkpoint labels ("2m ago") to refresh while the panel is open. */
   const [nowTick, setNowTick] = useState(() => Date.now());
   /** Sum of estimated USD for completed runs in this chat (not including the in-flight run). */
@@ -367,6 +363,7 @@ export function App() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const bugReportTextareaRef = useRef<HTMLTextAreaElement>(null);
   const localAttachInputRef = useRef<HTMLInputElement>(null);
   const persistTimer = useRef<number | undefined>();
   const settingsSaveTimer = useRef<number | undefined>();
@@ -389,8 +386,6 @@ export function App() {
   const [bugReportBusy, setBugReportBusy] = useState(false);
   const [bugReportStatus, setBugReportStatus] = useState("");
   const [bugReportDictating, setBugReportDictating] = useState(false);
-  const bugReportVoiceRef = useRef<VoiceDictation | null>(null);
-  const bugReportBaseRef = useRef("");
 
   const commitRunCost = (u: {
     promptTokens?: number;
@@ -905,6 +900,50 @@ export function App() {
             setTimeout(() => setBugReportOpen(false), 800);
           }
           break;
+        case "dictation_focus":
+          if (msg.target === "bug_report") {
+            bugReportTextareaRef.current?.focus();
+          } else {
+            textareaRef.current?.focus();
+          }
+          break;
+        case "dictation_state":
+          if (msg.target === "bug_report") {
+            setBugReportDictating(msg.recording);
+            if (msg.detail) setBugReportStatus(msg.detail);
+          } else {
+            setDictating(msg.recording);
+          }
+          break;
+        case "dictation_result": {
+          const piece = msg.text.trim();
+          if (!piece) break;
+          if (msg.target === "bug_report") {
+            setBugReportText((prev) => {
+              const sep = prev && !/\s$/.test(prev) ? " " : "";
+              return `${prev}${sep}${piece}`;
+            });
+            setBugReportStatus("Transcribed");
+          } else {
+            setDraft((prev) => {
+              const sep = prev && !/\s$/.test(prev) ? " " : "";
+              return `${prev}${sep}${piece}${piece.endsWith(" ") ? "" : " "}`;
+            });
+          }
+          break;
+        }
+        case "dictation_error":
+          if (msg.target === "bug_report") {
+            setBugReportDictating(false);
+            setBugReportStatus(msg.detail);
+          } else {
+            setDictating(false);
+            setItems((prev) => [
+              ...prev,
+              { kind: "status", text: msg.detail },
+            ]);
+          }
+          break;
         default:
           break;
       }
@@ -919,25 +958,15 @@ export function App() {
   }, [items]);
 
   useEffect(() => {
-    return () => {
-      voiceRef.current?.stop();
-    };
-  }, []);
-
-  useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
       const data = ev.data;
-      if (data && data.type === "view_hidden") {
-        if (voiceRef.current?.active) {
-          voiceRef.current.stop();
-          setDictating(false);
-          setDictationInterim("");
-        }
+      if (data && data.type === "view_hidden" && dictating) {
+        post({ type: "dictation_toggle", target: "composer" });
       }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, []);
+  }, [dictating]);
 
   useEffect(() => {
     window.clearTimeout(persistTimer.current);
@@ -1212,57 +1241,21 @@ export function App() {
     post({ type: "save_settings", settings: patch });
   };
 
+  /** Pick mic → OS dictation (macOS Apple Dictation / Windows Win+H). */
   const toggleDictation = () => {
-    if (!speechRecognitionAvailable()) {
+    textareaRef.current?.focus();
+    if (!dictating) {
       setItems((previous) => [
-        ...previous,
+        ...previous.filter((it) => it.kind !== "status"),
         {
           kind: "status",
-          text: "Voice dictation needs Web Speech API (Chromium). Try VS Code / Cursor desktop.",
+          text: "Choose a microphone…",
         },
       ]);
-      return;
     }
-    if (!voiceRef.current) {
-      voiceRef.current = new VoiceDictation(navigator.language || "en-US");
-    }
-    const voice = voiceRef.current;
-    if (voice.active) {
-      voice.stop();
-      setDictating(false);
-      setDictationInterim("");
-      return;
-    }
-    draftBaseRef.current = draft;
-    setDictationInterim("");
-    voice.start({
-      onStart: () => setDictating(true),
-      onEnd: () => {
-        setDictating(false);
-        setDictationInterim("");
-      },
-      onInterim: (text) => {
-        setDictationInterim(text);
-        const base = draftBaseRef.current;
-        const sep = base && !/\s$/.test(base) ? " " : "";
-        setDraft(base + sep + text);
-      },
-      onFinal: (text) => {
-        const piece = text.trim();
-        if (!piece) return;
-        const base = draftBaseRef.current;
-        const sep = base && !/\s$/.test(base) ? " " : "";
-        const next = `${base}${sep}${piece}`.replace(/\s+/g, " ");
-        draftBaseRef.current = next.endsWith(" ") ? next : `${next} `;
-        setDictationInterim("");
-        setDraft(draftBaseRef.current);
-      },
-      onError: (message) => {
-        setDictating(false);
-        setDictationInterim("");
-        setItems((previous) => [...previous, { kind: "status", text: message }]);
-      },
-    });
+    window.setTimeout(() => {
+      post({ type: "dictation_toggle", target: "composer" });
+    }, 40);
   };
 
   useEffect(() => {
@@ -3547,19 +3540,7 @@ export function App() {
                   ref={textareaRef}
                   value={draft}
                   onChange={(e) => {
-                    const v = e.target.value;
-                    setDraft(v);
-                    if (dictating) {
-                      const interim = dictationInterim;
-                      let base = v;
-                      if (interim) {
-                        const sep = " ";
-                        const suffix = sep + interim;
-                        if (base.endsWith(suffix)) base = base.slice(0, -suffix.length);
-                        else if (base.endsWith(interim)) base = base.slice(0, -interim.length);
-                      }
-                      draftBaseRef.current = base;
-                    }
+                    setDraft(e.target.value);
                   }}
                   onPaste={(e) => {
                     const files = collectTransferFiles(e.clipboardData);
@@ -3588,16 +3569,12 @@ export function App() {
                     ) {
                       e.preventDefault();
                       if (dictating) {
-                        voiceRef.current?.stop();
-                        setDictating(false);
-                        setDictationInterim("");
+                        post({ type: "dictation_toggle", target: "composer" });
                       }
                       send();
                     } else if (e.key === "Escape" && dictating) {
                       e.preventDefault();
-                      voiceRef.current?.stop();
-                      setDictating(false);
-                      setDictationInterim("");
+                      post({ type: "dictation_toggle", target: "composer" });
                     } else if (e.key === "Escape" && busy) {
                       e.preventDefault();
                       post({ type: "cancel" });
@@ -3622,8 +3599,8 @@ export function App() {
                     className={`icon-btn mic-btn${dictating ? " active" : ""}`}
                     title={
                       dictating
-                        ? "Stop dictation (Esc / ⌃␣ / F8)"
-                        : "Voice dictation (⌃␣ / F8)"
+                        ? "Stop dictation (Esc / Mic)"
+                        : "Pick mic & dictate (macOS Fn Fn · Windows Win+H). ⌃␣ / F8"
                     }
                     aria-label={dictating ? "Stop dictation" : "Start voice dictation"}
                     aria-pressed={dictating}
@@ -3695,7 +3672,9 @@ export function App() {
                     title="Close"
                     aria-label="Close bug report"
                     onClick={() => {
-                      bugReportVoiceRef.current?.stop();
+                      if (bugReportDictating) {
+                        post({ type: "dictation_toggle", target: "bug_report" });
+                      }
                       setBugReportDictating(false);
                       setBugReportOpen(false);
                     }}
@@ -3707,18 +3686,13 @@ export function App() {
                   Type, speak, or attach a screenshot. Sends email via alpaca_deploy SMTP.
                 </p>
                 <textarea
+                  ref={bugReportTextareaRef}
                   className="bug-report-text"
                   rows={5}
                   value={bugReportText}
                   placeholder="What went wrong?"
                   disabled={bugReportBusy}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setBugReportText(v);
-                    if (bugReportDictating) {
-                      bugReportBaseRef.current = v;
-                    }
-                  }}
+                  onChange={(e) => setBugReportText(e.target.value)}
                 />
                 {bugReportShots.length > 0 ? (
                   <div className="bug-report-shots">
@@ -3746,46 +3720,18 @@ export function App() {
                   <button
                     type="button"
                     className={`icon-btn mic-btn${bugReportDictating ? " active" : ""}`}
-                    title="Dictate bug description"
+                    title="Pick mic & dictate"
                     aria-label="Dictate bug description"
                     aria-pressed={bugReportDictating}
                     disabled={bugReportBusy}
                     onClick={() => {
-                      if (bugReportDictating) {
-                        bugReportVoiceRef.current?.stop();
-                        setBugReportDictating(false);
-                        return;
+                      bugReportTextareaRef.current?.focus();
+                      if (!bugReportDictating) {
+                        setBugReportStatus("Choose a microphone…");
                       }
-                      if (!speechRecognitionAvailable()) {
-                        setBugReportStatus("Speech recognition unavailable in this webview");
-                        return;
-                      }
-                      bugReportBaseRef.current = bugReportText;
-                      if (!bugReportVoiceRef.current) {
-                        bugReportVoiceRef.current = new VoiceDictation(
-                          navigator.language || "en-US",
-                        );
-                      }
-                      const ok = bugReportVoiceRef.current.start({
-                        onStart: () => setBugReportDictating(true),
-                        onEnd: () => setBugReportDictating(false),
-                        onInterim: (t) => {
-                          const base = bugReportBaseRef.current;
-                          const sep = base && !base.endsWith(" ") ? " " : "";
-                          setBugReportText(base + sep + t);
-                        },
-                        onFinal: (t) => {
-                          const base = bugReportBaseRef.current;
-                          const sep = base && !base.endsWith(" ") ? " " : "";
-                          const next = (base + sep + t).trimEnd() + " ";
-                          bugReportBaseRef.current = next;
-                          setBugReportText(next);
-                        },
-                        onError: (m) => setBugReportStatus(m),
-                      });
-                      if (!ok) {
-                        setBugReportStatus("Could not start dictation");
-                      }
+                      window.setTimeout(() => {
+                        post({ type: "dictation_toggle", target: "bug_report" });
+                      }, 40);
                     }}
                   >
                     {bugReportDictating ? <IconMicOff /> : <IconMic />}
@@ -3809,7 +3755,9 @@ export function App() {
                     className="primary bug-report-send"
                     disabled={bugReportBusy || !bugReportText.trim()}
                     onClick={() => {
-                      bugReportVoiceRef.current?.stop();
+                      if (bugReportDictating) {
+                        post({ type: "dictation_toggle", target: "bug_report" });
+                      }
                       setBugReportDictating(false);
                       setBugReportBusy(true);
                       setBugReportStatus("Sending…");
