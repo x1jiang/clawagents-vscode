@@ -1229,10 +1229,10 @@ async def run_chat_turn(
 
         return await agent.invoke(augmented, **invoke_kwargs)
 
-    # Floor is clawagents≥6.20.10 — workspace= is required. No process chdir / turn lock.
+    # Floor is clawagents≥6.20.11 — workspace= is required. No process chdir / turn lock.
     if not supports_workspace:
         raise RuntimeError(
-            "ClawAgents sidecar requires clawagents≥6.20.10 with workspace= support. "
+            "ClawAgents sidecar requires clawagents≥6.20.11 with workspace= support. "
             "Run ClawAgents: Install/Upgrade Python Dependencies."
         )
     result = await _run_turn()

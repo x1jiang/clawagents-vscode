@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.89
+
+- Require `clawagents>=6.20.11` — Claude Opus 4.7+ / Mantle Messages omit deprecated ``temperature`` (fixes 400 on Opus 4.8).
+
 ## 1.0.88
 
 - **Key-flag hardening:** host `collectKeyFlags()` (SecretStorage + `.env` + shell) attached to every `settings` / `verify_result` after save/clear; webview no longer parses "saved"/"cleared" from detail text (that falsely cleared OpenAI after Clear when `.env` still had a key).
@@ -478,6 +482,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.89
+
+- Require `clawagents>=6.20.11` — Claude Opus 4.7+ / Mantle Messages omit deprecated ``temperature`` (fixes 400 on Opus 4.8).
 
 ## 1.0.88
 

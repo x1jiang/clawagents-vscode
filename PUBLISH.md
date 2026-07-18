@@ -1,5 +1,6 @@
-Publisher **`clawagents`** · version **1.0.88**
+Publisher **`clawagents`** · version **1.0.89**
 
-- [x] clawagents **6.20.10** on GitHub + PyPI
-- [x] GitHub release `v1.0.88` + VSIX
+- [ ] Publish `clawagents` **6.20.11** to GitHub (wheel + sdist)
+- [ ] Publish `clawagents` **6.20.11** to PyPI
+- [ ] GitHub release `v1.0.89` + VSIX
 - [ ] Marketplace / Open VSX (optional)
