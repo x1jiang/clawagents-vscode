@@ -305,8 +305,10 @@ function settingsPatchMismatches(
   patch: Record<string, unknown>,
   saved: Record<string, unknown>,
 ): string[] {
-  // Server may intentionally rewrite base_url / skill_dirs on full saves.
+  // Server may intentionally rewrite skill_dirs on full saves.
   // Always verify small patches; on large autosaves only check critical keys.
+  // bedrock_mode / base_url must be critical — stale IAM echoes were snapping
+  // Mantle Access mode back to Native IAM.
   const critical = new Set([
     "wire_api",
     "reasoning_effort",
@@ -315,6 +317,9 @@ function settingsPatchMismatches(
     "provider",
     "agent_mode",
     "action_mode",
+    "bedrock_mode",
+    "base_url",
+    "aws_region",
   ]);
   const keys = Object.keys(patch).filter((k) => !k.startsWith("_"));
   const checkKeys = keys.length <= 5 ? keys : keys.filter((k) => critical.has(k));
@@ -322,10 +327,25 @@ function settingsPatchMismatches(
   for (const key of checkKeys) {
     const expected = patch[key];
     const actual = saved[key];
-    const same =
+    let same =
       Array.isArray(expected) && Array.isArray(actual)
         ? JSON.stringify(expected) === JSON.stringify(actual)
         : expected === actual;
+    // Host normalizes URLs (strip trailing /); treat those as equal.
+    if (!same && key === "base_url") {
+      const a = String(expected || "")
+        .trim()
+        .replace(/\/+$/, "");
+      const b = String(actual || "")
+        .trim()
+        .replace(/\/+$/, "");
+      same = a === b;
+    }
+    if (!same && key === "bedrock_mode") {
+      same =
+        String(expected || "iam").toLowerCase() ===
+        String(actual || "iam").toLowerCase();
+    }
     if (!same) {
       failed.push(key);
     }
@@ -425,6 +445,8 @@ export function App() {
    * Autosave only runs when local settings differ — prevents forever PUT loops.
    */
   const committedSettingsKey = useRef<string>("");
+  /** Latest settings for message-handler stale-echo checks (avoid clobber). */
+  const settingsRef = useRef<Record<string, unknown>>({});
   /** One-shot preferred-model fill (empty model only) — never loop on catalog mismatch. */
   const preferredModelFilled = useRef(false);
   const historySearchTimer = useRef<number | undefined>();
@@ -525,12 +547,20 @@ export function App() {
           setChatId(msg.chatId);
           setChats(msg.chats || []);
           if (msg.settings) {
-            skipSettingsAutosave.current = true;
-            settingsAutosaveReady.current = true;
-            committedSettingsKey.current = settingsSaveKey(msg.settings);
-            setSettings(msg.settings);
-            if (typeof msg.settings.model === "string" && msg.settings.model) {
-              setModel(msg.settings.model);
+            const localKey = settingsSaveKey(settingsRef.current);
+            const dirty =
+              Boolean(localKey) && localKey !== committedSettingsKey.current;
+            if (!dirty) {
+              skipSettingsAutosave.current = true;
+              settingsAutosaveReady.current = true;
+              committedSettingsKey.current = settingsSaveKey(msg.settings);
+              settingsRef.current = msg.settings;
+              setSettings(msg.settings);
+              if (typeof msg.settings.model === "string" && msg.settings.model) {
+                setModel(msg.settings.model);
+              }
+            } else {
+              settingsAutosaveReady.current = true;
             }
           }
           if (msg.providers) {
@@ -556,32 +586,49 @@ export function App() {
             setChatId(msg.chatId);
           }
           break;
-        case "settings":
-          skipSettingsAutosave.current = true;
-          settingsAutosaveReady.current = true;
-          committedSettingsKey.current = settingsSaveKey(msg.settings || {});
-          setSettings(msg.settings || {});
-          if (typeof msg.settings?.model === "string" && msg.settings.model) {
-            setModel(msg.settings.model);
-          }
+        case "settings": {
+          const incoming = msg.settings || {};
           if (msg.providers) {
             setProviders(msg.providers as Provider[]);
           }
-          {
-            const pending = pendingSettingsPatch.current;
-            pendingSettingsPatch.current = null;
-            if (pending) {
-              const failed = settingsPatchMismatches(pending, msg.settings || {});
+          const pending = pendingSettingsPatch.current;
+          if (pending) {
+            const failed = settingsPatchMismatches(pending, incoming);
+            if (failed.length > 0) {
+              // Stale reply (e.g. IAM echo after user chose Mantle) — keep local UI.
               setVerifyMsg(
-                failed.length
-                  ? `Save failed: ${failed.join(", ")} not persisted`
-                  : "Saved ✓",
+                `Ignoring stale settings (${failed.join(", ")}) — keeping your Access mode`,
               );
-            } else {
-              setVerifyMsg((v) => (v === "Saving…" ? "Saved ✓" : v));
+              break;
             }
+            pendingSettingsPatch.current = null;
+            skipSettingsAutosave.current = true;
+            settingsAutosaveReady.current = true;
+            committedSettingsKey.current = settingsSaveKey(incoming);
+            settingsRef.current = incoming;
+            setSettings(incoming);
+            if (typeof incoming.model === "string" && incoming.model) {
+              setModel(incoming.model);
+            }
+            setVerifyMsg("Saved ✓");
+            break;
           }
+          // Unsolicited push (load/ready) — never clobber in-progress edits.
+          const localKey = settingsSaveKey(settingsRef.current);
+          if (localKey && localKey !== committedSettingsKey.current) {
+            break;
+          }
+          skipSettingsAutosave.current = true;
+          settingsAutosaveReady.current = true;
+          committedSettingsKey.current = settingsSaveKey(incoming);
+          settingsRef.current = incoming;
+          setSettings(incoming);
+          if (typeof incoming.model === "string" && incoming.model) {
+            setModel(incoming.model);
+          }
+          setVerifyMsg((v) => (v === "Saving…" ? "Saved ✓" : v));
           break;
+        }
         case "skill_dir_picked": {
           const path = (msg.path || "").trim();
           if (!path) break;
@@ -1008,6 +1055,10 @@ export function App() {
     post({ type: "ready" });
     return () => window.removeEventListener("message", onMessage);
   }, []);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -2059,8 +2110,9 @@ export function App() {
                       const mode = e.target.value;
                       const region =
                         String(settings.aws_region || "").trim() || "us-east-1";
+                      let next: Record<string, unknown>;
                       if (mode === "mantle") {
-                        const next = {
+                        next = {
                           ...settings,
                           provider: "bedrock",
                           bedrock_mode: "mantle",
@@ -2074,13 +2126,11 @@ export function App() {
                               ? String(settings.model)
                               : "openai.gpt-5.6-sol",
                         };
-                        setSettings(next);
-                        setModel(String(next.model));
                         setProviderSetupMsg(
                           `Mantle (OneHUB) — ${next.base_url}. Paste Mantle API key below.`,
                         );
                       } else if (mode === "bag") {
-                        const next = {
+                        next = {
                           ...settings,
                           provider: "bedrock",
                           bedrock_mode: "bag",
@@ -2090,13 +2140,11 @@ export function App() {
                             String(settings.model || "") ||
                             "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         };
-                        setSettings(next);
-                        setModel(String(next.model));
                         setProviderSetupMsg(
                           "BAG / LiteLLM gateway — save gateway key, then Test.",
                         );
                       } else {
-                        const next = {
+                        next = {
                           ...settings,
                           provider: "bedrock",
                           bedrock_mode: "iam",
@@ -2109,12 +2157,21 @@ export function App() {
                               : String(settings.model || "") ||
                                 "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         };
-                        setSettings(next);
-                        setModel(String(next.model));
                         setProviderSetupMsg(
                           "Native IAM — uses ~/.aws credentials (no Mantle/BAG key).",
                         );
                       }
+                      // Persist immediately — debounced autosave + stale echoes
+                      // were snapping Mantle back to Native IAM.
+                      skipSettingsAutosave.current = true;
+                      settingsRef.current = next;
+                      committedSettingsKey.current = settingsSaveKey(next);
+                      setSettings(next);
+                      setModel(String(next.model || ""));
+                      const patch = normalizeSettingsForSave(next);
+                      pendingSettingsPatch.current = patch;
+                      setVerifyMsg("Saving…");
+                      post({ type: "save_settings", settings: patch });
                     }}
                   >
                     <option value="iam">Native IAM (classic Bedrock)</option>

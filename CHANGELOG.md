@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.73
+
+- **Fix Mantle Access mode snapping back to Native IAM:** stale `settings` echoes no longer overwrite a newer Mantle/BAG choice; Access mode saves immediately; `bedrock_mode` / `base_url` are critical save-verify keys
+
 ## 1.0.72
 
 - **Hard-stop settings save loop:** autosave commits a settings fingerprint; host echoes cannot re-PUT. Providers/skills refresh only when those keys actually change.
