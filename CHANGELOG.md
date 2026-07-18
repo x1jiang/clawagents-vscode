@@ -1,3 +1,7 @@
+## 1.0.60
+
+- Restore full composer placeholder hints (mic / paste / attach / send / Esc stop)
+
 ## 1.0.59
 
 - **Pick mic, then dictate:** Mic opens a microphone QuickPick, sets it as the system input, then starts OS dictation.

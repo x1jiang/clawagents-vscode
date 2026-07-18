@@ -3555,8 +3555,8 @@ export function App() {
                       finishAttachmentRequest,
                     );
                   }}
-                  placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · ↵ send · ⇧↵ newline`}
-                  rows={2}
+                  placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · mic / ⌃␣ / F8 dictate · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
+                  rows={3}
                   onKeyDown={(e) => {
                     // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
                     // Ignore Enter while an IME composition is active.
