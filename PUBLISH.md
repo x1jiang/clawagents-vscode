@@ -1,5 +1,5 @@
 Publisher **`clawagents`** · version **1.0.101**
 
-- [ ] Publish `clawagents` **6.20.18** to GitHub (wheel + sdist)
+- [x] Publish `clawagents` **6.20.18** to GitHub
 - [ ] Publish `clawagents` **6.20.18** to PyPI (needs token)
-- [ ] GitHub release `v1.0.101` + VSIX
+- [x] GitHub release `v1.0.101` + VSIX
