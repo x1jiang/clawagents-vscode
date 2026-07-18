@@ -373,6 +373,10 @@ export function App() {
   const settingsAutosaveReady = useRef(false);
   /** Last settings patch we asked the host to persist — verified on `settings` reply. */
   const pendingSettingsPatch = useRef<Record<string, unknown> | null>(null);
+  /** Stable JSON of last autosave payload — skip no-op / echo loops. */
+  const lastAutosaveJson = useRef<string>("");
+  /** One-shot preferred-model fill (empty model only) — never loop on catalog mismatch. */
+  const preferredModelFilled = useRef(false);
   const historySearchTimer = useRef<number | undefined>();
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
@@ -983,11 +987,27 @@ export function App() {
     }
     if (skipSettingsAutosave.current) {
       skipSettingsAutosave.current = false;
+      // Remember host-echoed payload so a later effect doesn't re-PUT identical data.
+      try {
+        lastAutosaveJson.current = JSON.stringify(normalizeSettingsForSave(settings));
+      } catch {
+        /* ignore */
+      }
       return;
     }
     window.clearTimeout(settingsSaveTimer.current);
     settingsSaveTimer.current = window.setTimeout(() => {
       const patch = normalizeSettingsForSave(settings);
+      let json = "";
+      try {
+        json = JSON.stringify(patch);
+      } catch {
+        json = "";
+      }
+      if (json && json === lastAutosaveJson.current) {
+        return;
+      }
+      lastAutosaveJson.current = json;
       pendingSettingsPatch.current = patch;
       setVerifyMsg("Saving…");
       post({
@@ -1152,10 +1172,19 @@ export function App() {
   const activeModelMeta = allModels.find((m) => m.id === activeModelId);
   modelRef.current = activeModelId || model;
   modelMetaRef.current = activeModelMeta;
+  // Fill a default model only when unset. Never replace a saved model just
+  // because it's missing from the current catalog (probe=0 / Mantle IDs) —
+  // that used to PUT /settings forever (skills "loading" storm).
   useEffect(() => {
-    const savedModel = typeof settings.model === "string" ? settings.model : "";
-    if (savedModel && allModels.some((m) => m.id === savedModel)) return;
+    if (preferredModelFilled.current) return;
+    const savedModel =
+      typeof settings.model === "string" ? settings.model.trim() : "";
+    if (savedModel) {
+      preferredModelFilled.current = true;
+      return;
+    }
     if (!preferredPick.model) return;
+    preferredModelFilled.current = true;
     const nextSettings: Record<string, unknown> = {
       ...settings,
       model: preferredPick.model,
@@ -1165,9 +1194,10 @@ export function App() {
     setModel(preferredPick.model);
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
+    lastAutosaveJson.current = JSON.stringify(patch);
     pendingSettingsPatch.current = patch;
     post({ type: "save_settings", settings: patch });
-  }, [allModels, preferredPick, post, settings]);
+  }, [preferredPick.model, preferredPick.effort, post, settings]);
   const promptTok = usage.promptTokens || 0;
   const completionTok = usage.completionTokens || 0;
   const totalTok =
@@ -1207,6 +1237,7 @@ export function App() {
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
+    lastAutosaveJson.current = JSON.stringify(patch);
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
     post({ type: "save_settings", settings: patch });

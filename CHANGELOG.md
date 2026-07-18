@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.71
+
+- **Fix settings/skills save storm:** preferred-model effect no longer replaces Mantle/custom models missing from the cheap (`probe=0`) catalog — that looped `PUT /settings` + `GET /skills` forever.
+- Autosave skips identical payloads; skills preview refreshes only when skill-related keys change
+
 ## 1.0.70
 
 - **Auto-upgrade PATH Pythons on install/reinstall:** `ensureSidecarDeps` / Install Python Deps / Doctor / sidecar start also upgrade other PATH interpreters below the clawagents floor (Homebrew/conda). Setting `clawagents.syncPathPythons` (default on).

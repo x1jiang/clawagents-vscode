@@ -1147,11 +1147,27 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           }
           this.post({ type: "settings", settings, providers });
           this.post({ type: "status", message: "Settings saved" });
-          try {
-            const skills = await this.gateway.getSkills();
-            this.post({ type: "skills_preview", ...skills });
-          } catch {
-            /* preview is best-effort after save */
+          // Skills catalog is expensive — only refresh when skill-related keys change.
+          const skillKeys = [
+            "skill_dirs",
+            "skill_ignore_dirs",
+            "skill_exclude",
+            "skill_auto_discover",
+            "skill_user_homes",
+            "allow_external_skill_dirs",
+          ] as const;
+          const skillsChanged = skillKeys.some((k) => {
+            const a = JSON.stringify(previous[k] ?? null);
+            const b = JSON.stringify(settings[k] ?? null);
+            return a !== b;
+          });
+          if (skillsChanged) {
+            try {
+              const skills = await this.gateway.getSkills();
+              this.post({ type: "skills_preview", ...skills });
+            } catch {
+              /* preview is best-effort after save */
+            }
           }
         } catch (err) {
           if (isSidecarTransportError(err)) {
