@@ -190,7 +190,12 @@ export class SidecarManager {
 
     const python = this.config.pythonPath;
     const bridge = path.join(this.extensionPath, "python", "bridge.py");
-    const probe = await ensureSidecarDeps(python, this.output, curatedProcessEnv());
+    // Do not PATH-sync / pip-upgrade other interpreters on every restart —
+    // that used --break-system-packages, hung offline, and slowed startup.
+    // PATH floor sync stays on Install/Doctor/activation (see extension.ts).
+    const probe = await ensureSidecarDeps(python, this.output, curatedProcessEnv(), {
+      syncPathFloor: false,
+    });
     this.assertCurrentStart(generation);
     this.output.appendLine(`Python probe (${python}): ${probe.ok ? "ok" : "FAILED"}`);
     this.output.appendLine(`Using interpreter: ${python}`);

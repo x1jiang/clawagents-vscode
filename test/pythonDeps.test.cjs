@@ -15,6 +15,11 @@ fs.writeFileSync(path.join(vscodeStubDir, "index.js"), `module.exports = {
     withProgress: (_opts, task) => task({ report() {} }),
     showInformationMessage() {},
   },
+  workspace: {
+    getConfiguration() {
+      return { get: (_key, def) => def };
+    },
+  },
 };`);
 buildSync({
   entryPoints: [path.join(__dirname, "..", "src", "pythonDeps.ts")],
@@ -27,6 +32,7 @@ buildSync({
 });
 
 const deps = require(outputFile);
+const floor = deps.MIN_CLAWAGENTS_VERSION_STR;
 
 test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
@@ -34,15 +40,18 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.20.3",
+      version: floor,
       supportsSkillsExclude: true,
     }),
     false,
   );
+  // One patch below the floor must upgrade.
+  const [maj, min, pat] = deps.MIN_CLAWAGENTS_VERSION;
+  const below = `${maj}.${min}.${Math.max(0, pat - 1)}`;
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.20.2",
+      version: below,
       supportsSkillsExclude: true,
     }),
     true,
@@ -60,10 +69,15 @@ test("dependency versions stay inside the supported major ranges", () => {
       .every((spec) => spec.includes("<")),
   );
   assert.ok(
-    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.20.3")),
+    deps.SIDECAR_PIP_PACKAGES.some(
+      (spec) => spec.includes("clawagents") && spec.includes(floor),
+    ),
   );
   assert.ok(!deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("atlas")));
-  assert.match(deps.CLAWAGENTS_GITHUB_WHEEL, /clawagents-6\.20\.3-py3-none-any\.whl$/);
+  assert.match(
+    deps.CLAWAGENTS_GITHUB_WHEEL,
+    new RegExp(`clawagents-${floor.replace(/\./g, "\\.")}-py3-none-any\\.whl$`),
+  );
   assert.ok(
     deps.SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.includes(deps.CLAWAGENTS_GITHUB_WHEEL),
   );
@@ -73,12 +87,12 @@ test("concurrent dependency checks share one in-flight promise", async () => {
   const fakePython = path.join(tempDir, "fake-python");
   fs.writeFileSync(
     fakePython,
-    "#!/bin/sh\nprintf '/fake/python\\n6.20.3\nTrue\\n'\n",
+    `#!/bin/sh\nprintf '/fake/python\\n${floor}\\nTrue\\n'\n`,
     { mode: 0o755 },
   );
   const output = { appendLine() {} };
-  const first = deps.ensureSidecarDeps(fakePython, output, {});
-  const second = deps.ensureSidecarDeps(fakePython, output, {});
+  const first = deps.ensureSidecarDeps(fakePython, output, {}, { syncPathFloor: false });
+  const second = deps.ensureSidecarDeps(fakePython, output, {}, { syncPathFloor: false });
   assert.strictEqual(first, second);
   assert.equal((await first).ok, true);
 });

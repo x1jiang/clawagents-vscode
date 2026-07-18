@@ -1,4 +1,6 @@
 import {
+  memo,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -165,25 +167,58 @@ const FALLBACK_PROVIDERS: Provider[] = [
   },
 ];
 
+/** Default Mantle model — chat-completions safe (frontier GPT/Claude use other paths). */
+const MANTLE_DEFAULT_MODEL = "openai.gpt-oss-20b";
+
 /** Client fallback when sidecar catalog is empty but Settings say Mantle. */
 const MANTLE_FALLBACK_MODELS: Array<{ id: string; label: string }> = [
-  { id: "openai.gpt-5.6-sol", label: "GPT-5.6 Sol (Mantle)" },
-  { id: "openai.gpt-5.6-luna", label: "GPT-5.6 Luna (Mantle)" },
-  { id: "openai.gpt-5.6-terra", label: "GPT-5.6 Terra (Mantle)" },
-  { id: "openai.gpt-5.5", label: "GPT-5.5 (Mantle)" },
-  { id: "anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (Mantle)" },
-  { id: "anthropic.claude-opus-4-8", label: "Claude Opus 4.8 (Mantle)" },
-  { id: "anthropic.claude-haiku-4-5", label: "Claude Haiku 4.5 (Mantle)" },
-  { id: "anthropic.claude-fable-5", label: "Claude Fable 5 (Mantle)" },
-  { id: "deepseek.v3.2", label: "DeepSeek V3.2 (Mantle)" },
-  { id: "xai.grok-4.3", label: "xAI Grok 4.3 (Mantle)" },
-  { id: "zai.glm-5", label: "Z.ai GLM-5 (Mantle)" },
+  { id: "openai.gpt-oss-20b", label: "GPT-OSS 20B (Mantle · chat)" },
+  { id: "deepseek.v3.2", label: "DeepSeek V3.2 (Mantle · chat)" },
+  { id: "anthropic.claude-haiku-4-5", label: "Claude Haiku 4.5 (Mantle · messages)" },
+  { id: "anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (Mantle · messages)" },
+  { id: "anthropic.claude-opus-4-8", label: "Claude Opus 4.8 (Mantle · messages)" },
+  { id: "anthropic.claude-fable-5", label: "Claude Fable 5 (Mantle · messages)" },
+  { id: "openai.gpt-5.6-sol", label: "GPT-5.6 Sol (Mantle · responses)" },
+  { id: "openai.gpt-5.6-luna", label: "GPT-5.6 Luna (Mantle · responses)" },
+  { id: "openai.gpt-5.6-terra", label: "GPT-5.6 Terra (Mantle · responses)" },
+  { id: "openai.gpt-5.5", label: "GPT-5.5 (Mantle · responses)" },
+  { id: "xai.grok-4.3", label: "xAI Grok 4.3 (Mantle · chat)" },
+  { id: "zai.glm-5", label: "Z.ai GLM-5 (Mantle · chat)" },
 ];
 
 function isMantleSettings(settings: Record<string, unknown>): boolean {
   const mode = String(settings.bedrock_mode || "").toLowerCase();
   const base = String(settings.base_url || "");
   return mode === "mantle" || /bedrock-mantle\./i.test(base);
+}
+
+function isMantleAnthropicModel(id: string): boolean {
+  let m = String(id || "")
+    .trim()
+    .toLowerCase();
+  if (m.startsWith("bedrock/")) m = m.slice("bedrock/".length);
+  for (const p of ["us.", "eu.", "ap.", "global."] as const) {
+    if (m.startsWith(p)) {
+      m = m.slice(p.length);
+      break;
+    }
+  }
+  return m.startsWith("anthropic.") || m.startsWith("claude");
+}
+
+function isMantleOpenAIResponsesModel(id: string): boolean {
+  const m = String(id || "")
+    .trim()
+    .toLowerCase();
+  if (!m.startsWith("openai.") || m.includes("gpt-oss")) return false;
+  return /gpt-5\.[3456]/.test(m);
+}
+
+/** Wire API to save with a Mantle model (Claude Messages ignores wire_api). */
+function mantleWireApiForModel(id: string): string {
+  if (isMantleAnthropicModel(id)) return "auto";
+  if (isMantleOpenAIResponsesModel(id)) return "responses";
+  return "chat_completions";
 }
 
 function providerIsAvailable(provider: Provider): boolean {
@@ -322,6 +357,21 @@ function settingsSaveKey(settings: Record<string, unknown>): string {
   }
 }
 
+/** Host may set bedrock_mode=mantle when base_url is a Mantle host. */
+function mantleEquivalent(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  return isMantleSettings(a) && isMantleSettings(b);
+}
+
+function normalizeBaseUrlKey(raw: unknown): string {
+  return String(raw || "")
+    .trim()
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
 function settingsPatchMismatches(
   patch: Record<string, unknown>,
   saved: Record<string, unknown>,
@@ -345,6 +395,7 @@ function settingsPatchMismatches(
   const keys = Object.keys(patch).filter((k) => !k.startsWith("_"));
   const checkKeys = keys.length <= 5 ? keys : keys.filter((k) => critical.has(k));
   const failed: string[] = [];
+  const bothMantle = mantleEquivalent(patch, saved);
   for (const key of checkKeys) {
     const expected = patch[key];
     const actual = saved[key];
@@ -352,29 +403,292 @@ function settingsPatchMismatches(
       Array.isArray(expected) && Array.isArray(actual)
         ? JSON.stringify(expected) === JSON.stringify(actual)
         : expected === actual;
-    // Host normalizes URLs (strip trailing /); treat those as equal.
+    // Host normalizes URLs (strip trailing /, Mantle canonical form).
     if (!same && key === "base_url") {
-      const a = String(expected || "")
-        .trim()
-        .replace(/\/+$/, "");
-      const b = String(actual || "")
-        .trim()
-        .replace(/\/+$/, "");
-      same = a === b;
+      const a = normalizeBaseUrlKey(expected);
+      const b = normalizeBaseUrlKey(actual);
+      same = a === b || (bothMantle && /bedrock-mantle\./i.test(a) && /bedrock-mantle\./i.test(b));
     }
     if (!same && key === "bedrock_mode") {
-      same =
-        String(expected || "iam").toLowerCase() ===
-        String(actual || "iam").toLowerCase();
+      const exp = String(expected || "iam").toLowerCase();
+      const act = String(actual || "iam").toLowerCase();
+      same = exp === act;
+      // Host upgrades IAM → mantle when the URL is Mantle — accept that echo.
+      if (!same && act === "mantle" && isMantleSettings(saved) && isMantleSettings(patch)) {
+        same = true;
+      }
+      if (
+        !same &&
+        act === "mantle" &&
+        /bedrock-mantle\./i.test(String(patch.base_url || ""))
+      ) {
+        same = true;
+      }
     }
     if (!same) {
       failed.push(key);
     }
   }
+  // Pure Mantle URL/mode host normalization should never block confirmation.
+  if (
+    failed.length > 0 &&
+    bothMantle &&
+    failed.every((k) => k === "bedrock_mode" || k === "base_url" || k === "aws_region")
+  ) {
+    return [];
+  }
   return failed;
 }
 
 type Panel = "chat" | "history" | "settings" | "diagnostics";
+
+function resolvePerm(
+  requestId: string,
+  decision: "allow_once" | "allow_always" | "deny",
+  setItems: Dispatch<SetStateAction<ChatItem[]>>,
+) {
+  post({ type: "permission", requestId, decision });
+  setItems((prev) =>
+    prev.map((it) =>
+      it.kind === "permission" && it.requestId === requestId ? { ...it, resolved: true } : it,
+    ),
+  );
+}
+
+function resolveAsk(
+  requestId: string,
+  answer: string,
+  skip: boolean,
+  setItems: Dispatch<SetStateAction<ChatItem[]>>,
+) {
+  post({ type: "ask_user_reply", requestId, answer, skip });
+  setItems((prev) =>
+    prev.map((it) =>
+      it.kind === "ask" && it.requestId === requestId ? { ...it, resolved: true } : it,
+    ),
+  );
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function copyText(text: string) {
+  void navigator.clipboard?.writeText(text);
+}
+
+function looksLikeDiff(text: string): boolean {
+  return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
+}
+
+type TranscriptItemProps = {
+  item: ChatItem;
+  showStreamingCursor: boolean;
+  setItems: Dispatch<SetStateAction<ChatItem[]>>;
+  onAskDraftChange: (requestId: string, draft: string) => void;
+};
+
+const TranscriptItem = memo(function TranscriptItem({
+  item,
+  showStreamingCursor,
+  setItems,
+  onAskDraftChange,
+}: TranscriptItemProps) {
+  return (
+    <div className={`item item-${item.kind}`}>
+      {item.kind === "user" && (
+        <>
+          <div className="label-row">
+            <div className="label">You</div>
+            <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
+              Copy
+            </button>
+          </div>
+          <pre className="user-text">{item.text}</pre>
+        </>
+      )}
+      {item.kind === "assistant" && (
+        <>
+          <div className="label-row">
+            <div className="label">ClawAgents</div>
+            <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
+              Copy
+            </button>
+          </div>
+          <div className="md">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+            {showStreamingCursor && <span className="cursor" />}
+          </div>
+        </>
+      )}
+      {item.kind === "tool" && (
+        <details open={item.status === "running" || item.success === false}>
+          <summary>
+            <span className={`dot ${item.status}${item.success === false ? " fail-dot" : ""}`} />
+            <code>{item.name}</code>
+            {item.status === "done" && (
+              <span className={item.success ? "ok" : "fail"}>
+                {item.success ? "ok" : "fail"}
+              </span>
+            )}
+            {item.filePath && (
+              <button
+                type="button"
+                className="linkish"
+                onClick={(e) => {
+                  e.preventDefault();
+                  post({ type: "open_file", path: item.filePath! });
+                }}
+              >
+                open
+              </button>
+            )}
+          </summary>
+          {item.args != null && <pre className="tool-body">{safeJson(item.args)}</pre>}
+          {item.output ? (
+            <pre className={`tool-body ${looksLikeDiff(item.output) ? "diff" : ""}`}>
+              {item.output}
+            </pre>
+          ) : (
+            item.status === "done" &&
+            item.success === false && (
+              <pre className="tool-body muted">No error details returned.</pre>
+            )
+          )}
+        </details>
+      )}
+      {item.kind === "permission" && (
+        <div className="permission">
+          <div className="label">Permission required</div>
+          <div className="perm-body">
+            <strong>{item.tool}</strong>
+            {item.filePath && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => post({ type: "open_file", path: item.filePath! })}
+                >
+                  {item.filePath}
+                </button>
+              </>
+            )}
+            {item.command && <pre className="tool-body">{item.command}</pre>}
+            {item.reason && <div className="muted">{item.reason}</div>}
+          </div>
+          {!item.resolved && (
+            <div className="perm-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => resolvePerm(item.requestId, "allow_once", setItems)}
+              >
+                Allow once
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => resolvePerm(item.requestId, "allow_always", setItems)}
+              >
+                Always
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => resolvePerm(item.requestId, "deny", setItems)}
+              >
+                Deny
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {item.kind === "ask" && (
+        <div className="permission ask-user">
+          <div className="label">Agent asks</div>
+          <div className="perm-body">{item.question}</div>
+          {!item.resolved ? (
+            <>
+              <textarea
+                className="ask-input"
+                rows={3}
+                value={item.draft || ""}
+                placeholder="Type your answer…"
+                onChange={(e) => onAskDraftChange(item.requestId, e.target.value)}
+              />
+              <div className="perm-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!item.draft?.trim()}
+                  onClick={() => resolveAsk(item.requestId, item.draft || "", false, setItems)}
+                >
+                  Reply
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => resolveAsk(item.requestId, "", true, setItems)}
+                >
+                  Skip
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="muted tiny">Answered</div>
+          )}
+        </div>
+      )}
+      {item.kind === "file" && (
+        <div className="file-row">
+          <button
+            type="button"
+            className="file-chip"
+            onClick={() => post({ type: "open_file", path: item.path })}
+          >
+            Changed · {item.path}
+          </button>
+          <button
+            type="button"
+            className="ghost tiny"
+            onClick={() =>
+              post({
+                type: "diff_snapshot",
+                path: item.path,
+                snapshotId: item.snapshotId,
+                snapshotRel: item.snapshotRel,
+              })
+            }
+          >
+            Diff
+          </button>
+          {item.snapshotId && item.snapshotRel && (
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={() =>
+                post({
+                  type: "restore_snapshot",
+                  snapshotId: item.snapshotId!,
+                  rel: item.snapshotRel!,
+                })
+              }
+            >
+              Restore
+            </button>
+          )}
+        </div>
+      )}
+      {item.kind === "status" && <div className="status">{item.text}</div>}
+      {item.kind === "error" && <div className="error">{item.text}</div>}
+    </div>
+  );
+});
 
 export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -449,7 +763,15 @@ export function App() {
   const modelMetaRef = useRef<ModelPrice | undefined>(undefined);
   const [verifyMsg, setVerifyMsg] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLElement | null>(null);
+  /** When false, streaming tokens must not yank scroll away from the user. */
+  const stickToBottomRef = useRef(true);
   const streamingRef = useRef(false);
+  const handleAskDraftChange = useCallback((requestId: string, draft: string) => {
+    setItems((prev) =>
+      prev.map((it) => (it.kind === "ask" && it.requestId === requestId ? { ...it, draft } : it)),
+    );
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bugReportTextareaRef = useRef<HTMLTextAreaElement>(null);
   const localAttachInputRef = useRef<HTMLInputElement>(null);
@@ -602,6 +924,26 @@ export function App() {
           setSidecar(msg.state);
           setSidecarDetail(msg.detail);
           break;
+        case "stranded_interject": {
+          // Host normally queues these; if an event leaks here, surface it and
+          // re-queue so the redirect is not silently dropped.
+          const prompts = (msg.prompts || [])
+            .map((p: unknown) => String(p || "").trim())
+            .filter(Boolean);
+          if (prompts.length) {
+            setItems((prev) => [
+              ...prev,
+              {
+                kind: "status",
+                text: `Queued stranded redirect${prompts.length > 1 ? "s" : ""}`,
+              },
+            ]);
+            for (const text of prompts) {
+              post({ type: "queue_send", text });
+            }
+          }
+          break;
+        }
         case "chats":
           setChats(msg.chats || []);
           setHistorySearching(false);
@@ -660,6 +1002,15 @@ export function App() {
             localKey &&
             (localKey !== committedSettingsKey.current ||
               Boolean(inflightSettingsKey.current))
+          ) {
+            break;
+          }
+          // Post-commit race: a late getSettings can still push IAM while the
+          // UI is on Mantle. Never demote Mantle → IAM without an explicit save.
+          if (
+            msg.saveOutcome !== "ok" &&
+            isMantleSettings(settingsRef.current) &&
+            !isMantleSettings(incoming)
           ) {
             break;
           }
@@ -1106,8 +1457,48 @@ export function App() {
   }, [settings]);
 
   useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) {
+      return;
+    }
+    const onScroll = () => {
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = gap < 96;
+    };
+    onScroll();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [panel]);
+
+  useEffect(() => {
+    if (!stickToBottomRef.current) {
+      return;
+    }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [items]);
+
+  useEffect(() => {
+    if (!bugReportOpen) {
+      return;
+    }
+    const t = window.setTimeout(() => bugReportTextareaRef.current?.focus(), 0);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") {
+        return;
+      }
+      e.preventDefault();
+      if (bugReportDictating) {
+        post({ type: "dictation_toggle", target: "bug_report" });
+      }
+      setBugReportDictating(false);
+      setBugReportOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [bugReportOpen, bugReportDictating]);
 
   useEffect(() => {
     const onMsg = (ev: MessageEvent) => {
@@ -1123,10 +1514,10 @@ export function App() {
   useEffect(() => {
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
-      post({ type: "persist", items, draft, mode, chatId, autoApprove, interaction, caveman, goal: goalMode });
+      post({ type: "persist", draft, mode, chatId, autoApprove, interaction, caveman, goal: goalMode });
     }, 400);
     return () => window.clearTimeout(persistTimer.current);
-  }, [items, draft, mode, chatId, autoApprove, interaction, caveman, goalMode]);
+  }, [draft, mode, chatId, autoApprove, interaction, caveman, goalMode]);
 
   // Debounced autosave — only when local settings differ from last *confirmed*
   // commit. Do not optimistically commit before the host replies (that blocked
@@ -1428,12 +1819,80 @@ export function App() {
 
   const selectModel = (next: string) => {
     setModel(next || "default");
-    const nextSettings = { ...settings, model: next };
+    const nextSettings: Record<string, unknown> = { ...settings, model: next };
+    if (isMantleSettings(nextSettings) && next) {
+      nextSettings.wire_api = mantleWireApiForModel(next);
+    }
     // Immediate save for the next turn; skip the debounced effect to avoid a double write.
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
+    pendingSettingsPatch.current = patch;
+    setVerifyMsg("Saving…");
+    post({ type: "save_settings", settings: patch });
+  };
+
+  const applyBedrockMode = (mode: string) => {
+    const region = String(settings.aws_region || "").trim() || "us-east-1";
+    let next: Record<string, unknown>;
+    if (mode === "mantle") {
+      const model =
+        String(settings.model || "").includes("anthropic.claude-") &&
+        !String(settings.model || "").startsWith("us.")
+          ? String(settings.model)
+          : String(settings.model || "").startsWith("openai.gpt-oss") ||
+              String(settings.model || "").startsWith("deepseek.")
+            ? String(settings.model)
+            : MANTLE_DEFAULT_MODEL;
+      next = {
+        ...settings,
+        provider: "bedrock",
+        bedrock_mode: "mantle",
+        aws_region: region,
+        base_url: `https://bedrock-mantle.${region}.api.aws/v1`,
+        wire_api: mantleWireApiForModel(model),
+        model,
+      };
+      setProviderSetupMsg(
+        `Mantle (OneHUB) — ${next.base_url}. Paste Mantle API key below. Claude uses Messages; GPT-5.x uses Responses; others use chat.`,
+      );
+    } else if (mode === "bag") {
+      next = {
+        ...settings,
+        provider: "bedrock",
+        bedrock_mode: "bag",
+        aws_region: region,
+        base_url: "http://localhost:8000/api/v1",
+        model:
+          String(settings.model || "") ||
+          "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      };
+      setProviderSetupMsg("BAG / LiteLLM gateway — save gateway key, then Test.");
+    } else {
+      next = {
+        ...settings,
+        provider: "bedrock",
+        bedrock_mode: "iam",
+        aws_region: region,
+        base_url: "",
+        model:
+          String(settings.model || "").startsWith("openai.") ||
+          String(settings.model || "").startsWith("anthropic.")
+            ? "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+            : String(settings.model || "") ||
+              "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      };
+      setProviderSetupMsg(
+        "Native IAM — uses ~/.aws credentials (no Mantle/BAG key).",
+      );
+    }
+    skipSettingsAutosave.current = true;
+    settingsRef.current = next;
+    inflightSettingsKey.current = settingsSaveKey(next);
+    setSettings(next);
+    setModel(String(next.model || ""));
+    const patch = normalizeSettingsForSave(next);
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
     post({ type: "save_settings", settings: patch });
@@ -1734,11 +2193,13 @@ export function App() {
             </button>
           </div>
         </div>
-        <nav className="tabs" aria-label="Panels">
+        <nav className="tabs" role="tablist" aria-label="Panels">
           {(["chat", "history", "settings", "diagnostics"] as Panel[]).map((p) => (
             <button
               key={p}
               type="button"
+              role="tab"
+              aria-selected={panel === p}
               className={panel === p ? "tab active" : "tab"}
               onClick={() => {
                 setPanel(p);
@@ -1757,7 +2218,26 @@ export function App() {
         </nav>
         {!hasApiKey && panel === "chat" && (
           <div className="banner warn">
-            No provider credential. Open <strong>settings</strong> or run Set Provider Credential.
+            No provider credential.{" "}
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => {
+                setPanel("settings");
+                post({ type: "load_settings" });
+              }}
+            >
+              Open settings
+            </button>
+            {" or "}
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => post({ type: "set_api_key" })}
+            >
+              Set API key
+            </button>
+            .
           </div>
         )}
         {sidecar === "error" && (
@@ -1765,6 +2245,13 @@ export function App() {
             <strong>Sidecar failed to start</strong>
             {sidecarDetail ? <> — {sidecarDetail}</> : null}
             <div className="banner-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => post({ type: "restart_sidecar" })}
+              >
+                Restart sidecar
+              </button>
               On a remote SSH host, install packages into the <em>remote</em> Python (
               <code>clawagents.pythonPath</code>), then Restart Sidecar:
               <pre>
@@ -1815,9 +2302,13 @@ export function App() {
                         type="button"
                         className="tool-chip"
                         title="Restore workspace files only"
-                        onClick={() =>
-                          post({ type: "restore_checkpoint", sha, mode: "files" })
-                        }
+                        onClick={() => {
+                          const ok = window.confirm(
+                            `Restore files from checkpoint ${sha.slice(0, 10)}?\n\nWorkspace files will be overwritten to that snapshot.`,
+                          );
+                          if (!ok) return;
+                          post({ type: "restore_checkpoint", sha, mode: "files" });
+                        }}
                       >
                         Files
                       </button>
@@ -1825,9 +2316,17 @@ export function App() {
                         type="button"
                         className="tool-chip"
                         title="Restore conversation only"
-                        onClick={() =>
-                          post({ type: "restore_checkpoint", sha, mode: "conversation" })
-                        }
+                        onClick={() => {
+                          const ok = window.confirm(
+                            `Restore chat from checkpoint ${sha.slice(0, 10)}?\n\nThe current conversation view will be replaced.`,
+                          );
+                          if (!ok) return;
+                          post({
+                            type: "restore_checkpoint",
+                            sha,
+                            mode: "conversation",
+                          });
+                        }}
                       >
                         Chat
                       </button>
@@ -1835,9 +2334,13 @@ export function App() {
                         type="button"
                         className="tool-chip primary"
                         title="Restore files and conversation"
-                        onClick={() =>
-                          post({ type: "restore_checkpoint", sha, mode: "both" })
-                        }
+                        onClick={() => {
+                          const ok = window.confirm(
+                            `Restore files + chat from checkpoint ${sha.slice(0, 10)}?\n\nWorkspace files and this conversation will be overwritten.`,
+                          );
+                          if (!ok) return;
+                          post({ type: "restore_checkpoint", sha, mode: "both" });
+                        }}
                       >
                         Both
                       </button>
@@ -2002,7 +2505,14 @@ export function App() {
                 <button
                   type="button"
                   className="ghost tiny danger"
-                  onClick={() => post({ type: "delete_chat", chatId: c.id })}
+                  onClick={() => {
+                    const title = c.title || c.id;
+                    const ok = window.confirm(
+                      `Delete chat "${title}"?\n\nThis permanently removes the conversation history.`,
+                    );
+                    if (!ok) return;
+                    post({ type: "delete_chat", chatId: c.id });
+                  }}
                 >
                   Del
                 </button>
@@ -2040,13 +2550,15 @@ export function App() {
                       if (mode === "mantle") {
                         next.bedrock_mode = "mantle";
                         next.base_url = `https://bedrock-mantle.${region}.api.aws/v1`;
-                        next.wire_api = String(s.wire_api || "") || "chat_completions";
                         if (
                           !String(s.model || "").trim() ||
                           String(s.model).startsWith("us.anthropic.")
                         ) {
-                          next.model = "openai.gpt-5.6-sol";
+                          next.model = MANTLE_DEFAULT_MODEL;
                         }
+                        next.wire_api = mantleWireApiForModel(
+                          String(next.model || MANTLE_DEFAULT_MODEL),
+                        );
                       } else {
                         // Native IAM by default — clear leftover BAG/Mantle URL.
                         next.bedrock_mode = mode === "bag" ? "bag" : "iam";
@@ -2178,9 +2690,9 @@ export function App() {
                     </option>
                   </select>
                   <span className="settings-hint">
-                    Use Responses for Codex / Responses-only gateways that 404
-                    chat/completions. Auto picks Responses for GPT-5.5/5.6/Codex.
-                    Saved immediately.
+                    {String(settings.bedrock_mode || "") === "mantle"
+                      ? "Mantle: model pick sets this (chat / responses). Claude Haiku/Sonnet ignore Wire API and use Mantle Messages."
+                      : "Use Responses for Codex / Responses-only gateways that 404 chat/completions. Auto picks Responses for GPT-5.5/5.6/Codex. Saved immediately."}
                   </span>
                 </label>
                 <label className="row">
@@ -2200,86 +2712,55 @@ export function App() {
             {selectedProvider === "bedrock" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">AWS Bedrock</h4>
-                <label>
-                  Access mode
-                  <select
-                    value={String(settings.bedrock_mode || "iam")}
-                    onChange={(e) => {
-                      const mode = e.target.value;
-                      const region =
-                        String(settings.aws_region || "").trim() || "us-east-1";
-                      let next: Record<string, unknown>;
-                      if (mode === "mantle") {
-                        next = {
-                          ...settings,
-                          provider: "bedrock",
-                          bedrock_mode: "mantle",
-                          aws_region: region,
-                          base_url: `https://bedrock-mantle.${region}.api.aws/v1`,
-                          wire_api:
-                            String(settings.wire_api || "") || "chat_completions",
-                          model:
-                            String(settings.model || "").includes("anthropic.claude-") &&
-                            !String(settings.model || "").startsWith("us.")
-                              ? String(settings.model)
-                              : "openai.gpt-5.6-sol",
-                        };
-                        setProviderSetupMsg(
-                          `Mantle (OneHUB) — ${next.base_url}. Paste Mantle API key below.`,
-                        );
-                      } else if (mode === "bag") {
-                        next = {
-                          ...settings,
-                          provider: "bedrock",
-                          bedrock_mode: "bag",
-                          aws_region: region,
-                          base_url: "http://localhost:8000/api/v1",
-                          model:
-                            String(settings.model || "") ||
-                            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                        };
-                        setProviderSetupMsg(
-                          "BAG / LiteLLM gateway — save gateway key, then Test.",
-                        );
-                      } else {
-                        next = {
-                          ...settings,
-                          provider: "bedrock",
-                          bedrock_mode: "iam",
-                          aws_region: region,
-                          base_url: "",
-                          model:
-                            String(settings.model || "").startsWith("openai.") ||
-                            String(settings.model || "").startsWith("anthropic.")
-                              ? "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-                              : String(settings.model || "") ||
-                                "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                        };
-                        setProviderSetupMsg(
-                          "Native IAM — uses ~/.aws credentials (no Mantle/BAG key).",
-                        );
-                      }
-                      // Persist immediately — debounced autosave + stale echoes
-                      // were snapping Mantle back to Native IAM.
-                      skipSettingsAutosave.current = true;
-                      settingsRef.current = next;
-                      inflightSettingsKey.current = settingsSaveKey(next);
-                      setSettings(next);
-                      setModel(String(next.model || ""));
-                      const patch = normalizeSettingsForSave(next);
-                      pendingSettingsPatch.current = patch;
-                      setVerifyMsg("Saving…");
-                      post({ type: "save_settings", settings: patch });
-                    }}
+                <div className="access-mode">
+                  <span className="access-mode-label">Access mode</span>
+                  <div
+                    className="access-mode-seg"
+                    role="radiogroup"
+                    aria-label="Bedrock access mode"
                   >
-                    <option value="iam">Native IAM (classic Bedrock)</option>
-                    <option value="mantle">Mantle / OneHUB (API key)</option>
-                    <option value="bag">Access Gateway / BAG (optional)</option>
-                  </select>
-                </label>
+                    {(
+                      [
+                        {
+                          id: "iam",
+                          title: "Native IAM",
+                          sub: "Classic · AWS creds",
+                        },
+                        {
+                          id: "mantle",
+                          title: "Mantle",
+                          sub: "OneHUB · API key",
+                        },
+                        {
+                          id: "bag",
+                          title: "Gateway",
+                          sub: "BAG / LiteLLM",
+                        },
+                      ] as const
+                    ).map((opt) => {
+                      const active =
+                        String(settings.bedrock_mode || "iam") === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          className={
+                            active ? "access-mode-btn active" : "access-mode-btn"
+                          }
+                          onClick={() => applyBedrockMode(opt.id)}
+                        >
+                          <strong>{opt.title}</strong>
+                          <span>{opt.sub}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 <p className="settings-hint">
                   {String(settings.bedrock_mode || "iam") === "mantle"
-                    ? "Mantle is OpenAI-compatible: base_url + Mantle API key. Best catalog in us-east-1 (~54 models). Install clawagents with OpenAI client (no boto3 required for Mantle)."
+                    ? "Mantle routes by model: Claude → /anthropic/v1/messages, GPT-5.x → /openai/v1/responses, others → /v1/chat/completions. Paste Mantle API key below. Best catalog: us-east-1."
                     : String(settings.bedrock_mode || "iam") === "bag"
                       ? "Local or remote Bedrock Access Gateway / LiteLLM — Base URL + gateway key."
                       : "Native IAM (HIPAA-friendly). Uses ~/.aws credentials, env keys, or instance role. pip install 'clawagents[bedrock]'."}
@@ -2325,14 +2806,15 @@ export function App() {
                         className="ghost tiny"
                         onClick={() => {
                           const region = "us-east-1";
+                          const model = MANTLE_DEFAULT_MODEL;
                           const next = {
                             ...settings,
                             provider: "bedrock",
                             bedrock_mode: "mantle",
                             aws_region: region,
                             base_url: `https://bedrock-mantle.${region}.api.aws/v1`,
-                            wire_api: "chat_completions",
-                            model: "openai.gpt-5.6-sol",
+                            wire_api: mantleWireApiForModel(model),
+                            model,
                           };
                           setSettings(next);
                           setModel(next.model);
@@ -3349,7 +3831,7 @@ export function App() {
 
       {panel === "chat" && (
         <>
-          <main className="messages">
+          <main className="messages" ref={messagesRef}>
             {items.length === 0 && (
               <div className="empty">
                 <p>Multi-turn agent with providers, checkpoints, MCP, and local telemetry.</p>
@@ -3360,7 +3842,7 @@ export function App() {
                         key={q}
                         type="button"
                         className="chip"
-                        disabled={busy}
+                        disabled={busy || !hasApiKey}
                         onClick={() => {
                           setDraft(q);
                           post({
@@ -3381,207 +3863,13 @@ export function App() {
               </div>
             )}
             {items.map((item, i) => (
-              <div key={i} className={`item item-${item.kind}`}>
-                {item.kind === "user" && (
-                  <>
-                    <div className="label-row">
-                      <div className="label">You</div>
-                      <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
-                        Copy
-                      </button>
-                    </div>
-                    <pre className="user-text">{item.text}</pre>
-                  </>
-                )}
-                {item.kind === "assistant" && (
-                  <>
-                    <div className="label-row">
-                      <div className="label">ClawAgents</div>
-                      <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
-                        Copy
-                      </button>
-                    </div>
-                    <div className="md">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
-                      {busy && streamingRef.current && i === items.length - 1 && (
-                        <span className="cursor" />
-                      )}
-                    </div>
-                  </>
-                )}
-                {item.kind === "tool" && (
-                  <details open={item.status === "running" || item.success === false}>
-                    <summary>
-                      <span className={`dot ${item.status}${item.success === false ? " fail-dot" : ""}`} />
-                      <code>{item.name}</code>
-                      {item.status === "done" && (
-                        <span className={item.success ? "ok" : "fail"}>
-                          {item.success ? "ok" : "fail"}
-                        </span>
-                      )}
-                      {item.filePath && (
-                        <button
-                          type="button"
-                          className="linkish"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            post({ type: "open_file", path: item.filePath! });
-                          }}
-                        >
-                          open
-                        </button>
-                      )}
-                    </summary>
-                    {item.args != null && <pre className="tool-body">{safeJson(item.args)}</pre>}
-                    {item.output ? (
-                      <pre className={`tool-body ${looksLikeDiff(item.output) ? "diff" : ""}`}>
-                        {item.output}
-                      </pre>
-                    ) : (
-                      item.status === "done" &&
-                      item.success === false && (
-                        <pre className="tool-body muted">No error details returned.</pre>
-                      )
-                    )}
-                  </details>
-                )}
-                {item.kind === "permission" && (
-                  <div className="permission">
-                    <div className="label">Permission required</div>
-                    <div className="perm-body">
-                      <strong>{item.tool}</strong>
-                      {item.filePath && (
-                        <>
-                          {" · "}
-                          <button
-                            type="button"
-                            className="linkish"
-                            onClick={() => post({ type: "open_file", path: item.filePath! })}
-                          >
-                            {item.filePath}
-                          </button>
-                        </>
-                      )}
-                      {item.command && <pre className="tool-body">{item.command}</pre>}
-                      {item.reason && <div className="muted">{item.reason}</div>}
-                    </div>
-                    {!item.resolved && (
-                      <div className="perm-actions">
-                        <button
-                          type="button"
-                          className="primary"
-                          onClick={() => resolvePerm(item.requestId, "allow_once", setItems)}
-                        >
-                          Allow once
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => resolvePerm(item.requestId, "allow_always", setItems)}
-                        >
-                          Always
-                        </button>
-                        <button
-                          type="button"
-                          className="danger"
-                          onClick={() => resolvePerm(item.requestId, "deny", setItems)}
-                        >
-                          Deny
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {item.kind === "ask" && (
-                  <div className="permission ask-user">
-                    <div className="label">Agent asks</div>
-                    <div className="perm-body">{item.question}</div>
-                    {!item.resolved ? (
-                      <>
-                        <textarea
-                          className="ask-input"
-                          rows={3}
-                          value={item.draft || ""}
-                          placeholder="Type your answer…"
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setItems((prev) =>
-                              prev.map((it) =>
-                                it.kind === "ask" && it.requestId === item.requestId
-                                  ? { ...it, draft: v }
-                                  : it,
-                              ),
-                            );
-                          }}
-                        />
-                        <div className="perm-actions">
-                          <button
-                            type="button"
-                            className="primary"
-                            disabled={!item.draft?.trim()}
-                            onClick={() =>
-                              resolveAsk(item.requestId, item.draft || "", false, setItems)
-                            }
-                          >
-                            Reply
-                          </button>
-                          <button
-                            type="button"
-                            className="ghost"
-                            onClick={() => resolveAsk(item.requestId, "", true, setItems)}
-                          >
-                            Skip
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="muted tiny">Answered</div>
-                    )}
-                  </div>
-                )}
-                {item.kind === "file" && (
-                  <div className="file-row">
-                    <button
-                      type="button"
-                      className="file-chip"
-                      onClick={() => post({ type: "open_file", path: item.path })}
-                    >
-                      Changed · {item.path}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost tiny"
-                      onClick={() =>
-                        post({
-                          type: "diff_snapshot",
-                          path: item.path,
-                          snapshotId: item.snapshotId,
-                          snapshotRel: item.snapshotRel,
-                        })
-                      }
-                    >
-                      Diff
-                    </button>
-                    {item.snapshotId && item.snapshotRel && (
-                      <button
-                        type="button"
-                        className="ghost tiny"
-                        onClick={() =>
-                          post({
-                            type: "restore_snapshot",
-                            snapshotId: item.snapshotId!,
-                            rel: item.snapshotRel!,
-                          })
-                        }
-                      >
-                        Restore
-                      </button>
-                    )}
-                  </div>
-                )}
-                {item.kind === "status" && <div className="status">{item.text}</div>}
-                {item.kind === "error" && <div className="error">{item.text}</div>}
-              </div>
+              <TranscriptItem
+                key={i}
+                item={item}
+                setItems={setItems}
+                onAskDraftChange={handleAskDraftChange}
+                showStreamingCursor={busy && streamingRef.current && i === items.length - 1}
+              />
             ))}
             <div ref={bottomRef} />
           </main>
@@ -4078,7 +4366,8 @@ export function App() {
                   </button>
                 </div>
                 <p className="tiny muted">
-                  Type, speak, or attach a screenshot. Sends email via alpaca_deploy SMTP.
+                  Type, speak, or attach a screenshot. Sends via configured SMTP, or copies/opens a
+                  draft when email is unavailable.
                 </p>
                 <textarea
                   ref={bugReportTextareaRef}
@@ -4309,50 +4598,6 @@ function IconSpinner() {
   );
 }
 
-function resolvePerm(
-  requestId: string,
-  decision: "allow_once" | "allow_always" | "deny",
-  setItems: Dispatch<SetStateAction<ChatItem[]>>,
-) {
-  post({ type: "permission", requestId, decision });
-  setItems((prev) =>
-    prev.map((it) =>
-      it.kind === "permission" && it.requestId === requestId ? { ...it, resolved: true } : it,
-    ),
-  );
-}
-
-function resolveAsk(
-  requestId: string,
-  answer: string,
-  skip: boolean,
-  setItems: Dispatch<SetStateAction<ChatItem[]>>,
-) {
-  post({ type: "ask_user_reply", requestId, answer, skip });
-  setItems((prev) =>
-    prev.map((it) =>
-      it.kind === "ask" && it.requestId === requestId ? { ...it, resolved: true } : it,
-    ),
-  );
-}
-
-function safeJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function copyText(text: string) {
-  void navigator.clipboard?.writeText(text);
-}
-
-function looksLikeDiff(text: string): boolean {
-  return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
-}
-
-/** Client-side Mantle URL → https://bedrock-mantle.<region>.api.aws/v1 */
 function normalizeMantleUrlClient(raw: string): string {
   const text = (raw || "").trim();
   const fallbackRegion = "us-east-1";

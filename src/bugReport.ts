@@ -11,6 +11,13 @@ export type BugScreenshot = {
   data: string;
 };
 
+export type BugReportMeta = {
+  vscode: string;
+  extension?: string;
+  workspace: string;
+  platform: string;
+};
+
 function whichSync(bin: string): string | undefined {
   const cmd = process.platform === "win32" ? "where" : "which";
   const result = spawnSync(cmd, [bin], {
@@ -50,6 +57,126 @@ export function resolveAlpacaDeployRoot(extensionPath: string): string | undefin
     }
   }
   return undefined;
+}
+
+function smtpEnvFromSettings(): Record<string, string> {
+  const cfg = vscode.workspace.getConfiguration("clawagents");
+  const out: Record<string, string> = {};
+  const map: Array<[string, string]> = [
+    ["bugReportSmtpServer", "EMAIL_SMTP_SERVER"],
+    ["bugReportSmtpPort", "EMAIL_SMTP_PORT"],
+    ["bugReportEmailSender", "EMAIL_SENDER"],
+    ["bugReportEmailTo", "CLAWAGENTS_BUG_REPORT_EMAIL"],
+  ];
+  for (const [settingKey, envKey] of map) {
+    const value = cfg.get<string>(settingKey, "")?.trim();
+    if (value) {
+      out[envKey] = value;
+    }
+  }
+  return out;
+}
+
+function smtpEnvFromProcess(): Record<string, string> {
+  const keys = [
+    "EMAIL_PASSWORD",
+    "EMAIL_SENDER",
+    "EMAIL_SMTP_SERVER",
+    "EMAIL_SMTP_PORT",
+    "EMAIL_ENABLED",
+    "CLAWAGENTS_BUG_REPORT_EMAIL",
+    "ALPACA_DEPLOY_ROOT",
+  ];
+  const out: Record<string, string> = {};
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+function hasSmtpCredentials(env: Record<string, string>): boolean {
+  return Boolean(env.EMAIL_PASSWORD?.trim());
+}
+
+export function buildBugReportMeta(): BugReportMeta {
+  return {
+    vscode: `${vscode.env.appName} ${vscode.version}`,
+    extension: vscode.extensions.getExtension("clawagents.clawagents")?.packageJSON?.version,
+    workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "",
+    platform: `${process.platform} ${os.release()}`,
+  };
+}
+
+export function formatBugReportBody(
+  text: string,
+  meta: BugReportMeta,
+  screenshots: BugScreenshot[] = [],
+): string {
+  const lines = [
+    "ClawAgents bug report",
+    "=".repeat(40),
+    text.trim(),
+    "",
+    "— Meta —",
+    `vscode: ${meta.vscode}`,
+  ];
+  if (meta.extension) {
+    lines.push(`extension: ${meta.extension}`);
+  }
+  if (meta.workspace) {
+    lines.push(`workspace: ${meta.workspace}`);
+  }
+  lines.push(`platform: ${meta.platform}`);
+  if (screenshots.length > 0) {
+    lines.push("");
+    lines.push(
+      `— Attachments (${screenshots.length}) —`,
+      ...screenshots.map((s, i) => `${i + 1}. ${s.name} (${s.mediaType})`),
+      "Re-attach screenshots manually if email SMTP was unavailable.",
+    );
+  }
+  return lines.join("\n");
+}
+
+function resolveMailtoRecipient(): string {
+  const cfg = vscode.workspace.getConfiguration("clawagents");
+  return (
+    cfg.get<string>("bugReportEmailTo", "")?.trim() ||
+    process.env.CLAWAGENTS_BUG_REPORT_EMAIL?.trim() ||
+    process.env.EMAIL_SENDER?.trim() ||
+    ""
+  );
+}
+
+export async function submitBugReportFallback(options: {
+  text: string;
+  screenshots: BugScreenshot[];
+  smtpError: string;
+}): Promise<{ ok: boolean; detail: string }> {
+  const meta = buildBugReportMeta();
+  const body = formatBugReportBody(options.text, meta, options.screenshots);
+  await vscode.env.clipboard.writeText(body);
+
+  const subjectShort = options.text.slice(0, 72).replace(/\n/g, " ").trim() || "bug report";
+  const subject = encodeURIComponent(`[ClawAgents-bug-report] ${subjectShort}`);
+  const bodyEnc = encodeURIComponent(body.slice(0, 1800));
+  const to = encodeURIComponent(resolveMailtoRecipient());
+  const mailto = to
+    ? `mailto:${to}?subject=${subject}&body=${bodyEnc}`
+    : `mailto:?subject=${subject}&body=${bodyEnc}`;
+  await vscode.env.openExternal(vscode.Uri.parse(mailto));
+
+  const shotNote =
+    options.screenshots.length > 0
+      ? ` Attach ${options.screenshots.length} screenshot(s) manually in your mail client.`
+      : "";
+  return {
+    ok: true,
+    detail: `SMTP unavailable (${options.smtpError}). Report copied to clipboard and opened in your mail client.${shotNote}`,
+  };
 }
 
 /** Interactive region capture on macOS; file picker elsewhere. */
@@ -138,34 +265,42 @@ export async function sendBugReportEmail(options: {
   text: string;
   screenshots: BugScreenshot[];
   output: { appendLine(s: string): void };
-}): Promise<{ ok: boolean; detail: string }> {
+}): Promise<{ ok: boolean; detail: string; usedFallback?: boolean }> {
   const script = path.join(options.extensionPath, "python", "bug_report_email.py");
   const alpaca = resolveAlpacaDeployRoot(options.extensionPath);
-  if (!alpaca) {
-    return {
-      ok: false,
-      detail:
-        "alpaca_deploy not found. Set clawagents.alpacaDeployPath to the alpaca_deploy folder.",
-    };
+  const smtpEnv = {
+    ...smtpEnvFromProcess(),
+    ...smtpEnvFromSettings(),
+    ...(alpaca ? { ALPACA_DEPLOY_ROOT: alpaca } : {}),
+  };
+
+  if (!hasSmtpCredentials(smtpEnv) && !alpaca) {
+    return submitBugReportFallback({
+      text: options.text,
+      screenshots: options.screenshots,
+      smtpError: "SMTP not configured",
+    }).then((r) => ({ ...r, usedFallback: true }));
   }
 
+  const meta = buildBugReportMeta();
   const payload = {
     text: options.text,
     screenshots: options.screenshots.slice(0, 6),
-    meta: {
-      vscode: `${vscode.env.appName} ${vscode.version}`,
-      extension: vscode.extensions.getExtension("clawagents.clawagents")?.packageJSON
-        ?.version,
-      workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "",
-      platform: `${process.platform} ${os.release()}`,
-    },
+    meta,
   };
 
+  const via = hasSmtpCredentials(smtpEnv)
+    ? smtpEnv.ALPACA_DEPLOY_ROOT
+      ? `SMTP via env/settings (+ optional ${smtpEnv.ALPACA_DEPLOY_ROOT})`
+      : "SMTP via env/settings"
+    : alpaca
+      ? `alpaca_deploy (${alpaca})`
+      : "SMTP";
   options.output.appendLine(
-    `Bug report → alpaca_deploy email (${alpaca}), screenshots=${payload.screenshots.length}`,
+    `Bug report email (${via}), screenshots=${payload.screenshots.length}`,
   );
 
-  return await new Promise((resolve) => {
+  const emailResult = await new Promise<{ ok: boolean; detail: string }>((resolve) => {
     const child = spawn(options.python, [script], {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
@@ -173,7 +308,7 @@ export async function sendBugReportEmail(options: {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
         USERPROFILE: process.env.USERPROFILE,
-        ALPACA_DEPLOY_ROOT: alpaca,
+        ...smtpEnv,
       },
     });
     let stdout = "";
@@ -212,4 +347,15 @@ export async function sendBugReportEmail(options: {
     child.stdin?.write(JSON.stringify(payload));
     child.stdin?.end();
   });
+
+  if (emailResult.ok) {
+    return emailResult;
+  }
+
+  const fallback = await submitBugReportFallback({
+    text: options.text,
+    screenshots: options.screenshots,
+    smtpError: emailResult.detail,
+  });
+  return { ...fallback, usedFallback: true };
 }

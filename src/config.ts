@@ -283,6 +283,11 @@ export class ExtensionConfig {
 
   async hasAnyApiKey(): Promise<boolean> {
     const env = await this.getApiKeyEnv();
+    return this.hasAnyApiKeyFromEnv(env);
+  }
+
+  /** Sync check using a cached ``getApiKeyEnv`` result (avoids repeated SecretStorage reads). */
+  hasAnyApiKeyFromEnv(env: Record<string, string>): boolean {
     const llmKeys = [
       "OPENAI_API_KEY",
       "ANTHROPIC_API_KEY",
@@ -293,14 +298,23 @@ export class ExtensionConfig {
     if (llmKeys.some((k) => env[k])) {
       return true;
     }
-    // The sidecar is spawned with shell-env and workspace-.env keys merged in
-    // (see sidecar.ts), so a key that lives only there still makes chat work —
-    // don't show the "no credential" banner in that case.
     const dotenv = this.loadWorkspaceDotenv();
     if (llmKeys.some((k) => (dotenv[k] || process.env[k] || "").trim())) {
       return true;
     }
     return this.hasAwsCredentials();
+  }
+
+  /** Sync Tavily check using cached env + dotenv/process fallbacks. */
+  hasTavilyKeyFromEnv(env: Record<string, string>): boolean {
+    if (env.TAVILY_API_KEY) {
+      return true;
+    }
+    const dotenv = this.loadWorkspaceDotenv();
+    if (dotenv.TAVILY_API_KEY) {
+      return true;
+    }
+    return Boolean(process.env.TAVILY_API_KEY);
   }
 
   /** Native Bedrock can run without BEDROCK_API_KEY when AWS creds exist.

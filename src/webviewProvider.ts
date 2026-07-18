@@ -454,6 +454,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     } catch {
       /* partial — sidecar may still be starting or down */
     }
+    const keyEnv = await this.config.getApiKeyEnv();
     this.post({
       type: "ready",
       workspace: workspaceRoot(),
@@ -462,16 +463,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       goal: this.goalMode,
-      hasApiKey: await this.config.hasAnyApiKey(),
-      hasTavilyKey: await this.config.hasTavilyKey(),
-      hasBedrockKey: Boolean((await this.config.getApiKeyEnv()).BEDROCK_API_KEY),
+      hasApiKey: this.config.hasAnyApiKeyFromEnv(keyEnv),
+      hasTavilyKey: this.config.hasTavilyKeyFromEnv(keyEnv),
+      hasBedrockKey: Boolean(keyEnv.BEDROCK_API_KEY),
       hasAwsCreds: this.config.hasAwsCredentials(),
-      hasOpenAIKey: Boolean((await this.config.getApiKeyEnv()).OPENAI_API_KEY),
-      hasAnthropicKey: Boolean((await this.config.getApiKeyEnv()).ANTHROPIC_API_KEY),
-      hasGeminiKey: Boolean(
-        (await this.config.getApiKeyEnv()).GEMINI_API_KEY ||
-          (await this.config.getApiKeyEnv()).GOOGLE_API_KEY,
-      ),
+      hasOpenAIKey: Boolean(keyEnv.OPENAI_API_KEY),
+      hasAnthropicKey: Boolean(keyEnv.ANTHROPIC_API_KEY),
+      hasGeminiKey: Boolean(keyEnv.GEMINI_API_KEY || keyEnv.GOOGLE_API_KEY),
       sidecar: this.sidecar.current ? "running" : "stopped",
       chatId: this.chatId,
       chats,
@@ -527,20 +525,26 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         this.queue.push(msg.text);
         this.post({ type: "status", message: `Queued (${this.queue.length})` });
+        // If the run finished while interject raced, finally already drained —
+        // start the queued turn now so the message is not stranded.
+        this.drainQueueIfIdle(true);
         break;
       case "interject":
         try {
           const res = await this.gateway.interject(msg.text, this.chatId);
+          if (res.ok && (res.applied ?? 0) > 0) {
+            this.post({
+              type: "status",
+              message: "Redirected mid-turn",
+            });
+            break;
+          }
+          this.queue.push(msg.text);
           this.post({
             type: "status",
-            message:
-              res.ok && (res.applied ?? 0) > 0
-                ? "Redirected mid-turn"
-                : "No active run to redirect — queued for next turn",
+            message: "No active run to redirect — queued for next turn",
           });
-          if (!res.ok || !(res.applied ?? 0)) {
-            this.queue.push(msg.text);
-          }
+          this.drainQueueIfIdle(true);
         } catch (err) {
           this.post({
             type: "error",
@@ -1175,8 +1179,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           }
           this.post(
             providers
-              ? { type: "settings", settings, providers }
-              : { type: "settings", settings },
+              ? { type: "settings", settings, providers, saveOutcome: "ok" }
+              : { type: "settings", settings, saveOutcome: "ok" },
           );
           this.post({ type: "status", message: "Settings saved" });
           if (skillsChanged) {
@@ -1550,7 +1554,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           detail: result.detail,
         });
         if (result.ok) {
-          void vscode.window.showInformationMessage("Bug report emailed.");
+          void vscode.window.showInformationMessage(
+            result.usedFallback ? "Bug report copied — check your mail client." : "Bug report emailed.",
+          );
         } else {
           void vscode.window.showErrorMessage(`Bug report failed: ${result.detail}`);
         }
@@ -2087,6 +2093,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    // Reserve the run slot before await points so concurrent drainQueueIfIdle
+    // / interject cannot start a second turn in parallel.
+    this.abort = new AbortController();
+    const signal = this.abort.signal;
+
     this.post({ type: "user_echo", text: trimmed });
     this.post({ type: "sidecar", state: "starting" });
 
@@ -2094,6 +2105,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       await this.sidecar.ensureStarted();
       this.post({ type: "sidecar", state: "running" });
     } catch (err) {
+      this.abort = undefined;
       this.post({
         type: "sidecar",
         state: "error",
@@ -2103,11 +2115,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         type: "error",
         message: `Failed to start Python sidecar: ${err instanceof Error ? err.message : String(err)}`,
       });
+      this.drainQueueIfIdle(includeContext);
       return;
     }
-
-    this.abort = new AbortController();
-    const signal = this.abort.signal;
     try {
       const settings = await this.gateway
         .getSettings()
@@ -2153,6 +2163,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                   message: `Queued stranded redirect${prompts.length > 1 ? "s" : ""} (${this.queue.length})`,
                 });
               }
+              // Do not post stranded_interject to the webview — it was silently
+              // dropped there. Host owns the queue; finally / drainQueueIfIdle
+              // starts the next turn.
+              return;
+            }
+            if (ev.type === "file_changed" && ev.path) {
+              this.post(ev);
+              if (
+                vscode.workspace
+                  .getConfiguration("clawagents")
+                  .get<boolean>("autoOpenChangedFiles", false)
+              ) {
+                void this.openPath(ev.path);
+              }
               return;
             }
             this.post(ev);
@@ -2184,10 +2208,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (this.cancelling) {
         return;
       }
-      const next = this.queue.shift();
-      if (next) {
-        void this.runTask(next, includeContext, this.chatId);
-      }
+      this.drainQueueIfIdle(includeContext);
+    }
+  }
+
+  /** Start the next queued turn when no run is active (fixes interject race). */
+  private drainQueueIfIdle(includeContext = true): void {
+    if (this.abort || this.cancelling) {
+      return;
+    }
+    const next = this.queue.shift();
+    if (next) {
+      void this.runTask(next, includeContext, this.chatId);
     }
   }
 

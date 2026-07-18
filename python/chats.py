@@ -615,17 +615,29 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
                 kwargs.get("base_url")
                 and "bedrock-mantle." in str(kwargs.get("base_url") or "")
             ):
-                kwargs["model"] = "openai.gpt-5.6-sol"
+                # Chat-completions-safe default (frontier GPT / Claude need
+                # /openai/v1/responses or /anthropic/v1/messages — routed in
+                # create_provider when those models are selected).
+                kwargs["model"] = "openai.gpt-oss-20b"
             else:
                 kwargs["model"] = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
         if kwargs.get("base_url"):
             # OpenAI-compatible gateway (Mantle / BAG / LiteLLM)
             kwargs["api_key"] = _bedrock_api_key()
-            # Mantle speaks chat completions; leave wire_api if user set it.
+            # Mantle is multi-path: only default wire_api for chat-ok models.
+            # Claude → Anthropic Messages; openai.gpt-5.* → Responses.
             if "bedrock-mantle." in str(kwargs.get("base_url") or "") and not str(
                 settings.get("wire_api") or ""
             ).strip():
-                kwargs["wire_api"] = "chat_completions"
+                model_l = str(kwargs.get("model") or effective_model or "").lower()
+                if model_l.startswith("anthropic.") or model_l.startswith("claude"):
+                    pass  # Messages API; wire_api unused
+                elif model_l.startswith("openai.") and "gpt-oss" not in model_l and any(
+                    t in model_l for t in ("gpt-5.3", "gpt-5.4", "gpt-5.5", "gpt-5.6")
+                ):
+                    kwargs["wire_api"] = "responses"
+                else:
+                    kwargs["wire_api"] = "chat_completions"
         # else: native IAM — clawagents routes Bedrock model IDs via
         # AsyncAnthropicBedrock / Converse; do not force a gateway api_key.
     elif provider in _PROFILE_PROVIDERS and not effective_model:

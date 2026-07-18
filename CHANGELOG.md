@@ -1,5 +1,37 @@
 ## Unreleased
 
+## 1.0.79
+
+- Require `clawagents>=6.20.6` (dead handoffs, Mantle multi-path, DX/efficiency).
+- **Streaming perf:** memoized `TranscriptItem` rows — only the active assistant message re-parses markdown on each token.
+- **Cheap `/providers`:** `probe=0` no longer hits localhost Ollama (`/api/tags`); live check stays on `probe=1`.
+- **`pushReady` SecretStorage:** one `getApiKeyEnv()` per ready push instead of ~5 duplicate reads.
+- **Persist payload:** webview stops shipping full transcript on debounce (host only stores draft/mode/flags).
+- **Panel nav a11y:** top Chat/History/Settings/Diagnostics tabs use `role="tablist"` + `aria-selected`.
+- Also includes 1.0.76–1.0.78: Mantle Messages/Responses routing, Access mode UI, settings/Mantle race fixes, bug-report Marketplace fallback, `autoOpenChangedFiles`, empty-key UX.
+
+## 1.0.78
+
+- **Bug report for Marketplace users:** SMTP via `EMAIL_*` env / optional settings; mailto + clipboard fallback when SMTP unavailable; removed internal infra strings from UI.
+- **`clawagents.autoOpenChangedFiles`:** opens agent-edited files in the editor when enabled.
+- **No-API-key UX:** disable empty-state chips; banner links to Settings and **Set API key** (`clawagents.setApiKey`).
+- **Bug-report modal a11y:** focus textarea on open; Esc closes and stops dictation.
+- **Sidecar error banner:** Restart Sidecar button beside install instructions.
+
+## 1.0.77
+
+- **Settings autosave convergence:** accept host Mantle URL/`bedrock_mode` normalization; tag save echoes with `saveOutcome: "ok"`; block unsolicited IAM pushes from demoting Mantle.
+- **Sidecar start:** skip PATH Python floor sync / `--break-system-packages` upgrades on every restart (Install/Doctor/activation still sync once per floor).
+- **Interject race:** if a mid-turn redirect lands after the run ends, queue drains immediately (`drainQueueIfIdle`); `stranded_interject` no longer silently dropped in the webview.
+- Scroll-to-bottom only while the user is near the bottom; confirm before delete chat / restore checkpoint.
+- npm tests track `MIN_CLAWAGENTS_VERSION` dynamically (6.20.5).
+
+## 1.0.76
+
+- **Fix Mantle Claude chat 400:** `anthropic.*` no longer forced through `/v1/chat/completions`. Routes Claude → Mantle `/anthropic/v1/messages`, GPT-5.x → `/openai/v1/responses`, others → chat completions. Requires `clawagents>=6.20.5`.
+- Access mode: segmented Native IAM / Mantle / Gateway control (clearer than the dropdown).
+- Mantle default model: `openai.gpt-oss-20b` (chat-safe).
+
 ## 1.0.75
 
 - Require `clawagents>=6.20.4` (cancel kills orphan execute; bg shell-session sync)

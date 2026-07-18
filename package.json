@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.75",
+  "version": "1.0.79",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -268,7 +268,27 @@
         "clawagents.alpacaDeployPath": {
           "type": "string",
           "default": "",
-          "description": "Path to alpaca_deploy (for bug-report email via its EMAIL_* / send_alert_email). Empty auto-discovers ~/Dropbox/cursor_projects/mac/alpaca_deploy or ALPACA_DEPLOY_ROOT."
+          "description": "Optional path to a local folder whose .env supplies EMAIL_* SMTP credentials for in-extension bug reports. Also set ALPACA_DEPLOY_ROOT or EMAIL_PASSWORD in the environment."
+        },
+        "clawagents.bugReportEmailSender": {
+          "type": "string",
+          "default": "",
+          "description": "Optional SMTP sender (EMAIL_SENDER) for bug reports when not set in the environment."
+        },
+        "clawagents.bugReportSmtpServer": {
+          "type": "string",
+          "default": "",
+          "description": "Optional SMTP server hostname (EMAIL_SMTP_SERVER) for bug reports."
+        },
+        "clawagents.bugReportSmtpPort": {
+          "type": "string",
+          "default": "",
+          "description": "Optional SMTP port (EMAIL_SMTP_PORT) for bug reports."
+        },
+        "clawagents.bugReportEmailTo": {
+          "type": "string",
+          "default": "",
+          "description": "Optional bug-report recipient (CLAWAGENTS_BUG_REPORT_EMAIL) for SMTP and mailto fallback."
         },
         "clawagents.autoOpenChangedFiles": {
           "type": "boolean",

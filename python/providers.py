@@ -16,34 +16,34 @@ from url_trust import is_trusted_base_url
 # Curated AWS Bedrock Mantle (OneHUB) models — us-east-1 has the fullest list.
 # Live GET {base}/models still merges/extends when a Mantle key is present.
 _MANTLE_MODELS: list[dict[str, Any]] = [
-    # Anthropic
-    {"id": "anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (Mantle)"},
-    {"id": "anthropic.claude-opus-4-8", "label": "Claude Opus 4.8 (Mantle)"},
-    {"id": "anthropic.claude-opus-4-7", "label": "Claude Opus 4.7 (Mantle)"},
-    {"id": "anthropic.claude-haiku-4-5", "label": "Claude Haiku 4.5 (Mantle)"},
-    {"id": "anthropic.claude-fable-5", "label": "Claude Fable 5 (Mantle)"},
-    # OpenAI
-    {"id": "openai.gpt-5.6-sol", "label": "GPT-5.6 Sol (Mantle)"},
-    {"id": "openai.gpt-5.6-luna", "label": "GPT-5.6 Luna (Mantle)"},
-    {"id": "openai.gpt-5.6-terra", "label": "GPT-5.6 Terra (Mantle)"},
-    {"id": "openai.gpt-5.5", "label": "GPT-5.5 (Mantle)"},
-    {"id": "openai.gpt-5.5-2026-04-23", "label": "GPT-5.5 (2026-04-23)"},
-    {"id": "openai.gpt-5.4", "label": "GPT-5.4 (Mantle)"},
-    {"id": "openai.gpt-5.4-2026-03-05", "label": "GPT-5.4 (2026-03-05)"},
-    {"id": "openai.gpt-oss-120b", "label": "GPT-OSS 120B (Mantle)"},
-    {"id": "openai.gpt-oss-20b", "label": "GPT-OSS 20B (Mantle)"},
-    {"id": "openai.gpt-oss-safeguard-120b", "label": "GPT-OSS Safeguard 120B"},
+    # Chat-completions path (…/v1/chat/completions)
+    {"id": "openai.gpt-oss-20b", "label": "GPT-OSS 20B (Mantle · chat)"},
+    {"id": "openai.gpt-oss-120b", "label": "GPT-OSS 120B (Mantle · chat)"},
     {"id": "openai.gpt-oss-safeguard-20b", "label": "GPT-OSS Safeguard 20B"},
-    # Other Mantle vendors (common IDs)
-    {"id": "xai.grok-4.3", "label": "xAI Grok 4.3 (Mantle)"},
-    {"id": "moonshot.kimi-k2.5", "label": "Kimi K2.5 (Mantle)"},
+    {"id": "openai.gpt-oss-safeguard-120b", "label": "GPT-OSS Safeguard 120B"},
+    {"id": "deepseek.v3.2", "label": "DeepSeek V3.2 (Mantle · chat)"},
+    {"id": "deepseek.v3.1", "label": "DeepSeek V3.1 (Mantle · chat)"},
+    {"id": "xai.grok-4.3", "label": "xAI Grok 4.3 (Mantle · chat)"},
+    {"id": "moonshot.kimi-k2.5", "label": "Kimi K2.5 (Mantle · chat)"},
     {"id": "moonshot.kimi-k2-thinking", "label": "Kimi K2 Thinking (Mantle)"},
-    {"id": "deepseek.v3.2", "label": "DeepSeek V3.2 (Mantle)"},
-    {"id": "deepseek.v3.1", "label": "DeepSeek V3.1 (Mantle)"},
-    {"id": "zai.glm-5", "label": "Z.ai GLM-5 (Mantle)"},
-    {"id": "zai.glm-4.7", "label": "Z.ai GLM-4.7 (Mantle)"},
+    {"id": "zai.glm-5", "label": "Z.ai GLM-5 (Mantle · chat)"},
+    {"id": "zai.glm-4.7", "label": "Z.ai GLM-4.7 (Mantle · chat)"},
     {"id": "zai.glm-4.7-flash", "label": "Z.ai GLM-4.7 Flash (Mantle)"},
-    {"id": "zai.glm-4.6", "label": "Z.ai GLM-4.6 (Mantle)"},
+    {"id": "zai.glm-4.6", "label": "Z.ai GLM-4.6 (Mantle · chat)"},
+    # Anthropic Messages path (…/anthropic/v1/messages)
+    {"id": "anthropic.claude-haiku-4-5", "label": "Claude Haiku 4.5 (Mantle · messages)"},
+    {"id": "anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (Mantle · messages)"},
+    {"id": "anthropic.claude-opus-4-8", "label": "Claude Opus 4.8 (Mantle · messages)"},
+    {"id": "anthropic.claude-opus-4-7", "label": "Claude Opus 4.7 (Mantle · messages)"},
+    {"id": "anthropic.claude-fable-5", "label": "Claude Fable 5 (Mantle · messages)"},
+    # OpenAI Responses path (…/openai/v1/responses)
+    {"id": "openai.gpt-5.6-sol", "label": "GPT-5.6 Sol (Mantle · responses)"},
+    {"id": "openai.gpt-5.6-luna", "label": "GPT-5.6 Luna (Mantle · responses)"},
+    {"id": "openai.gpt-5.6-terra", "label": "GPT-5.6 Terra (Mantle · responses)"},
+    {"id": "openai.gpt-5.5", "label": "GPT-5.5 (Mantle · responses)"},
+    {"id": "openai.gpt-5.5-2026-04-23", "label": "GPT-5.5 (2026-04-23)"},
+    {"id": "openai.gpt-5.4", "label": "GPT-5.4 (Mantle · responses)"},
+    {"id": "openai.gpt-5.4-2026-03-05", "label": "GPT-5.4 (2026-03-05)"},
 ]
 
 
@@ -212,9 +212,14 @@ def _ollama_reachable() -> bool:
         return False
 
 
-def _provider_credentials_present(provider_id: str, env_key: str | None) -> bool:
+def _provider_credentials_present(
+    provider_id: str, env_key: str | None, *, probe_local: bool = True
+) -> bool:
     """Whether this provider has local credentials (before live probe)."""
     if provider_id == "ollama":
+        if not probe_local:
+            # Cheap catalog (probe=0): skip localhost HTTP — live check on probe=1.
+            return True
         return _ollama_reachable()
     if env_key is None:
         return True
@@ -393,7 +398,7 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
     for p in _CATALOG:
         env_key = p.get("env_key")
         ek: str | None = env_key if env_key is None or isinstance(env_key, str) else str(env_key)
-        available = _provider_credentials_present(str(p["id"]), ek)
+        available = _provider_credentials_present(str(p["id"]), ek, probe_local=probe_keys)
         models = list(p["models"])
         pid = str(p["id"])
 

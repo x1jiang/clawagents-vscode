@@ -14,12 +14,15 @@ class ProvidersProbeFlagTests(unittest.TestCase):
             providers_mod, "_probe_compatible_endpoint"
         ) as probe_ep, mock.patch.object(
             providers_mod, "verify_api_key"
-        ) as verify:
+        ) as verify, mock.patch.object(
+            providers_mod, "_ollama_reachable"
+        ) as ollama_reach:
             catalog = providers_mod.build_provider_catalog(probe_keys=False)
             self.assertIsInstance(catalog, list)
             self.assertGreater(len(catalog), 0)
             probe_ep.assert_not_called()
             verify.assert_not_called()
+            ollama_reach.assert_not_called()
 
 
 if __name__ == "__main__":

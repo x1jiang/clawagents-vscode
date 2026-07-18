@@ -204,6 +204,7 @@ export type HostToWebview =
     }
   | {
       type: "stranded_interject";
+      // Host usually consumes this; webview handles as a safety net.
       prompts: string[];
     };
 
@@ -294,7 +295,6 @@ export type WebviewToHost =
   | { type: "load_stats" }
   | {
       type: "persist";
-      items: unknown[];
       draft: string;
       mode: AgentMode;
       chatId?: string;
@@ -302,6 +302,8 @@ export type WebviewToHost =
       interaction?: InteractionStyle;
       caveman?: boolean;
       goal?: boolean;
+      /** @deprecated host ignores transcript items — kept for backward compat */
+      items?: unknown[];
     }
   | { type: "queue_send"; text: string }
   | { type: "bug_report_capture_screenshot" }

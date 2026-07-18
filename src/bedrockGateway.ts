@@ -9,7 +9,8 @@ export const OLLAMA_LOCAL_BASE_URL = "http://localhost:11434/v1";
 export const OPENAI_OFFICIAL_BASE_URL = ""; // empty = api.openai.com
 /** AWS Bedrock Mantle (OneHUB) — OpenAI-compatible `/v1` (not BAG `/api/v1`). */
 export const MANTLE_DEFAULT_REGION = "us-east-1";
-export const MANTLE_DEFAULT_MODEL = "openai.gpt-5.6-sol";
+/** Chat-completions-safe default; Claude/GPT-5.x route to other Mantle paths. */
+export const MANTLE_DEFAULT_MODEL = "openai.gpt-oss-20b";
 
 export type CompatibleUrlStyle = "openai" | "bag" | "mantle";
 export type BedrockAccessMode = "iam" | "mantle" | "bag";

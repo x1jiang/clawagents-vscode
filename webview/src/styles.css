@@ -892,6 +892,66 @@ button.send:not(.icon-btn) {
   font-weight: 600;
 }
 
+.access-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.access-mode-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.access-mode-seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.access-mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 88%, transparent);
+  color: var(--vscode-foreground, #ccc);
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.25;
+}
+
+.access-mode-btn strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.access-mode-btn span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.access-mode-btn:hover {
+  border-color: color-mix(in srgb, var(--vscode-focusBorder, #007fd4) 55%, var(--border));
+}
+
+.access-mode-btn.active {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  background: color-mix(
+    in srgb,
+    var(--vscode-button-background, #0e639c) 28%,
+    var(--vscode-editor-background, #1e1e1e)
+  );
+}
+
+.access-mode-btn.active strong {
+  color: var(--vscode-foreground, #fff);
+}
+
 .provider-presets,
 .provider-actions {
   display: flex;

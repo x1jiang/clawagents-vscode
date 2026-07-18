@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 4];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 6];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 export const MIN_CLAWAGENTS_VERSION_STR = MIN_CLAWAGENTS_VERSION.join(".");
 
@@ -344,9 +344,19 @@ async function ensureSidecarDepsOnce(
   }
 
   // Keep other PATH interpreters on the same floor so shell `python3` matches.
-  const syncPath =
-    opts?.syncPathFloor !== false &&
-    vscode.workspace.getConfiguration("clawagents").get<boolean>("syncPathPythons", true);
+  // Opt-in via opts + setting; never throw when vscode.workspace is stubbed (tests).
+  let syncPath = opts?.syncPathFloor === true;
+  if (opts?.syncPathFloor !== false && opts?.syncPathFloor !== true) {
+    try {
+      syncPath =
+        vscode.workspace?.getConfiguration?.("clawagents")?.get<boolean>(
+          "syncPathPythons",
+          true,
+        ) ?? true;
+    } catch {
+      syncPath = false;
+    }
+  }
   if (syncPath && probe.ok) {
     try {
       const { ensurePathPythonFloor } = await import("./pythonPathPin");

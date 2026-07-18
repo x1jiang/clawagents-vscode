@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send ClawAgents bug reports using alpaca_deploy SMTP credentials.
+"""Send ClawAgents bug reports via SMTP.
 
 Reads JSON from stdin:
   {
@@ -8,12 +8,12 @@ Reads JSON from stdin:
     "meta": {"vscode": "...", "clawagents": "...", "workspace": "..."}
   }
 
-Uses alpaca_deploy/.env for SMTP login only (EMAIL_SENDER, EMAIL_PASSWORD,
-EMAIL_SMTP_*). Does NOT use alpaca send_alert_email (that prefixes
-[alpaca-autotrading] and fans out to trading RECIPIENT_EMAILS).
+SMTP credentials (first match wins):
+  1. EMAIL_* environment variables (and VS Code settings forwarded as env)
+  2. alpaca_deploy/.env when ALPACA_DEPLOY_ROOT or auto-discovered
 
 Subject: [ClawAgents-bug-report] …
-To: EMAIL_SENDER only (the report author), never the trading recipient list.
+To: CLAWAGENTS_BUG_REPORT_EMAIL or EMAIL_SENDER only — never trading recipient lists.
 
 Exit 0 on success; print JSON {"ok": true/false, "detail": "..."} to stdout.
 """
@@ -51,8 +51,7 @@ def _resolve_alpaca_root() -> Path | None:
 
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
-    """Minimal .env reader. Handles quoted values + trailing `#` comments
-    (alpaca_deploy style: EMAIL_PASSWORD=\"xxxx xxxx\" # App password…)."""
+    """Minimal .env reader. Handles quoted values + trailing `#` comments."""
     out: dict[str, str] = {}
     if not path.is_file():
         return out
@@ -79,16 +78,16 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
     return out
 
 
-def _email_config_from_alpaca(root: Path) -> dict:
-    """SMTP credentials from alpaca .env; bug reports go only to EMAIL_SENDER."""
-    file_env = _parse_dotenv(root / ".env")
+def _email_config(*, file_env: dict[str, str] | None = None) -> dict:
+    """SMTP credentials from env (preferred) with optional .env fallback."""
 
     def get(key: str, default: str = "") -> str:
-        return (os.environ.get(key) or file_env.get(key) or default).strip()
+        if file_env and key in file_env and file_env[key].strip():
+            return file_env[key].strip()
+        return (os.environ.get(key) or default).strip()
 
     password = get("EMAIL_PASSWORD")
     sender = get("EMAIL_SENDER", "xiaoqian.jiang@gmail.com")
-    # Optional override; never fall back to trading RECIPIENT_EMAILS (may include others).
     to_raw = get("CLAWAGENTS_BUG_REPORT_EMAIL") or sender
     recipients = [e.strip() for e in to_raw.split(",") if e.strip()]
     enabled = get("EMAIL_ENABLED", "true").lower() == "true" and bool(password)
@@ -100,6 +99,21 @@ def _email_config_from_alpaca(root: Path) -> dict:
         "smtp_server": get("EMAIL_SMTP_SERVER", "smtp.gmail.com"),
         "smtp_port": int(get("EMAIL_SMTP_PORT", "587") or "587"),
     }
+
+
+def _resolve_email_config() -> tuple[dict, str]:
+    cfg = _email_config(file_env=None)
+    if cfg.get("sender_password"):
+        return cfg, "env"
+
+    root = _resolve_alpaca_root()
+    if root is not None:
+        file_env = _parse_dotenv(root / ".env")
+        cfg = _email_config(file_env=file_env)
+        if cfg.get("sender_password"):
+            return cfg, f"alpaca ({root})"
+
+    return cfg, "missing"
 
 
 def _result(ok: bool, detail: str) -> int:
@@ -120,7 +134,7 @@ def _send_smtp(
     if isinstance(recipients, str):
         recipients = [recipients]
     if not (sender and password and recipients):
-        raise RuntimeError("EMAIL_SENDER / EMAIL_PASSWORD / RECIPIENT_EMAILS incomplete")
+        raise RuntimeError("EMAIL_SENDER / EMAIL_PASSWORD / recipient incomplete")
 
     msg = MIMEMultipart()
     msg["From"] = sender
@@ -174,16 +188,13 @@ def main() -> int:
     if not isinstance(meta, dict):
         meta = {}
 
-    root = _resolve_alpaca_root()
-    if root is None:
+    cfg, source = _resolve_email_config()
+    if not cfg.get("sender_password"):
         return _result(
             False,
-            "alpaca_deploy not found — set ALPACA_DEPLOY_ROOT or clawagents.alpacaDeployPath",
+            "SMTP not configured — set EMAIL_PASSWORD (and EMAIL_SENDER) in the environment, "
+            "or configure clawagents.alpacaDeployPath / ALPACA_DEPLOY_ROOT with a .env file",
         )
-
-    cfg = _email_config_from_alpaca(root)
-    if not cfg.get("sender_password"):
-        return _result(False, "EMAIL_PASSWORD missing in alpaca_deploy/.env")
 
     lines = [
         "ClawAgents bug report",
@@ -195,7 +206,8 @@ def main() -> int:
     for key in ("vscode", "extension", "clawagents", "workspace", "platform"):
         if meta.get(key):
             lines.append(f"{key}: {meta[key]}")
-    lines.append(f"alpaca_deploy: {root}")
+    if source.startswith("alpaca"):
+        lines.append(f"smtp_source: {source}")
     body = "\n".join(lines)
     subject_short = text[:72].replace("\n", " ").strip() or "bug report"
     subject = f"[ClawAgents-bug-report] {subject_short}"

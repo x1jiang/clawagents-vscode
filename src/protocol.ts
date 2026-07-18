@@ -133,6 +133,7 @@ export type HostToWebview =
       type: "settings";
       settings: Record<string, unknown>;
       providers?: unknown[];
+      /** Present on save replies; absent on unsolicited load/ready pushes. */
       saveOutcome?: "ok" | "cancelled";
     }
   | {
@@ -303,7 +304,6 @@ export type WebviewToHost =
   | { type: "load_stats" }
   | {
       type: "persist";
-      items: unknown[];
       draft: string;
       mode: AgentMode;
       chatId?: string;
@@ -311,6 +311,8 @@ export type WebviewToHost =
       interaction?: InteractionStyle;
       caveman?: boolean;
       goal?: boolean;
+      /** @deprecated host ignores transcript items */
+      items?: unknown[];
     }
   | { type: "queue_send"; text: string }
   | { type: "bug_report_capture_screenshot" }
@@ -476,8 +478,9 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         && (value.style === undefined || value.style === "openai" || value.style === "bag")
         && optionalText(value.provider, 64) ? value as WebviewToHost : undefined;
     case "persist":
-      return Array.isArray(value.items) && value.items.length <= 100_000 && text(value.draft)
+      return text(value.draft)
         && AGENT_MODES.has(String(value.mode)) && optionalText(value.chatId, 128)
+        && (value.items === undefined || (Array.isArray(value.items) && value.items.length <= 100_000))
         && autoApprove(value.autoApprove)
         && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
         && (value.caveman === undefined || typeof value.caveman === "boolean")
