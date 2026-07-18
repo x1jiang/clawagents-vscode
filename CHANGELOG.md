@@ -1,3 +1,7 @@
+## 1.0.68
+
+- Require `clawagents>=6.20.3` (execute/sandbox hardening)
+
 ## 1.0.67
 
 - Require `clawagents>=6.20.2` (fix seatbelt execute `shlex` crash)
