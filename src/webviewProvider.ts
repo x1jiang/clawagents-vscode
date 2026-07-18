@@ -462,7 +462,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     } catch {
       /* partial — sidecar may still be starting or down */
     }
-    const keyEnv = await this.config.getApiKeyEnv();
+    const keyFlags = await this.config.collectKeyFlags();
     this.post({
       type: "ready",
       workspace: workspaceRoot(),
@@ -471,15 +471,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       goal: this.goalMode,
-      hasApiKey: this.config.hasAnyApiKeyFromEnv(keyEnv),
-      hasTavilyKey: this.config.hasProviderKeyFromEnv(keyEnv, "tavily"),
-      hasBedrockKey: this.config.hasProviderKeyFromEnv(keyEnv, "bedrock"),
-      hasAwsCreds: this.config.hasAwsCredentials(),
-      // Include workspace .env / shell — not only SecretStorage — so the
-      // provider menu "(no key)" matches a key that already makes turns work.
-      hasOpenAIKey: this.config.hasProviderKeyFromEnv(keyEnv, "openai"),
-      hasAnthropicKey: this.config.hasProviderKeyFromEnv(keyEnv, "anthropic"),
-      hasGeminiKey: this.config.hasProviderKeyFromEnv(keyEnv, "gemini"),
+      ...keyFlags,
       sidecar: this.sidecar.current ? "running" : "stopped",
       chatId: this.chatId,
       chats,
@@ -489,6 +481,22 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       stats,
       mcp,
       includeContextByDefault: this.config.includeContextByDefault,
+    });
+  }
+
+  /** Attach authoritative key flags whenever we push a providers catalog. */
+  private async postSettingsWithKeyFlags(
+    settings: Record<string, unknown>,
+    providers?: unknown[],
+    saveOutcome?: "ok" | "cancelled",
+  ): Promise<void> {
+    const keyFlags = await this.config.collectKeyFlags();
+    this.post({
+      type: "settings",
+      settings,
+      ...(providers ? { providers } : {}),
+      ...(saveOutcome ? { saveOutcome } : {}),
+      ...keyFlags,
     });
   }
 
@@ -994,7 +1002,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           const settings = await this.gateway.getSettings();
           // Explicit Settings open — allow one live credential probe.
           const providers = await this.gateway.getProviders({ probe: true });
-          this.post({ type: "settings", settings, providers });
+          await this.postSettingsWithKeyFlags(settings, providers);
           const skills = await this.gateway.getSkills();
           this.post({ type: "skills_preview", ...skills });
         } catch (err) {
@@ -1073,11 +1081,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             );
             if (choice !== "Trust and save") {
               this.post({ type: "status", message: "Settings save cancelled" });
-              this.post({
-                type: "settings",
-                settings: previous,
-                saveOutcome: "cancelled",
-              });
+              await this.postSettingsWithKeyFlags(previous, undefined, "cancelled");
               return;
             }
             incoming.trust_custom_base_url = true;
@@ -1150,11 +1154,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               /* catalog refresh is best-effort */
             }
           }
-          this.post(
-            providers
-              ? { type: "settings", settings, providers, saveOutcome: "ok" }
-              : { type: "settings", settings, saveOutcome: "ok" },
-          );
+          await this.postSettingsWithKeyFlags(settings, providers, "ok");
           this.post({ type: "status", message: "Settings saved" });
           if (skillsChanged) {
             try {
@@ -1299,11 +1299,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             bedrock: "Bedrock Access Gateway",
             tavily: "Tavily",
           };
+          const keyFlags = await this.config.collectKeyFlags();
           this.post({
             type: "verify_result",
             provider: msg.provider,
             ok: true,
             detail: `${labels[msg.provider] || msg.provider} API key saved; sidecar restarted`,
+            ...keyFlags,
           });
         } catch (err) {
           this.post({
@@ -1332,11 +1334,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             bedrock: "Bedrock Access Gateway",
             tavily: "Tavily",
           };
+          // After clear, flags still true if workspace .env / shell still has a key.
+          const keyFlags = await this.config.collectKeyFlags();
           this.post({
             type: "verify_result",
             provider: msg.provider,
             ok: true,
             detail: `${labels[msg.provider] || msg.provider} key cleared; sidecar restarted`,
+            ...keyFlags,
           });
         } catch (err) {
           this.post({
@@ -1351,7 +1356,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         const { probeCompatibleEndpoint } = await import("./bedrockGateway");
         const key =
           (msg.apiKey || "").trim() ||
-          (await this.config.getApiKeyEnv()).BEDROCK_API_KEY ||
+          (await this.config.resolveProviderApiKey("bedrock")) ||
           "";
         const result = await probeCompatibleEndpoint(msg.baseUrl || "", key, {
           style: "bag",
@@ -1374,16 +1379,19 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           .then(async () => {
             const { probeCompatibleEndpoint } = await import("./bedrockGateway");
             const style = msg.style === "bag" ? "bag" : "openai";
-            const env = await this.config.getApiKeyEnv();
             const provider =
               msg.provider || (style === "bag" ? "bedrock" : "openai");
+            const keyProvider =
+              provider === "bedrock"
+                ? "bedrock"
+                : provider === "gemini"
+                  ? "gemini"
+                  : provider === "anthropic"
+                    ? "anthropic"
+                    : "openai";
             const key =
               (msg.apiKey || "").trim() ||
-              (provider === "bedrock"
-                ? env.BEDROCK_API_KEY
-                : provider === "gemini"
-                  ? env.GEMINI_API_KEY || env.GOOGLE_API_KEY
-                  : env.OPENAI_API_KEY) ||
+              (await this.config.resolveProviderApiKey(keyProvider)) ||
               "";
             const result = await probeCompatibleEndpoint(testedUrl, key, {
               style,
@@ -1416,7 +1424,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 return;
               }
               const providers = await this.gateway.getProviders({ probe: true });
-              this.post({ type: "settings", settings, providers });
+              await this.postSettingsWithKeyFlags(settings, providers);
             } catch {
               /* best-effort */
             }

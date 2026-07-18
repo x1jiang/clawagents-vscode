@@ -462,14 +462,22 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
                 models = remote_models
         elif available and probe_keys and pid in ("openai", "anthropic", "gemini"):
             checked = verify_api_key(pid, probe=True)
-            # Missing/rejected key → unavailable. Network blips keep available.
+            # Credentials already present — never flip to "(no key)" because a
+            # live /models probe 401'd (org/project/scopes) while chat still works.
+            # Only demote when the key is genuinely absent/blank after sanitize.
             detail = str(checked.get("detail") or "")
-            if not checked.get("ok") and (
-                "REJECTED" in detail or "Missing" in detail or "empty" in detail.lower()
-            ):
+            detail_l = detail.lower()
+            missing = (
+                not checked.get("ok")
+                and (
+                    detail.startswith("Missing")
+                    or "missing api key" in detail_l
+                    or detail_l in {"empty", "key empty", "api key empty"}
+                    or "no api key" in detail_l
+                )
+            )
+            if missing:
                 available = False
-            elif not checked.get("ok"):
-                available = True
             if available and pid == "openai":
                 key = _sanitize_api_key(os.environ.get("OPENAI_API_KEY"))
                 ok, _detail, remote_models = _probe_compatible_endpoint(

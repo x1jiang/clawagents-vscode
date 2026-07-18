@@ -303,14 +303,21 @@ export function applyKeyFlagsToFallback(
   providers: Provider[],
   keys: Record<string, boolean>,
 ): Provider[] {
-  return providers.map((provider) => ({
-    ...provider,
-    available: keys[provider.id] === true,
-    models: (provider.models || []).map((model) => ({
-      ...model,
-      available: keys[provider.id] === true,
-    })),
-  }));
+  return providers.map((provider) => {
+    // Providers without a key slot (Ollama, etc.) keep their default availability.
+    if (!(provider.id in keys)) {
+      return provider;
+    }
+    const avail = keys[provider.id] === true;
+    return {
+      ...provider,
+      available: avail,
+      models: (provider.models || []).map((model) => ({
+        ...model,
+        available: avail,
+      })),
+    };
+  });
 }
 
 /**

@@ -1,5 +1,12 @@
 ## Unreleased
 
+## 1.0.88
+
+- **Key-flag hardening:** host `collectKeyFlags()` (SecretStorage + `.env` + shell) attached to every `settings` / `verify_result` after save/clear; webview no longer parses "saved"/"cleared" from detail text (that falsely cleared OpenAI after Clear when `.env` still had a key).
+- **Catalog probe:** present OpenAI/Anthropic/Gemini credentials stay `available` even if live `/models` returns 401 REJECTED.
+- **Probe keys** for Test connection resolve the same SecretStorage → `.env` → shell order as sidecar spawn.
+- Fallback catalog no longer marks Ollama as "(no key)".
+
 ## 1.0.87
 
 - **Provider menu "(no key)"**: honor host SecretStorage / workspace `.env` over a stale sidecar catalog probe (OpenAI can show no key while turns still work).
@@ -471,6 +478,13 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.88
+
+- **Key-flag hardening:** host `collectKeyFlags()` (SecretStorage + `.env` + shell) attached to every `settings` / `verify_result` after save/clear; webview no longer parses "saved"/"cleared" from detail text (that falsely cleared OpenAI after Clear when `.env` still had a key).
+- **Catalog probe:** present OpenAI/Anthropic/Gemini credentials stay `available` even if live `/models` returns 401 REJECTED.
+- **Probe keys** for Test connection resolve the same SecretStorage → `.env` → shell order as sidecar spawn.
+- Fallback catalog no longer marks Ollama as "(no key)".
 
 ## 1.0.87
 

@@ -387,6 +387,61 @@ export class ExtensionConfig {
     return env;
   }
 
+  /**
+   * Resolve a probe/chat key the same way the sidecar spawn does:
+   * SecretStorage → workspace ``.env`` → shell ``process.env``.
+   */
+  async resolveProviderApiKey(
+    provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily",
+  ): Promise<string> {
+    const secrets = await this.getApiKeyEnv();
+    const dotenv = this.loadWorkspaceDotenv();
+    const first = (...keys: string[]) => {
+      for (const k of keys) {
+        const v = sanitizeApiKey(secrets[k] || dotenv[k] || process.env[k] || "");
+        if (v) {
+          return v;
+        }
+      }
+      return "";
+    };
+    if (provider === "openai") {
+      return first("OPENAI_API_KEY");
+    }
+    if (provider === "anthropic") {
+      return first("ANTHROPIC_API_KEY");
+    }
+    if (provider === "gemini") {
+      return first("GEMINI_API_KEY", "GOOGLE_API_KEY");
+    }
+    if (provider === "bedrock") {
+      return first("BEDROCK_API_KEY", "MANTLE_API_KEY");
+    }
+    return first("TAVILY_API_KEY");
+  }
+
+  /** Snapshot used by ready / settings / verify_result so the webview never guesses. */
+  async collectKeyFlags(): Promise<{
+    hasApiKey: boolean;
+    hasTavilyKey: boolean;
+    hasBedrockKey: boolean;
+    hasAwsCreds: boolean;
+    hasOpenAIKey: boolean;
+    hasAnthropicKey: boolean;
+    hasGeminiKey: boolean;
+  }> {
+    const keyEnv = await this.getApiKeyEnv();
+    return {
+      hasApiKey: this.hasAnyApiKeyFromEnv(keyEnv),
+      hasTavilyKey: this.hasProviderKeyFromEnv(keyEnv, "tavily"),
+      hasBedrockKey: this.hasProviderKeyFromEnv(keyEnv, "bedrock"),
+      hasAwsCreds: this.hasAwsCredentials(),
+      hasOpenAIKey: this.hasProviderKeyFromEnv(keyEnv, "openai"),
+      hasAnthropicKey: this.hasProviderKeyFromEnv(keyEnv, "anthropic"),
+      hasGeminiKey: this.hasProviderKeyFromEnv(keyEnv, "gemini"),
+    };
+  }
+
   async hasTavilyKey(): Promise<boolean> {
     const fromSecret = sanitizeApiKey((await this.secrets.get(TAVILY_SECRET_KEY)) || "");
     if (fromSecret) {

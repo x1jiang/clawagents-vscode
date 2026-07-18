@@ -135,6 +135,14 @@ export type HostToWebview =
       providers?: unknown[];
       /** Present on save replies; absent on unsolicited load/ready pushes. */
       saveOutcome?: "ok" | "cancelled";
+      /** Host key presence (SecretStorage + workspace .env + shell). */
+      hasApiKey?: boolean;
+      hasTavilyKey?: boolean;
+      hasBedrockKey?: boolean;
+      hasAwsCreds?: boolean;
+      hasOpenAIKey?: boolean;
+      hasAnthropicKey?: boolean;
+      hasGeminiKey?: boolean;
     }
   | {
       type: "skills_preview";
@@ -163,7 +171,20 @@ export type HostToWebview =
   // File attachments (PDF/DOCX) pending for the next send — same contract.
   | { type: "files_pending"; files: Array<{ id: string; name: string }> }
   | { type: "attachment_staged"; requestId: string }
-  | { type: "verify_result"; provider: string; ok: boolean; detail?: string }
+  | {
+      type: "verify_result";
+      provider: string;
+      ok: boolean;
+      detail?: string;
+      /** Authoritative key flags after save/clear — prefer over parsing detail. */
+      hasApiKey?: boolean;
+      hasTavilyKey?: boolean;
+      hasBedrockKey?: boolean;
+      hasAwsCreds?: boolean;
+      hasOpenAIKey?: boolean;
+      hasAnthropicKey?: boolean;
+      hasGeminiKey?: boolean;
+    }
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
   | {

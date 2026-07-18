@@ -71,6 +71,18 @@ test("overlayHostKeyAvailability clears false (no key) when host has key", () =>
   assert.equal(overlaid[0].models[0].available, true);
 });
 
+test("applyKeyFlagsToFallback leaves Ollama available without a key slot", () => {
+  const rows = mod.applyKeyFlagsToFallback(
+    [
+      { id: "openai", name: "OpenAI", available: true, models: [] },
+      { id: "ollama", name: "Ollama (local)", available: true, models: [] },
+    ],
+    { openai: false, anthropic: false, gemini: false, bedrock: false },
+  );
+  assert.equal(rows.find((r) => r.id === "openai").available, false);
+  assert.equal(rows.find((r) => r.id === "ollama").available, true);
+});
+
 test("effectiveProviderLabel shows OpenAI for auto + gpt model", () => {
   assert.equal(
     mod.effectiveProviderLabel(

@@ -797,6 +797,16 @@ export function App() {
           if (msg.providers) {
             setProviders(msg.providers as Provider[]);
           }
+          // Authoritative host key flags travel with every catalog push.
+          if (typeof msg.hasApiKey === "boolean") setHasApiKey(msg.hasApiKey);
+          if (typeof msg.hasTavilyKey === "boolean") setHasTavilyKey(msg.hasTavilyKey);
+          if (typeof msg.hasBedrockKey === "boolean") setHasBedrockKey(msg.hasBedrockKey);
+          if (typeof msg.hasAwsCreds === "boolean") setHasAwsCreds(msg.hasAwsCreds);
+          if (typeof msg.hasOpenAIKey === "boolean") setHasOpenAIKey(msg.hasOpenAIKey);
+          if (typeof msg.hasAnthropicKey === "boolean") {
+            setHasAnthropicKey(msg.hasAnthropicKey);
+          }
+          if (typeof msg.hasGeminiKey === "boolean") setHasGeminiKey(msg.hasGeminiKey);
           // Trust-modal cancel (or explicit host revert) — always apply snapshot.
           if (msg.saveOutcome === "cancelled") {
             pendingSettingsPatch.current = null;
@@ -912,25 +922,18 @@ export function App() {
             msg.provider === "tavily"
           ) {
             setProviderSetupMsg(`${msg.ok ? "✓" : "✗"} ${msg.detail || ""}`);
-            if (msg.ok && String(msg.detail || "").toLowerCase().includes("saved")) {
-              setHasApiKey(true);
-              if (msg.provider === "bedrock") setHasBedrockKey(true);
-              if (msg.provider === "openai") setHasOpenAIKey(true);
-              if (msg.provider === "anthropic") setHasAnthropicKey(true);
-              if (msg.provider === "gemini") setHasGeminiKey(true);
-              if (msg.provider === "tavily") setHasTavilyKey(true);
-            }
-            if (
-              msg.ok &&
-              String(msg.detail || "").toLowerCase().includes("cleared")
-            ) {
-              if (msg.provider === "bedrock") setHasBedrockKey(false);
-              if (msg.provider === "openai") setHasOpenAIKey(false);
-              if (msg.provider === "anthropic") setHasAnthropicKey(false);
-              if (msg.provider === "gemini") setHasGeminiKey(false);
-              if (msg.provider === "tavily") setHasTavilyKey(false);
-            }
           }
+          // Never parse "saved"/"cleared" from detail — that clobbered workspace
+          // .env keys after Clear. Prefer explicit host flags when present.
+          if (typeof msg.hasApiKey === "boolean") setHasApiKey(msg.hasApiKey);
+          if (typeof msg.hasTavilyKey === "boolean") setHasTavilyKey(msg.hasTavilyKey);
+          if (typeof msg.hasBedrockKey === "boolean") setHasBedrockKey(msg.hasBedrockKey);
+          if (typeof msg.hasAwsCreds === "boolean") setHasAwsCreds(msg.hasAwsCreds);
+          if (typeof msg.hasOpenAIKey === "boolean") setHasOpenAIKey(msg.hasOpenAIKey);
+          if (typeof msg.hasAnthropicKey === "boolean") {
+            setHasAnthropicKey(msg.hasAnthropicKey);
+          }
+          if (typeof msg.hasGeminiKey === "boolean") setHasGeminiKey(msg.hasGeminiKey);
           break;
         case "diagnostics":
           setDiagnostics(msg.data);
