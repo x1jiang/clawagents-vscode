@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.72
+
+- **Hard-stop settings save loop:** autosave commits a settings fingerprint; host echoes cannot re-PUT. Providers/skills refresh only when those keys actually change.
+- Note: install this VSIX into the editor you use (Cursor was still on 1.0.10 while VS Code had 1.0.69)
+
 ## 1.0.71
 
 - **Fix settings/skills save storm:** preferred-model effect no longer replaces Mantle/custom models missing from the cheap (`probe=0`) catalog — that looped `PUT /settings` + `GET /skills` forever.

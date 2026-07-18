@@ -254,6 +254,53 @@ function normalizeSettingsForSave(settings: Record<string, unknown>): Record<str
   };
 }
 
+/** Keys that participate in autosave equality (ignore ephemeral UI-only fields). */
+const SETTINGS_SAVE_KEYS = [
+  "model",
+  "provider",
+  "base_url",
+  "default_mode",
+  "telemetry",
+  "trajectory",
+  "learn",
+  "browser_tools",
+  "mcp_enabled",
+  "mcp_trust_workspace",
+  "context_mode",
+  "workspace_system_prompt",
+  "skill_dirs",
+  "skill_auto_discover",
+  "skill_ignore_dirs",
+  "skill_exclude",
+  "allow_full_access",
+  "allow_external_skill_dirs",
+  "skill_user_homes",
+  "aws_region",
+  "aws_profile",
+  "bedrock_mode",
+  "reasoning_effort",
+  "wire_api",
+  "ssl_verify",
+  "agent_mode",
+  "action_mode",
+] as const;
+
+/** Stable fingerprint for autosave — host echoes must not re-trigger PUT. */
+function settingsSaveKey(settings: Record<string, unknown>): string {
+  try {
+    const norm = normalizeSettingsForSave(settings);
+    const slim: Record<string, unknown> = {};
+    for (const k of SETTINGS_SAVE_KEYS) {
+      if (k in norm) {
+        slim[k] = norm[k];
+      }
+    }
+    return JSON.stringify(slim);
+  } catch {
+    return "";
+  }
+}
+
 function settingsPatchMismatches(
   patch: Record<string, unknown>,
   saved: Record<string, unknown>,
@@ -373,8 +420,11 @@ export function App() {
   const settingsAutosaveReady = useRef(false);
   /** Last settings patch we asked the host to persist — verified on `settings` reply. */
   const pendingSettingsPatch = useRef<Record<string, unknown> | null>(null);
-  /** Stable JSON of last autosave payload — skip no-op / echo loops. */
-  const lastAutosaveJson = useRef<string>("");
+  /**
+   * Fingerprint of last committed settings (host echo or outbound save).
+   * Autosave only runs when local settings differ — prevents forever PUT loops.
+   */
+  const committedSettingsKey = useRef<string>("");
   /** One-shot preferred-model fill (empty model only) — never loop on catalog mismatch. */
   const preferredModelFilled = useRef(false);
   const historySearchTimer = useRef<number | undefined>();
@@ -477,6 +527,7 @@ export function App() {
           if (msg.settings) {
             skipSettingsAutosave.current = true;
             settingsAutosaveReady.current = true;
+            committedSettingsKey.current = settingsSaveKey(msg.settings);
             setSettings(msg.settings);
             if (typeof msg.settings.model === "string" && msg.settings.model) {
               setModel(msg.settings.model);
@@ -508,6 +559,7 @@ export function App() {
         case "settings":
           skipSettingsAutosave.current = true;
           settingsAutosaveReady.current = true;
+          committedSettingsKey.current = settingsSaveKey(msg.settings || {});
           setSettings(msg.settings || {});
           if (typeof msg.settings?.model === "string" && msg.settings.model) {
             setModel(msg.settings.model);
@@ -980,34 +1032,29 @@ export function App() {
     return () => window.clearTimeout(persistTimer.current);
   }, [items, draft, mode, chatId, autoApprove, interaction, caveman, goalMode]);
 
-  // Debounced autosave for the Settings panel (checkboxes, skill dirs, etc.).
+  // Debounced autosave — only when local settings differ from last commit.
+  // Host echoes update committedSettingsKey and must never re-PUT.
   useEffect(() => {
     if (!settingsAutosaveReady.current) {
       return;
     }
     if (skipSettingsAutosave.current) {
       skipSettingsAutosave.current = false;
-      // Remember host-echoed payload so a later effect doesn't re-PUT identical data.
-      try {
-        lastAutosaveJson.current = JSON.stringify(normalizeSettingsForSave(settings));
-      } catch {
-        /* ignore */
-      }
+      return;
+    }
+    const key = settingsSaveKey(settings);
+    if (!key || key === committedSettingsKey.current) {
       return;
     }
     window.clearTimeout(settingsSaveTimer.current);
     settingsSaveTimer.current = window.setTimeout(() => {
       const patch = normalizeSettingsForSave(settings);
-      let json = "";
-      try {
-        json = JSON.stringify(patch);
-      } catch {
-        json = "";
-      }
-      if (json && json === lastAutosaveJson.current) {
+      const keyNow = settingsSaveKey(settings);
+      if (!keyNow || keyNow === committedSettingsKey.current) {
         return;
       }
-      lastAutosaveJson.current = json;
+      // Commit before post so in-flight echoes / re-renders cannot loop.
+      committedSettingsKey.current = keyNow;
       pendingSettingsPatch.current = patch;
       setVerifyMsg("Saving…");
       post({
@@ -1194,7 +1241,7 @@ export function App() {
     setModel(preferredPick.model);
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
-    lastAutosaveJson.current = JSON.stringify(patch);
+    committedSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
     post({ type: "save_settings", settings: patch });
   }, [preferredPick.model, preferredPick.effort, post, settings]);
@@ -1237,7 +1284,7 @@ export function App() {
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
-    lastAutosaveJson.current = JSON.stringify(patch);
+    committedSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
     post({ type: "save_settings", settings: patch });
@@ -1247,6 +1294,7 @@ export function App() {
     const nextSettings = { ...settings, reasoning_effort: next };
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
+    committedSettingsKey.current = settingsSaveKey(nextSettings);
     const patch = { reasoning_effort: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
@@ -1256,7 +1304,9 @@ export function App() {
 
   const selectWireApi = (next: string) => {
     skipSettingsAutosave.current = true;
-    setSettings((s) => ({ ...s, wire_api: next }));
+    const nextSettings = { ...settings, wire_api: next };
+    setSettings(nextSettings);
+    committedSettingsKey.current = settingsSaveKey(nextSettings);
     const patch = { wire_api: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
@@ -1265,7 +1315,9 @@ export function App() {
 
   const selectSslVerify = (next: boolean) => {
     skipSettingsAutosave.current = true;
-    setSettings((s) => ({ ...s, ssl_verify: next }));
+    const nextSettings = { ...settings, ssl_verify: next };
+    setSettings(nextSettings);
+    committedSettingsKey.current = settingsSaveKey(nextSettings);
     const patch = { ssl_verify: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");

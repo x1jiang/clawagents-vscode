@@ -1137,17 +1137,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           // .clawagents/vscode_settings.json. Persist the effective grants in
           // workspace-scoped VS Code SecretStorage for sidecar restarts.
           await this.config.storeRuntimeTrust(settings, { revokeGatewayTrust });
-          // Cheap catalog only — never live-probe Mantle/OpenAI on autosave.
-          // Probes belong on ready / Check credentials / Test endpoint.
-          let providers: unknown[] = [];
-          try {
-            providers = await this.gateway.getProviders({ probe: false });
-          } catch {
-            /* catalog refresh is best-effort */
-          }
-          this.post({ type: "settings", settings, providers });
-          this.post({ type: "status", message: "Settings saved" });
-          // Skills catalog is expensive — only refresh when skill-related keys change.
           const skillKeys = [
             "skill_dirs",
             "skill_ignore_dirs",
@@ -1156,11 +1145,33 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             "skill_user_homes",
             "allow_external_skill_dirs",
           ] as const;
-          const skillsChanged = skillKeys.some((k) => {
-            const a = JSON.stringify(previous[k] ?? null);
-            const b = JSON.stringify(settings[k] ?? null);
-            return a !== b;
-          });
+          const catalogKeys = [
+            "provider",
+            "model",
+            "base_url",
+            "bedrock_mode",
+            "aws_region",
+            "wire_api",
+          ] as const;
+          const changed = (keys: readonly string[]) =>
+            keys.some((k) => JSON.stringify(previous[k] ?? null) !== JSON.stringify(settings[k] ?? null));
+          const skillsChanged = changed(skillKeys);
+          const catalogChanged = changed(catalogKeys);
+          // Cheap catalog only — and only when provider/model/endpoint changed.
+          let providers: unknown[] | undefined;
+          if (catalogChanged) {
+            try {
+              providers = await this.gateway.getProviders({ probe: false });
+            } catch {
+              /* catalog refresh is best-effort */
+            }
+          }
+          this.post(
+            providers
+              ? { type: "settings", settings, providers }
+              : { type: "settings", settings },
+          );
+          this.post({ type: "status", message: "Settings saved" });
           if (skillsChanged) {
             try {
               const skills = await this.gateway.getSkills();
