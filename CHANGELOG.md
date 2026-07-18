@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.91
+
+- **Cost estimates for Bedrock / Mantle:** price table uses [Bedrock on-demand rates](https://aws.amazon.com/bedrock/pricing/) (e.g. Claude Opus 4.8 = $6/$30 per 1M); strips ``anthropic.`` / geo prefixes so Mantle ids match. Unknown models omit ``~$0.00`` instead of faking zero.
+
 ## 1.0.90
 
 - Require `clawagents>=6.20.12` — Mantle GPT-5.6 Luna / Responses omit deprecated ``temperature``; bare ``gpt-5.6-*`` → ``openai.gpt-5.6-*`` (fixes 400 + 404).
@@ -486,6 +490,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.91
+
+- **Cost estimates for Bedrock / Mantle:** price table uses [Bedrock on-demand rates](https://aws.amazon.com/bedrock/pricing/) (e.g. Claude Opus 4.8 = $6/$30 per 1M); strips ``anthropic.`` / geo prefixes so Mantle ids match. Unknown models omit ``~$0.00`` instead of faking zero.
 
 ## 1.0.90
 

@@ -666,6 +666,7 @@ export function App() {
       u.promptTokens || 0,
       u.completionTokens || 0,
       modelMetaRef.current,
+      String(settingsRef.current.provider || ""),
     );
     if (cost != null && cost > 0) {
       setSessionCostUsd((s) => s + cost);
@@ -1208,6 +1209,7 @@ export function App() {
               finalUsage.promptTokens || 0,
               finalUsage.completionTokens || 0,
               modelMetaRef.current,
+              String(settingsRef.current.provider || ""),
             );
           setItems((prev) => [
             ...prev.filter((it) => it.kind !== "status"),
@@ -1662,6 +1664,7 @@ export function App() {
     promptTok,
     completionTok,
     activeModelMeta,
+    selectedProvider,
   );
   // While a run is in flight, include its live estimate in the session total.
   const sessionCostShown =

@@ -3,11 +3,15 @@
 Used for sidebar cost estimates. Not a billing system — rates drift; verify on
 the provider's pricing page. Cache discounts and long-context multipliers are
 ignored (estimate is an upper bound for uncached short-context traffic).
+
+Bedrock / Mantle on-demand rates from:
+https://aws.amazon.com/bedrock/pricing/ (fetched 2026-07-18).
+Anthropic / OpenAI direct API rates are separate (often slightly lower).
 """
 
 from __future__ import annotations
 
-# model_id -> (input_usd_per_mtok, output_usd_per_mtok)
+# Direct API list prices (Anthropic / OpenAI / Gemini) — model_id → (in, out)
 PRICES: dict[str, tuple[float, float]] = {
     # OpenAI GPT-5.6 family (Sol / Terra / Luna)
     "gpt-5.6": (5.0, 30.0),  # alias → Sol
@@ -25,9 +29,17 @@ PRICES: dict[str, tuple[float, float]] = {
     # Legacy / still listed
     "gpt-4o": (2.5, 10.0),
     "gpt-4o-mini": (0.15, 0.6),
-    # Anthropic (approx)
+    # Anthropic direct API (approx; Opus 4.5+ = $5/$25)
+    "claude-opus-4": (5.0, 25.0),
+    "claude-opus-4-5": (5.0, 25.0),
+    "claude-opus-4-6": (5.0, 25.0),
+    "claude-opus-4-7": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-4": (3.0, 15.0),
     "claude-sonnet-4-5": (3.0, 15.0),
-    "claude-opus-4-6": (15.0, 75.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-sonnet-5": (2.0, 10.0),  # Bedrock promo note; same ballpark
+    "claude-haiku-4-5": (1.0, 5.0),
     "claude-haiku-4-5-20251001": (1.0, 5.0),
     # Gemini (approx; standard paid tier, short-context rates)
     "gemini-3.5-flash": (1.5, 9.0),
@@ -38,18 +50,90 @@ PRICES: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash": (0.3, 2.5),
 }
 
+# Amazon Bedrock / Mantle on-demand (US East) — from aws.amazon.com/bedrock/pricing
+BEDROCK_PRICES: dict[str, tuple[float, float]] = {
+    # Anthropic on Bedrock (Opus 4.8 listed at $6/$30)
+    "claude-opus-4": (6.0, 30.0),
+    "claude-opus-4-5": (6.0, 30.0),
+    "claude-opus-4-6": (6.0, 30.0),
+    "claude-opus-4-7": (6.0, 30.0),
+    "claude-opus-4-8": (6.0, 30.0),
+    "claude-sonnet-4": (3.0, 15.0),
+    "claude-sonnet-4-5": (3.0, 15.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-sonnet-5": (2.0, 10.0),  # promo through 2026-08-31 → then $3/$15
+    "claude-haiku-4-5": (1.0, 5.0),
+    # OpenAI on Bedrock (in-region US East)
+    "gpt-5.6": (5.5, 33.0),
+    "gpt-5.6-sol": (5.5, 33.0),
+    "gpt-5.6-terra": (2.75, 16.5),
+    "gpt-5.6-luna": (1.1, 6.6),
+    "gpt-5.5": (5.5, 33.0),
+    "gpt-5.4": (2.75, 16.5),
+}
 
-def price_for(model_id: str) -> tuple[float, float] | None:
-    if not model_id:
-        return None
-    key = model_id.strip().lower()
-    if key in PRICES:
-        return PRICES[key]
-    # Snapshot ids like gpt-5.5-2026-04-23 — longest prefix wins so
-    # gpt-5.5-pro-… does not match gpt-5.5 first.
+_GEO_PREFIXES = (
+    "global.",
+    "us.",
+    "eu.",
+    "apac.",
+    "ap.",
+    "af.",
+    "me.",
+    "ca.",
+    "sa.",
+)
+_PROVIDER_DOT_PREFIXES = (
+    "anthropic.",
+    "openai.",
+    "amazon.",
+    "meta.",
+    "mistral.",
+    "cohere.",
+    "ai21.",
+)
+
+
+def _looks_bedrock(model_id: str) -> bool:
+    """True for Mantle / Bedrock FM ids (``anthropic.claude-…``, ``us.openai.…``)."""
+    m = (model_id or "").strip().lower()
+    if not m:
+        return False
+    if m.startswith("bedrock/") or m.startswith("bedrock."):
+        return True
+    if m.startswith(_GEO_PREFIXES):
+        return True
+    if m.startswith(_PROVIDER_DOT_PREFIXES):
+        return True
+    return False
+
+
+def normalize_model_id(model_id: str) -> str:
+    """Strip Bedrock geo / provider prefixes and ``:revision`` suffixes."""
+    key = (model_id or "").strip().lower()
+    if not key:
+        return key
+    if key.startswith("bedrock/"):
+        key = key[len("bedrock/") :]
+    for prefix in _GEO_PREFIXES:
+        if key.startswith(prefix):
+            key = key[len(prefix) :]
+            break
+    for prefix in _PROVIDER_DOT_PREFIXES:
+        if key.startswith(prefix):
+            key = key[len(prefix) :]
+            break
+    if ":" in key:
+        key = key.split(":", 1)[0]
+    return key
+
+
+def _lookup_table(table: dict[str, tuple[float, float]], key: str) -> tuple[float, float] | None:
+    if key in table:
+        return table[key]
     best: tuple[float, float] | None = None
     best_len = -1
-    for prefix, rates in PRICES.items():
+    for prefix, rates in table.items():
         if key.startswith(prefix + "-") or key.startswith(prefix + "_"):
             if len(prefix) > best_len:
                 best = rates
@@ -57,13 +141,35 @@ def price_for(model_id: str) -> tuple[float, float] | None:
     return best
 
 
+def price_for(
+    model_id: str, *, provider: str | None = None
+) -> tuple[float, float] | None:
+    if not model_id:
+        return None
+    raw = model_id.strip()
+    key = normalize_model_id(raw)
+    if not key or key == "default":
+        return None
+    prov = (provider or "").strip().lower()
+    force_bedrock = prov in ("bedrock", "mantle", "amazon", "aws")
+    use_bedrock = force_bedrock or _looks_bedrock(raw)
+    table = BEDROCK_PRICES if use_bedrock else PRICES
+    hit = _lookup_table(table, key)
+    if hit is not None:
+        return hit
+    # Mantle bare ids after strip still miss — try the other table as fallback.
+    other = PRICES if table is BEDROCK_PRICES else BEDROCK_PRICES
+    return _lookup_table(other, key)
+
+
 def estimate_usd(
     model_id: str,
     *,
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
+    provider: str | None = None,
 ) -> float | None:
-    rates = price_for(model_id)
+    rates = price_for(model_id, provider=provider)
     if rates is None:
         return None
     inp, out = rates

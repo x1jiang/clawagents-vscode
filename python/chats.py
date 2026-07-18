@@ -1272,17 +1272,26 @@ async def run_chat_turn(
         "total_tokens": total_n,
     }
     model_id = str(kwargs.get("model") or settings.get("model") or MODEL or "")
-    run_cost = estimate_usd(
-        model_id, prompt_tokens=prompt_n, completion_tokens=completion_n
+    provider = str(
+        kwargs.get("provider") or settings.get("provider") or ""
     )
-    run_cost_f = float(run_cost) if run_cost is not None else 0.0
+    run_cost = estimate_usd(
+        model_id,
+        prompt_tokens=prompt_n,
+        completion_tokens=completion_n,
+        provider=provider,
+    )
+    # Unknown model → omit cost (do not coerce to $0.00).
+    run_cost_f = float(run_cost) if run_cost is not None else None
 
     latest = get_chat(chat_id) or meta
-    session_cost = float(latest.get("session_cost_usd") or 0.0) + run_cost_f
+    prev_session = float(latest.get("session_cost_usd") or 0.0)
+    session_cost = prev_session + (run_cost_f if run_cost_f is not None else 0.0)
     session_prompt = int(latest.get("session_prompt_tokens") or 0) + prompt_n
     session_completion = int(latest.get("session_completion_tokens") or 0) + completion_n
     session_total = int(latest.get("session_total_tokens") or 0) + total_n
-    usage_payload["run_cost_usd"] = run_cost_f
+    if run_cost_f is not None:
+        usage_payload["run_cost_usd"] = run_cost_f
     usage_payload["session_cost_usd"] = session_cost
     usage_payload["session_prompt_tokens"] = session_prompt
     usage_payload["session_completion_tokens"] = session_completion
