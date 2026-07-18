@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.96
+
+- Require `clawagents>=6.20.15` — skill-loading auto-continuation (no refusal loop / mid-load deadlock); ``use_skill(abort=true)``.
+
 ## 1.0.95
 
 - Require `clawagents>=6.20.14` — strict apply_patch (empty REPLACE / fence guard), ``snapshot_diff``, code crush floor, /tmp sandbox allow.
@@ -506,6 +510,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.96
+
+- Require `clawagents>=6.20.15` — skill-loading auto-continuation (no refusal loop / mid-load deadlock); ``use_skill(abort=true)``.
 
 ## 1.0.95
 

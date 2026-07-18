@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 14];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 15];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 export const MIN_CLAWAGENTS_VERSION_STR = MIN_CLAWAGENTS_VERSION.join(".");
 
