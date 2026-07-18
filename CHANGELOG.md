@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.87
+
+- **Provider menu "(no key)"**: honor host SecretStorage / workspace `.env` over a stale sidecar catalog probe (OpenAI can show no key while turns still work).
+- **Chat header**: show effective provider next to the model picker (e.g. OpenAI · GPT-5.6 Luna).
+
 ## 1.0.86
 
 - Require `clawagents>=6.20.10` (canonical model classifier + PromptHook/PROVIDER fixes).
@@ -466,6 +471,11 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.87
+
+- **Provider menu "(no key)"**: honor host SecretStorage / workspace `.env` over a stale sidecar catalog probe (OpenAI can show no key while turns still work).
+- **Chat header**: show effective provider next to the model picker (e.g. OpenAI · GPT-5.6 Luna).
 
 ## 1.0.86
 

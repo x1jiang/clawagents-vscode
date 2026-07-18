@@ -47,3 +47,48 @@ test("expandBedrockProviderChoices splits IAM vs Mantle availability", () => {
   assert.equal(iam.available, false);
   assert.equal(mantle.available, true);
 });
+
+test("overlayHostKeyAvailability clears false (no key) when host has key", () => {
+  const overlaid = mod.overlayHostKeyAvailability(
+    [
+      {
+        id: "openai",
+        name: "OpenAI",
+        available: false,
+        models: [{ id: "gpt-5.6-luna", label: "GPT-5.6 Luna", available: false }],
+      },
+    ],
+    {
+      openai: true,
+      anthropic: false,
+      gemini: false,
+      iam: false,
+      mantle: false,
+      bag: false,
+    },
+  );
+  assert.equal(overlaid[0].available, true);
+  assert.equal(overlaid[0].models[0].available, true);
+});
+
+test("effectiveProviderLabel shows OpenAI for auto + gpt model", () => {
+  assert.equal(
+    mod.effectiveProviderLabel(
+      { provider: "auto" },
+      "gpt-5.6-luna",
+      [
+        {
+          id: "openai",
+          name: "OpenAI",
+          available: true,
+          models: [{ id: "gpt-5.6-luna", label: "GPT-5.6 Luna" }],
+        },
+      ],
+    ),
+    "OpenAI",
+  );
+  assert.equal(
+    mod.effectiveProviderLabel({ provider: "bedrock", bedrock_mode: "mantle" }, "x", []),
+    "Bedrock Mantle",
+  );
+});

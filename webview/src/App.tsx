@@ -102,6 +102,8 @@ import {
   modelsForKeys,
   pickPreferredModel,
   applyKeyFlagsToFallback,
+  overlayHostKeyAvailability,
+  effectiveProviderLabel,
 } from "./providerCatalog";
 
 
@@ -1565,7 +1567,16 @@ export function App() {
       ? providers
       : applyKeyFlagsToFallback(FALLBACK_PROVIDERS, keyFlags);
     // Distinct Provider rows for IAM / Mantle / Gateway (saved provider = bedrock).
-    return expandBedrockProviderChoices(base, {
+    const expanded = expandBedrockProviderChoices(base, {
+      iam: hasAwsCreds,
+      mantle: hasBedrockKey,
+      bag: hasBedrockKey,
+    });
+    // Host SecretStorage / .env wins over a stale sidecar "(no key)" probe.
+    return overlayHostKeyAvailability(expanded, {
+      openai: hasOpenAIKey,
+      anthropic: hasAnthropicKey,
+      gemini: hasGeminiKey,
       iam: hasAwsCreds,
       mantle: hasBedrockKey,
       bag: hasBedrockKey,
@@ -1588,6 +1599,11 @@ export function App() {
     (model !== "default" ? model : "") ||
     "";
   const activeModelMeta = allModels.find((m) => m.id === activeModelId);
+  const headerProviderLabel = effectiveProviderLabel(
+    settings,
+    activeModelId || model,
+    providerCatalog,
+  );
   modelRef.current = activeModelId || model;
   modelMetaRef.current = activeModelMeta;
   // Fill a default model only when unset. Never replace a saved model just
@@ -1926,10 +1942,17 @@ export function App() {
           <span className="meta-workspace" title={workspace}>
             {workspaceName}
           </span>
+          <span
+            className="meta-provider"
+            title="Provider (change in Settings)"
+            aria-label={`Provider ${headerProviderLabel}`}
+          >
+            {headerProviderLabel}
+          </span>
           <select
             className="model-select"
             value={activeModelId}
-            title="Only models for providers with a saved key"
+            title={`${headerProviderLabel} · only models for providers with a saved key`}
             aria-label="Model"
             onChange={(e) => selectModel(e.target.value)}
           >

@@ -288,21 +288,40 @@ export class ExtensionConfig {
 
   /** Sync check using a cached ``getApiKeyEnv`` result (avoids repeated SecretStorage reads). */
   hasAnyApiKeyFromEnv(env: Record<string, string>): boolean {
-    const llmKeys = [
-      "OPENAI_API_KEY",
-      "ANTHROPIC_API_KEY",
-      "GEMINI_API_KEY",
-      "GOOGLE_API_KEY",
-      "BEDROCK_API_KEY",
-    ];
-    if (llmKeys.some((k) => env[k])) {
-      return true;
-    }
+    return (
+      this.hasProviderKeyFromEnv(env, "openai") ||
+      this.hasProviderKeyFromEnv(env, "anthropic") ||
+      this.hasProviderKeyFromEnv(env, "gemini") ||
+      this.hasProviderKeyFromEnv(env, "bedrock") ||
+      this.hasAwsCredentials()
+    );
+  }
+
+  /**
+   * True when a provider key exists in SecretStorage (``env``), workspace
+   * ``.env``, or the shell. Sidecar catalog probes can lag; the webview uses
+   * this so "(no key)" does not disagree with a working saved key.
+   */
+  hasProviderKeyFromEnv(
+    env: Record<string, string>,
+    provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily",
+  ): boolean {
     const dotenv = this.loadWorkspaceDotenv();
-    if (llmKeys.some((k) => (dotenv[k] || process.env[k] || "").trim())) {
-      return true;
+    const pick = (...keys: string[]) =>
+      keys.some((k) => Boolean((env[k] || dotenv[k] || process.env[k] || "").trim()));
+    if (provider === "openai") {
+      return pick("OPENAI_API_KEY");
     }
-    return this.hasAwsCredentials();
+    if (provider === "anthropic") {
+      return pick("ANTHROPIC_API_KEY");
+    }
+    if (provider === "gemini") {
+      return pick("GEMINI_API_KEY", "GOOGLE_API_KEY");
+    }
+    if (provider === "bedrock") {
+      return pick("BEDROCK_API_KEY", "MANTLE_API_KEY");
+    }
+    return pick("TAVILY_API_KEY");
   }
 
   /** Sync Tavily check using cached env + dotenv/process fallbacks. */

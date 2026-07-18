@@ -1,8 +1,8 @@
 {
   "name": "clawagents",
   "displayName": "ClawAgents",
-  "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.86",
+  "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
+  "version": "1.0.87",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -129,7 +129,7 @@
       },
       {
         "command": "clawagents.clearApiKey",
-        "title": "ClawAgents: Clear API Key\u2026"
+        "title": "ClawAgents: Clear API Key…"
       },
       {
         "command": "clawagents.installPythonDeps",
@@ -253,7 +253,7 @@
         "clawagents.contextMode": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools \u2014 sandboxed code execution and indexed search. Requires context-mode >=1.0.169; auto-installed when clawagents.ensureCompanions is true. The sidebar Settings checkbox overrides this per workspace."
+          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools — sandboxed code execution and indexed search. Requires context-mode >=1.0.169; auto-installed when clawagents.ensureCompanions is true. The sidebar Settings checkbox overrides this per workspace."
         },
         "clawagents.ensureCompanions": {
           "type": "boolean",

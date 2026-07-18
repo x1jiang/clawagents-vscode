@@ -312,3 +312,92 @@ export function applyKeyFlagsToFallback(
     })),
   }));
 }
+
+/**
+ * Host key flags win over a stale/failed sidecar catalog probe so the
+ * Provider menu does not show "(no key)" when a key is already saved.
+ */
+export function overlayHostKeyAvailability(
+  providers: Provider[],
+  flags: {
+    openai: boolean;
+    anthropic: boolean;
+    gemini: boolean;
+    iam: boolean;
+    mantle: boolean;
+    bag: boolean;
+  },
+): Provider[] {
+  const hostHas = (id: string): boolean | undefined => {
+    if (id === "openai") return flags.openai;
+    if (id === "anthropic") return flags.anthropic;
+    if (id === "gemini") return flags.gemini;
+    if (id === BEDROCK_SELECT_IAM) return flags.iam;
+    if (id === BEDROCK_SELECT_MANTLE) return flags.mantle;
+    if (id === BEDROCK_SELECT_BAG) return flags.bag;
+    if (id === "bedrock") return flags.iam || flags.mantle || flags.bag;
+    return undefined;
+  };
+  return providers.map((p) => {
+    const has = hostHas(p.id);
+    if (has !== true) {
+      return p;
+    }
+    return {
+      ...p,
+      available: true,
+      models: (p.models || []).map((m) => ({
+        ...m,
+        // Parent was gated false → models inherited false; re-open them.
+        available: true,
+      })),
+    };
+  });
+}
+
+/** Short provider label for the chat header. */
+export function providerDisplayLabel(settings: Record<string, unknown>): string {
+  const p = String(settings.provider || "auto").trim().toLowerCase();
+  if (p === "bedrock") {
+    const mode = bedrockModeFromSettings(settings);
+    if (mode === "mantle") return "Bedrock Mantle";
+    if (mode === "bag") return "Bedrock Gateway";
+    return "Bedrock IAM";
+  }
+  if (p === "openai") return "OpenAI";
+  if (p === "anthropic") return "Anthropic";
+  if (p === "gemini") return "Gemini";
+  if (p === "ollama") return "Ollama";
+  if (p.startsWith("profile:")) return p.slice("profile:".length) || "profile";
+  return "auto";
+}
+
+/** When provider is ``auto``, show which catalog row owns the active model. */
+export function effectiveProviderLabel(
+  settings: Record<string, unknown>,
+  modelId: string,
+  providers: Provider[],
+): string {
+  const saved = providerDisplayLabel(settings);
+  if (saved !== "auto") {
+    return saved;
+  }
+  const mid = String(modelId || "").trim();
+  if (!mid) {
+    return "auto";
+  }
+  for (const p of providers) {
+    if (p.available === false) continue;
+    if ((p.models || []).some((m) => m.id === mid)) {
+      if (p.id === BEDROCK_SELECT_IAM) return "Bedrock IAM";
+      if (p.id === BEDROCK_SELECT_MANTLE) return "Bedrock Mantle";
+      if (p.id === BEDROCK_SELECT_BAG) return "Bedrock Gateway";
+      if (p.id === "openai") return "OpenAI";
+      if (p.id === "anthropic") return "Anthropic";
+      if (p.id === "gemini") return "Gemini";
+      if (p.id === "ollama") return "Ollama";
+      return p.name || p.id;
+    }
+  }
+  return "auto";
+}
