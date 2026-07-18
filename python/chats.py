@@ -730,7 +730,7 @@ async def run_chat_turn(
     before_tool_factory: Callable[..., Any],
     cancel_check: Callable[[], bool],
     ask_user_factory: Callable[[], Any] | None = None,
-    caveman: bool = False,
+    caveman: bool = True,
     goal: bool = False,
     images: list[dict[str, Any]] | None = None,
     files: list[dict[str, Any]] | None = None,

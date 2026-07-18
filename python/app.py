@@ -410,8 +410,8 @@ class ChatBody(BaseModel):
     # interactive = ask_user hits the webview; auto = agent decides without waiting.
     # Plan (read_only) always forces interactive on the server.
     interaction: InteractionStyle = "interactive"
-    # Terse caveman-style replies (juliusbrussee/caveman).
-    caveman: bool = False
+    # Terse caveman-style replies (juliusbrussee/caveman). Default on.
+    caveman: bool = True
     # Goal autopilot (planner→verify→strategist).
     goal: bool = False
     # Image attachments for the first user turn. Each item is

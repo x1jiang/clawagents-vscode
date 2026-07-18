@@ -303,7 +303,7 @@ export function App() {
     web: false,
     browser: false,
   });
-  const [caveman, setCaveman] = useState(false);
+  const [caveman, setCaveman] = useState(true);
   const [goalMode, setGoalMode] = useState(false);
   const [autoApproveOpen, setAutoApproveOpen] = useState(false);
   const [includeContext, setIncludeContext] = useState(false);

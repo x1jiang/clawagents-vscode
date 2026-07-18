@@ -1,3 +1,7 @@
+## 1.0.64
+
+- Caveman mode on by default (one-time migrate for existing workspaces; toggle still sticky after that)
+
 ## 1.0.63
 
 - Mic: pick device once per session, then reuse; ⌥/Alt+Mic to change

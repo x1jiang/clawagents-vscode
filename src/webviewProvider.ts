@@ -111,7 +111,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private chatId: string | undefined;
   private mode: AgentMode;
   private interaction: InteractionStyle = "interactive";
-  private caveman = false;
+  private caveman = true;
   private goalMode = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
   private queue: string[] = [];
@@ -134,6 +134,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     // Chats live under the workspace's .clawagents dir, so the pointer to
     // the active chat must be workspace-scoped too.
     const saved = context.workspaceState.get<PersistedState>(STATE_KEY);
+    const cavemanMigrated = Boolean(
+      context.workspaceState.get<boolean>("clawagents.migratedCavemanDefaultOn"),
+    );
     if (saved) {
       this.mode = saved.mode || this.mode;
       this.chatId = saved.chatId;
@@ -143,12 +146,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (saved.interaction === "interactive" || saved.interaction === "auto") {
         this.interaction = saved.interaction;
       }
-      if (typeof saved.caveman === "boolean") {
-        this.caveman = saved.caveman;
-      }
       if (typeof saved.goal === "boolean") {
         this.goalMode = saved.goal;
       }
+    }
+    // Default caveman ON. One-time migrate so prior persisted `false` flips up;
+    // after that, the user's toggle is respected.
+    if (!cavemanMigrated) {
+      this.caveman = true;
+      void context.workspaceState.update("clawagents.migratedCavemanDefaultOn", true);
+    } else if (saved && typeof saved.caveman === "boolean") {
+      this.caveman = saved.caveman;
     }
     // Plan is always interactive.
     if (this.mode === "read_only") {
