@@ -1,3 +1,7 @@
+## 1.0.66
+
+- Require `clawagents>=6.20.1` (Grok harness hardening: trailer markers, sticky caps, grep/pty bounds)
+
 ## 1.0.65
 
 - Require `clawagents>=6.20.0` (Grok harness: edit depth, execute stream/env, hashline_grep, PTY routing)

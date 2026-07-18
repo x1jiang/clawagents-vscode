@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.0** (Grok harness ports + companion floors)
+- **clawagents ≥ 6.20.1** (Grok harness ports + hardening)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -15,7 +15,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into `clawagents.pythonPath`:
 
 ```text
-clawagents[gemini,anthropic,bedrock,mcp]>=6.20.0  fastapi  uvicorn  pydantic  python-dotenv
+clawagents[gemini,anthropic,bedrock,mcp]>=6.20.1  fastapi  uvicorn  pydantic  python-dotenv
 ```
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
@@ -49,7 +49,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 
 Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
 
-## Companions (lockstep with clawagents ≥6.20.0)
+## Companions (lockstep with clawagents ≥6.20.1)
 
 | Companion | Floor | Auto-ensure | Manual |
 | --- | --- | --- | --- |

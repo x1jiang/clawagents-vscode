@@ -102,7 +102,7 @@ def run_diagnostics() -> dict[str, Any]:
         rtk = probe_rtk()
         add("rtk", rtk.ok_vs_floor, rtk.summary())
     except ImportError:
-        add("rtk", False, "clawagents.companions missing — upgrade clawagents>=6.20.0")
+        add("rtk", False, "clawagents.companions missing — upgrade clawagents>=6.20.1")
     except Exception as exc:  # noqa: BLE001
         add("rtk", False, str(exc))
 
