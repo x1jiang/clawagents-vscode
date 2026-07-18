@@ -1,3 +1,12 @@
+## 1.0.55
+
+- Require `clawagents>=6.19.0` (companion floors + doctor probes)
+- Auto-ensure companions on sidecar start (`clawagents.ensureCompanions`, default on): `npm i -g context-mode@latest`, `brew install/upgrade rtk`
+- Command: **ClawAgents: Ensure Companions (context-mode / rtk)**
+- Doctor reports companion versions; diagnostics check context-mode semver + rtk
+- Caveman toggle injects full JuliusBrussee/caveman skill (vendored)
+- Composer Mic/Send as compact overlay icon buttons
+
 ## 1.0.54
 
 - Require `clawagents>=6.18.0` (hashline edit, RTK wrap, shell-session cwd, auto-bg on execute timeout, aggressive tool crush)

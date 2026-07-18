@@ -57,13 +57,61 @@ _ALLOWED_MCP_COMMANDS = frozenset({
 })
 
 
+# Fallback floors when clawagents<6.19.0 is briefly installed.
+_FALLBACK_MIN_CONTEXT_MODE = (1, 0, 169)
+
+
+def _min_context_mode() -> tuple[int, int, int]:
+    try:
+        from clawagents.companions import MIN_CONTEXT_MODE
+
+        return MIN_CONTEXT_MODE
+    except ImportError:
+        return _FALLBACK_MIN_CONTEXT_MODE
+
+
 def context_mode_available() -> bool:
     return shutil.which(CONTEXT_MODE_BINARY) is not None
 
 
+def context_mode_status() -> dict[str, Any]:
+    """Version-aware Context Mode status for doctor / diagnostics."""
+    try:
+        from clawagents.companions import probe_context_mode
+
+        s = probe_context_mode()
+        return {
+            "found": s.found,
+            "version": s.version,
+            "ok": s.ok_vs_floor,
+            "min_version": s.min_version,
+            "path": s.path,
+            "hint": s.hint,
+            "summary": s.summary(),
+        }
+    except ImportError:
+        path = shutil.which(CONTEXT_MODE_BINARY)
+        found = path is not None
+        min_v = ".".join(str(x) for x in _min_context_mode())
+        return {
+            "found": found,
+            "version": None,
+            "ok": found,  # presence-only without companions module
+            "min_version": min_v,
+            "path": path,
+            "hint": "ok" if found else "npm install -g context-mode@latest",
+            "summary": (
+                f"context-mode: found (version unknown; upgrade clawagents>=6.19.0 for floors)"
+                if found
+                else f"context-mode: missing — need >={min_v}"
+            ),
+        }
+
+
 def create_context_mode_server() -> Any | None:
-    """Build the MCPServerStdio for Context Mode, or None if unavailable."""
-    if not context_mode_available():
+    """Build the MCPServerStdio for Context Mode, or None if unavailable/outdated."""
+    status = context_mode_status()
+    if not status.get("ok"):
         return None
     try:
         from clawagents import MCPServerStdio
@@ -218,14 +266,14 @@ def load_mcp_servers(*, trust_workspace: bool = False) -> list[Any]:
 
 
 def list_mcp_config(*, trust_workspace: bool = False) -> list[dict[str, Any]]:
+    cm = context_mode_status()
     items: list[dict[str, Any]] = [
         {
             "name": "context-mode",
-            "disabled": not context_mode_available(),
+            "disabled": not bool(cm.get("ok")),
             "command": CONTEXT_MODE_BINARY,
             "url": None,
-            "source": "builtin (settings: context_mode)"
-            + ("" if context_mode_available() else " — binary not found"),
+            "source": "builtin (settings: context_mode) — " + str(cm.get("summary") or ""),
         }
     ]
     for path, origin in _mcp_paths(trust_workspace=True):

@@ -89,16 +89,22 @@ def run_diagnostics() -> dict[str, Any]:
     add("mcp_config", mcp_path.is_file(), str(mcp_path) if mcp_path.is_file() else "none")
 
     try:
-        from mcp_loader import context_mode_available
+        from mcp_loader import context_mode_status
 
-        cm = context_mode_available()
-        add(
-            "context_mode",
-            cm,
-            "binary found" if cm else "not installed (npm install -g context-mode)",
-        )
+        cm = context_mode_status()
+        add("context_mode", bool(cm.get("ok")), cm.get("summary") or str(cm))
     except Exception as exc:  # noqa: BLE001
         add("context_mode", False, str(exc))
+
+    try:
+        from clawagents.companions import probe_rtk
+
+        rtk = probe_rtk()
+        add("rtk", rtk.ok_vs_floor, rtk.summary())
+    except ImportError:
+        add("rtk", False, "clawagents.companions missing — upgrade clawagents>=6.19.0")
+    except Exception as exc:  # noqa: BLE001
+        add("rtk", False, str(exc))
 
     agents = WORKSPACE / "AGENTS.md"
     add("agents_md", agents.is_file(), str(agents) if agents.is_file() else "none")

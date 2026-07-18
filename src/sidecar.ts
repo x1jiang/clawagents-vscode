@@ -6,6 +6,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { AWS_ENV_KEYS, ExtensionConfig, workspaceRoot } from "./config";
 import { curatedProcessEnv } from "./envCurate";
+import { ensureCompanions } from "./companionDeps";
 import { ensureSidecarDeps } from "./pythonDeps";
 import { pinPythonPathEnv } from "./pythonPathPin";
 import { StartGeneration } from "./startGeneration";
@@ -142,6 +143,16 @@ export class SidecarManager {
     if (!probe.ok) {
       throw new Error(probe.detail);
     }
+
+    // Companions (context-mode / rtk): non-fatal — chat works without them.
+    try {
+      await ensureCompanions(this.output);
+    } catch (err) {
+      this.output.appendLine(
+        `Companion ensure error (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    this.assertCurrentStart(generation);
 
     const port = await findFreePort();
     const token = crypto.randomBytes(32).toString("hex");

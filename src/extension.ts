@@ -6,6 +6,7 @@ import {
   wrapCurrentFileRef,
   wrapSelectionBlock,
 } from "./config";
+import { ensureCompanions, probeCompanions } from "./companionDeps";
 import { ensureSidecarDeps, SIDECAR_PIP_PACKAGES } from "./pythonDeps";
 import {
   formatDriftWarning,
@@ -129,6 +130,10 @@ export function activate(context: vscode.ExtensionContext): void {
           `  version=${probe.version || "?"} ok=${probe.ok}\n` +
           `  executable=${probe.executable || "?"}`,
       );
+      out.appendLine("=== Companions ===");
+      for (const c of probeCompanions()) {
+        out.appendLine(`  ${c.name}: ${c.detail}`);
+      }
       const drift = probePathInterpreterDrift(python);
       if (drift.length === 0) {
         out.appendLine("PATH drift: none (no outdated clawagents on other PATH Pythons).");
@@ -162,6 +167,24 @@ export function activate(context: vscode.ExtensionContext): void {
         } else if (choice === "Install Sidecar Deps") {
           await vscode.commands.executeCommand("clawagents.installPythonDeps");
         }
+      }
+    }),
+    vscode.commands.registerCommand("clawagents.ensureCompanions", async () => {
+      const out = sidecar?.output;
+      if (!out) {
+        return;
+      }
+      out.show(true);
+      const results = await ensureCompanions(out, { force: true });
+      const ok = results.every((r) => r.ok);
+      if (ok) {
+        void vscode.window.showInformationMessage(
+          `Companions OK — ${results.map((r) => `${r.name} ${r.version || "?"}`).join(", ")}`,
+        );
+      } else {
+        void vscode.window.showWarningMessage(
+          "Some companions are still missing or below floor — see ClawAgents Sidecar output.",
+        );
       }
     }),
     vscode.commands.registerCommand("clawagents.setApiKey", async () => {

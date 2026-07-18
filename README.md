@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.17.8** (P1 security hardening + rewind failure reporting)
+- **clawagents ≥ 6.19.0** (companion floors + doctor probes for context-mode / rtk)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -15,7 +15,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into `clawagents.pythonPath`:
 
 ```text
-clawagents[gemini,anthropic,mcp]  fastapi  uvicorn  pydantic  python-dotenv
+clawagents[gemini,anthropic,bedrock,mcp]>=6.19.0  fastapi  uvicorn  pydantic  python-dotenv
 ```
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
@@ -44,9 +44,20 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.provider` | `auto` | Preferred provider for credential selection |
 | `clawagents.defaultMode` | `auto` | Default permission mode |
 | `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
-| `clawagents.contextMode` | `true` | Context Mode tools (needs `npm install -g context-mode`) |
+| `clawagents.contextMode` | `true` | Context Mode tools (`context-mode` ≥1.0.169) |
+| `clawagents.ensureCompanions` | `true` | Auto-upgrade companions on sidecar start (`context-mode`, `rtk`) |
 
 Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
+
+## Companions (lockstep with clawagents ≥6.19.0)
+
+| Companion | Floor | Auto-ensure | Manual |
+| --- | --- | --- | --- |
+| [Context Mode](https://github.com/mksglu/context-mode) | **1.0.169** | `npm install -g context-mode@latest` | Node ≥ 22.5 |
+| [RTK](https://www.rtk-ai.app/) | **0.43.0** | `brew install rtk` / `brew upgrade rtk` | PATH `rtk` |
+| Caveman | vendored skill | composer toggle | JuliusBrussee/caveman |
+
+Command Palette → **ClawAgents: Ensure Companions** forces a re-probe/upgrade.
 
 ## Security
 
@@ -68,7 +79,7 @@ Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools
 
 ## Optional tools
 
-- [Context Mode](https://github.com/mksglu/context-mode): `npm install -g context-mode` (Node ≥ 22.5)
+- Companions above (auto-ensured when `clawagents.ensureCompanions` is true)
 - Browser tools: Playwright Chromium via clawagents browser extras
 
 ## Source & development

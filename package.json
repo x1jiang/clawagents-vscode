@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.54",
+  "version": "1.0.55",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -138,6 +138,10 @@
       {
         "command": "clawagents.doctorPython",
         "title": "ClawAgents: Doctor (Python versions)"
+      },
+      {
+        "command": "clawagents.ensureCompanions",
+        "title": "ClawAgents: Ensure Companions (context-mode / rtk)"
       }
     ],
     "keybindings": [
@@ -249,7 +253,12 @@
         "clawagents.contextMode": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools \u2014 sandboxed code execution and indexed search. Requires the context-mode binary (npm install -g context-mode); silently skipped when missing. The sidebar Settings checkbox overrides this per workspace."
+          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools \u2014 sandboxed code execution and indexed search. Requires context-mode >=1.0.169; auto-installed when clawagents.ensureCompanions is true. The sidebar Settings checkbox overrides this per workspace."
+        },
+        "clawagents.ensureCompanions": {
+          "type": "boolean",
+          "default": true,
+          "description": "On sidecar start, probe and auto-upgrade companion CLIs (npm context-mode@latest, Homebrew rtk) when missing or below the floors required by this extension."
         },
         "clawagents.autoOpenChangedFiles": {
           "type": "boolean",

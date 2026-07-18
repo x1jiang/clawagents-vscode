@@ -3514,118 +3514,230 @@ export function App() {
                 }
               }}
             >
-              <textarea
-                ref={textareaRef}
-                value={draft}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setDraft(v);
-                  if (dictating) {
-                    const interim = dictationInterim;
-                    let base = v;
-                    if (interim) {
-                      const sep = " ";
-                      const suffix = sep + interim;
-                      if (base.endsWith(suffix)) base = base.slice(0, -suffix.length);
-                      else if (base.endsWith(interim)) base = base.slice(0, -interim.length);
-                    }
-                    draftBaseRef.current = base;
-                  }
-                }}
-                onPaste={(e) => {
-                  const files = collectTransferFiles(e.clipboardData);
-                  if (files.length === 0) {
-                    return;
-                  }
-                  e.preventDefault();
-                  void attachLocalBrowserFiles(
-                    files,
-                    setItems,
-                    beginAttachmentRequest,
-                    finishAttachmentRequest,
-                  );
-                }}
-                placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · mic / ⌃␣ / F8 dictate · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
-                rows={3}
-                onKeyDown={(e) => {
-                  // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
-                  // Ignore Enter while an IME composition is active.
-                  if (
-                    e.key === "Enter" &&
-                    !e.shiftKey &&
-                    !e.metaKey &&
-                    !e.ctrlKey &&
-                    !e.nativeEvent.isComposing
-                  ) {
-                    e.preventDefault();
+              <div className="compose-shell">
+                <textarea
+                  ref={textareaRef}
+                  value={draft}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDraft(v);
                     if (dictating) {
+                      const interim = dictationInterim;
+                      let base = v;
+                      if (interim) {
+                        const sep = " ";
+                        const suffix = sep + interim;
+                        if (base.endsWith(suffix)) base = base.slice(0, -suffix.length);
+                        else if (base.endsWith(interim)) base = base.slice(0, -interim.length);
+                      }
+                      draftBaseRef.current = base;
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const files = collectTransferFiles(e.clipboardData);
+                    if (files.length === 0) {
+                      return;
+                    }
+                    e.preventDefault();
+                    void attachLocalBrowserFiles(
+                      files,
+                      setItems,
+                      beginAttachmentRequest,
+                      finishAttachmentRequest,
+                    );
+                  }}
+                  placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · ↵ send · ⇧↵ newline`}
+                  rows={2}
+                  onKeyDown={(e) => {
+                    // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
+                    // Ignore Enter while an IME composition is active.
+                    if (
+                      e.key === "Enter" &&
+                      !e.shiftKey &&
+                      !e.metaKey &&
+                      !e.ctrlKey &&
+                      !e.nativeEvent.isComposing
+                    ) {
+                      e.preventDefault();
+                      if (dictating) {
+                        voiceRef.current?.stop();
+                        setDictating(false);
+                        setDictationInterim("");
+                      }
+                      send();
+                    } else if (e.key === "Escape" && dictating) {
+                      e.preventDefault();
                       voiceRef.current?.stop();
                       setDictating(false);
                       setDictationInterim("");
+                    } else if (e.key === "Escape" && busy) {
+                      e.preventDefault();
+                      post({ type: "cancel" });
                     }
-                    send();
-                  } else if (e.key === "Escape" && dictating) {
-                    e.preventDefault();
-                    voiceRef.current?.stop();
-                    setDictating(false);
-                    setDictationInterim("");
-                  } else if (e.key === "Escape" && busy) {
-                    e.preventDefault();
-                    post({ type: "cancel" });
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className={`tool-chip mic-btn${dictating ? " active" : ""}`}
-                title={
-                  dictating
-                    ? "Stop dictation (Esc / ⌃␣ / F8)"
-                    : "Voice dictation (Web Speech; may use cloud STT). Often unavailable in VS Code/Cursor. ⌃␣ / F8"
-                }
-                aria-pressed={dictating}
-                onClick={() => toggleDictation()}
-              >
-                {dictating ? "Listening…" : "Mic"}
-                {dictationInterim ? (
-                  <span className="tool-chip-meta">…</span>
-                ) : null}
-              </button>
-              {busy ? (
-                <>
+                  }}
+                />
+                <div className="compose-actions">
                   <button
                     type="button"
-                    className="tool-chip send"
-                    title="Send draft as mid-turn redirect without stopping"
-                    disabled={!draft.trim()}
-                    onClick={() => {
-                      const value = draft.trim();
-                      if (!value) return;
-                      setDraft("");
-                      post({ type: "interject", text: value });
-                    }}
+                    className={`icon-btn mic-btn${dictating ? " active" : ""}`}
+                    title={
+                      dictating
+                        ? "Stop dictation (Esc / ⌃␣ / F8)"
+                        : "Voice dictation (⌃␣ / F8)"
+                    }
+                    aria-label={dictating ? "Stop dictation" : "Start voice dictation"}
+                    aria-pressed={dictating}
+                    onClick={() => toggleDictation()}
                   >
-                    Redirect
+                    {dictating ? <IconMicOff /> : <IconMic />}
                   </button>
-                  <button type="button" className="danger send" onClick={() => post({ type: "cancel" })}>
-                    Stop
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="primary send"
-                  onClick={send}
-                  disabled={!draft.trim() || attachmentUploads > 0}
-                >
-                  {attachmentUploads > 0 ? "Attaching…" : "Send"}
-                </button>
-              )}
+                  {busy ? (
+                    <>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Redirect draft mid-turn (without stopping)"
+                        aria-label="Redirect draft mid-turn"
+                        disabled={!draft.trim()}
+                        onClick={() => {
+                          const value = draft.trim();
+                          if (!value) return;
+                          setDraft("");
+                          post({ type: "interject", text: value });
+                        }}
+                      >
+                        <IconRedirect />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn danger"
+                        title="Stop generation (Esc)"
+                        aria-label="Stop generation"
+                        onClick={() => post({ type: "cancel" })}
+                      >
+                        <IconStop />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="icon-btn primary send"
+                      title={
+                        attachmentUploads > 0
+                          ? "Attaching files…"
+                          : "Send (Enter)"
+                      }
+                      aria-label={attachmentUploads > 0 ? "Attaching files" : "Send"}
+                      onClick={send}
+                      disabled={!draft.trim() || attachmentUploads > 0}
+                    >
+                      {attachmentUploads > 0 ? <IconSpinner /> : <IconSend />}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </footer>
         </>
       )}
     </div>
+  );
+}
+
+function IconMic() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 14a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v4a3 3 0 0 0 3 3Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M19 11a7 7 0 0 1-14 0M12 18v3"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconMicOff() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 14a3 3 0 0 0 3-3V7a3 3 0 0 0-4.9-1.8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 9v2a3 3 0 0 0 4.2 2.7M19 11a7 7 0 0 1-9.9 6.3M5 11a7 7 0 0 0 3.1 5.8M12 18v3M4 4l16 16"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconSend() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 19V5M12 5l-6 6M12 5l6 6"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconStop() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
+function IconRedirect() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 7h7a5 5 0 0 1 0 10H7M7 7l3-3M7 7l3 3"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconSpinner() {
+  return (
+    <svg
+      className="icon-spin"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" opacity="0.35" />
+      <path
+        d="M20 12a8 8 0 0 0-8-8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 

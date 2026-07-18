@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from caveman_prompt import CAVEMAN_INSTRUCTION
 from grants import GrantStore
 from paths import (
     CHATS_DIR,
@@ -638,14 +639,6 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     if "ssl_verify" in settings:
         kwargs["ssl_verify"] = bool(settings.get("ssl_verify"))
     return kwargs
-
-
-CAVEMAN_INSTRUCTION = """\
-Caveman mode ON. Respond terse like smart caveman. All technical substance stay. Only fluff die.
-Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries, hedging.
-Fragments OK. Short synonyms. Technical terms exact. Code blocks unchanged. Errors quoted exact.
-Pattern: [thing] [action] [reason]. [next step].
-"""
 
 
 # Bound attachment payloads so a malformed/hostile request can't OOM the
