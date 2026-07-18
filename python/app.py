@@ -754,6 +754,29 @@ def create_app() -> FastAPI:
             "provider": settings.get("provider") or "auto",
         }
 
+    @app.get("/capabilities")
+    async def capabilities(request: Request):
+        """Versioned feature flags — prefer this over inspect.signature / patches."""
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            import clawagents
+            from clawagents.capabilities import get_capabilities
+
+            caps = get_capabilities()
+            caps["clawagents_version"] = getattr(clawagents, "__version__", "?")
+            return caps
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "contract_version": 0,
+                "error": str(exc),
+                "gemini_array_items": False,
+                "workspace_scoped_agent": False,
+                "raw_tool_output": False,
+                "artifact_workspace_arg": False,
+            }
+
     @app.get("/diagnostics")
     async def diagnostics(request: Request):
         denied = _auth_or_401(request)

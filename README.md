@@ -45,11 +45,12 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.defaultMode` | `auto` | Default permission mode |
 | `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
 | `clawagents.contextMode` | `true` | Context Mode tools (`context-mode` ≥1.0.169) |
-| `clawagents.ensureCompanions` | `true` | Auto-upgrade companions on sidecar start (`context-mode`, `rtk`) |
+| `clawagents.ensureCompanions` | `false` | Offer companion installs on sidecar start after confirmation (`context-mode`, `rtk`); default is probe-only |
+| `clawagents.syncPathPythons` | `false` | Offer (with confirmation) to upgrade other PATH Pythons below the floor; default manages only `pythonPath` |
 
 Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
 
-## Companions (lockstep with clawagents ≥6.20.1)
+## Companions (lockstep with clawagents ≥6.20.9)
 
 | Companion | Floor | Auto-ensure | Manual |
 | --- | --- | --- | --- |
@@ -79,7 +80,7 @@ Command Palette → **ClawAgents: Ensure Companions** forces a re-probe/upgrade.
 
 ## Optional tools
 
-- Companions above (auto-ensured when `clawagents.ensureCompanions` is true)
+- Companions above (optional; enable `clawagents.ensureCompanions` or run **Ensure Companions**)
 - Browser tools: Playwright Chromium via clawagents browser extras
 
 ## Source & development

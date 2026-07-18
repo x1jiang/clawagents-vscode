@@ -6,7 +6,6 @@ import json
 import inspect
 import os
 import re
-import threading
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -74,11 +73,6 @@ def _apply_aws_settings(settings: dict[str, Any]) -> None:
     profile = str(settings.get("aws_profile") or "").strip()
     if profile:
         os.environ["AWS_PROFILE"] = profile
-
-
-# Legacy fallback only: os.chdir is process-global. Prefer create_claw_agent(
-# workspace=…) which scopes tools without chdir — then this lock is unused.
-_turn_lock = threading.Lock()
 
 
 # Host appends editor snippets under this marker (see webviewProvider.runTask).
@@ -1204,21 +1198,13 @@ async def run_chat_turn(
 
         return await agent.invoke(augmented, **invoke_kwargs)
 
-    if supports_workspace:
-        # No process-global cwd mutation — concurrent turns can run in parallel.
-        result = await _run_turn()
-    else:
-        # Legacy clawagents: serialize turns around os.chdir(WORKSPACE).
-        with _turn_lock:
-            prev = os.getcwd()
-            try:
-                os.chdir(WORKSPACE)
-                result = await _run_turn()
-            finally:
-                try:
-                    os.chdir(prev)
-                except OSError:
-                    pass
+    # Floor is clawagents≥6.20.9 — workspace= is required. No process chdir / turn lock.
+    if not supports_workspace:
+        raise RuntimeError(
+            "ClawAgents sidecar requires clawagents≥6.20.9 with workspace= support. "
+            "Run ClawAgents: Install/Upgrade Python Dependencies."
+        )
+    result = await _run_turn()
 
     status = getattr(result, "status", "done")
     iterations = getattr(result, "iterations", 0)

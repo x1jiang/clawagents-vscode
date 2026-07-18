@@ -35,6 +35,7 @@ import type {
   InteractionStyle,
   WebviewToHost,
 } from "./protocol";
+import { AutoOpenScheduler } from "./autoOpenFiles";
 import { SidecarManager } from "./sidecar";
 
 export const SIDEBAR_ID = "clawagents.sidebar";
@@ -103,31 +104,6 @@ function sessionCostFromChat(chat: Record<string, unknown> | undefined): number 
   return typeof v === "number" ? v : undefined;
 }
 
-/** Align with clawagents.security.secret_paths — never auto-open credentials. */
-function looksLikeSecretPath(filePath: string): boolean {
-  const base = path.basename(filePath || "").toLowerCase();
-  if (!base) {
-    return false;
-  }
-  if (base === ".env" || base.startsWith(".env.")) {
-    return true;
-  }
-  if (/\.(pem|key|p12|pfx)$/i.test(base)) {
-    return true;
-  }
-  if (base === "id_rsa" || base === "id_ed25519") {
-    return true;
-  }
-  if (base.includes("credentials") || base.includes("secrets")) {
-    return true;
-  }
-  return false;
-}
-
-function pathHasDotDot(filePath: string): boolean {
-  return (filePath || "").split(/[/\\]/).some((p) => p === "..");
-}
-
 export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = SIDEBAR_ID;
 
@@ -151,8 +127,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
    *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
   private saveSettingsChain: Promise<void> = Promise.resolve();
   /** Debounced auto-open of agent-edited files (avoid focus thrash). */
-  private autoOpenPending: string[] = [];
-  private autoOpenTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly autoOpen = new AutoOpenScheduler(
+    (filePath) => {
+      void this.openPath(filePath, undefined, { quiet: true });
+    },
+    (message) => this.sidecar.output.appendLine(message),
+  );
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -2009,42 +1989,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Coalesce multi-file edits into one quiet open of the latest path. */
   private scheduleAutoOpenChangedFile(filePath: string): void {
-    const p = (filePath || "").trim();
-    if (!p || looksLikeSecretPath(p) || pathHasDotDot(p)) {
-      if (p) {
-        this.sidecar.output.appendLine(`autoOpen: skipped ${p}`);
-      }
-      return;
-    }
-    if (!this.autoOpenPending.includes(p)) {
-      this.autoOpenPending.push(p);
-    }
-    // Keep only the most recent paths if the agent thrash-writes.
-    if (this.autoOpenPending.length > 24) {
-      this.autoOpenPending.splice(0, this.autoOpenPending.length - 24);
-    }
-    if (this.autoOpenTimer) {
-      clearTimeout(this.autoOpenTimer);
-    }
-    this.autoOpenTimer = setTimeout(() => {
-      this.autoOpenTimer = undefined;
-      const batch = this.autoOpenPending.splice(0);
-      // Prefer last non-secret path (secrets can still sneak in via rename).
-      const last = [...batch].reverse().find((x) => !looksLikeSecretPath(x));
-      if (last) {
-        void this.openPath(last, undefined, { quiet: true });
-      }
-    }, 450);
+    this.autoOpen.schedule(filePath);
   }
 
   dispose(): void {
-    if (this.autoOpenTimer) {
-      clearTimeout(this.autoOpenTimer);
-      this.autoOpenTimer = undefined;
-    }
-    this.autoOpenPending.length = 0;
+    this.autoOpen.dispose();
   }
 
   private async diffSnapshot(

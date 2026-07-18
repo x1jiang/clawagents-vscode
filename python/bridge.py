@@ -26,7 +26,6 @@ def _normalize_env() -> None:
     snapshot_spawn_secrets()
 
 
-# Snapshot helpers live in spawn_secrets (imported by chats before each turn).
 def _check_dependencies() -> None:
     missing: list[str] = []
     for mod, pip_name in (
@@ -47,25 +46,34 @@ def _check_dependencies() -> None:
             + "\n\nInstall into the interpreter set in VS Code setting "
             "'clawagents.pythonPath', for example:\n"
             f"  python3 -m pip install -r \"{req}\"\n"
-            "Optional extras: pip install 'clawagents[gemini,anthropic,mcp]'",
+            "Optional extras: pip install 'clawagents[gemini,anthropic,mcp,media]'",
             file=sys.stderr,
         )
         sys.exit(1)
 
 
-def _patch_gemini_array_schemas() -> None:
-    """Gemini rejects ARRAY tool params without ``items`` (MCP schemas often omit it).
+def _maybe_patch_legacy_gemini() -> None:
+    """Apply Gemini ARRAY ``items`` shim only when the library lacks the capability.
 
-    Back-compat shim for pip-installed clawagents releases that predate the
-    upstream fix. Self-disables when the installed converters already handle
-    ``items`` so it can never mask newer upstream behavior.
+    Modern clawagents advertises ``gemini_array_items`` via
+    ``clawagents.capabilities`` / ``GET /capabilities``. Prefer that contract
+    over unconditional private monkey-patches.
     """
-    import inspect
+    try:
+        from clawagents.capabilities import get_capabilities
 
+        if get_capabilities().get("gemini_array_items"):
+            return
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Legacy wheel without the capability flag — last-resort shim.
     try:
         from clawagents.providers import llm as llm_mod
     except Exception:  # noqa: BLE001
         return
+
+    import inspect
 
     def _already_fixed(fn) -> bool:  # type: ignore[no-untyped-def]
         try:
@@ -74,13 +82,7 @@ def _patch_gemini_array_schemas() -> None:
             return False
 
     if _already_fixed(getattr(llm_mod, "_to_gemini_tools", None)):
-        try:
-            from clawagents.mcp import tool_bridge as bridge_mod
-
-            if _already_fixed(getattr(bridge_mod, "_normalize_input_schema", None)):
-                return  # upstream carries both fixes — nothing to patch
-        except Exception:  # noqa: BLE001
-            return
+        return
 
     def _to_gemini_tools(schemas):  # type: ignore[no-untyped-def]
         declarations = []
@@ -109,40 +111,11 @@ def _patch_gemini_array_schemas() -> None:
         return [{"function_declarations": declarations}]
 
     llm_mod._to_gemini_tools = _to_gemini_tools  # type: ignore[attr-defined]
-
-    try:
-        from clawagents.mcp import tool_bridge as bridge_mod
-    except Exception:  # noqa: BLE001
-        return
-
-    _orig = bridge_mod._normalize_input_schema
-
-    def _normalize_input_schema(input_schema):  # type: ignore[no-untyped-def]
-        out = _orig(input_schema)
-        if not isinstance(input_schema, dict):
-            return out
-        props = input_schema.get("properties") or {}
-        if not isinstance(props, dict):
-            return out
-        for pname, raw in props.items():
-            if pname not in out or not isinstance(raw, dict):
-                continue
-            if out[pname].get("type") != "array":
-                continue
-            if "items" in out[pname]:
-                continue
-            items = raw.get("items")
-            item_type = "string"
-            if isinstance(items, dict):
-                t = items.get("type", "string")
-                if isinstance(t, list):
-                    t = next((x for x in t if x != "null"), "string")
-                if isinstance(t, str):
-                    item_type = t
-            out[pname]["items"] = {"type": item_type}
-        return out
-
-    bridge_mod._normalize_input_schema = _normalize_input_schema  # type: ignore[attr-defined]
+    print(
+        "WARN: applied legacy Gemini ARRAY items shim "
+        "(upgrade clawagents for GET /capabilities gemini_array_items)",
+        flush=True,
+    )
 
 
 def main() -> None:
@@ -171,7 +144,7 @@ def main() -> None:
 
     _normalize_env()
     _check_dependencies()
-    _patch_gemini_array_schemas()
+    _maybe_patch_legacy_gemini()
 
     import clawagents
     import uvicorn

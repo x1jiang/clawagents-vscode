@@ -234,13 +234,13 @@ export function activate(context: vscode.ExtensionContext): void {
     void provider?.openChat();
   }
 
-  // Auto-upgrade outdated PATH clawagents once per window (Homebrew/conda vs
-  // clawagents.pythonPath). Same floor as Install Python Deps / sidecar ensure.
+  // Optional PATH Python floor sync — off by default; never mutates other
+  // interpreters without an explicit setting + confirmation.
   void (async () => {
     try {
       const sync = vscode.workspace
         .getConfiguration("clawagents")
-        .get<boolean>("syncPathPythons", true);
+        .get<boolean>("syncPathPythons", false);
       if (!sync) {
         return;
       }
@@ -249,9 +249,17 @@ export function activate(context: vscode.ExtensionContext): void {
       if (drift.length === 0) {
         return;
       }
-      // Re-run when the extension floor bumps (e.g. 6.20.3 → 6.21.0).
       const key = `clawagents.pathDriftSynced.${MIN_CLAWAGENTS_VERSION_STR}`;
       if (context.workspaceState.get(key) === true) {
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(
+        `ClawAgents found ${drift.length} PATH Python(s) below ${MIN_CLAWAGENTS_VERSION_STR}. Upgrade them now?`,
+        { modal: true },
+        "Upgrade PATH Pythons",
+        "Skip",
+      );
+      if (choice !== "Upgrade PATH Pythons") {
         return;
       }
       await context.workspaceState.update(key, true);
@@ -259,15 +267,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!out) {
         return;
       }
-      out.appendLine("Activation: syncing PATH Python clawagents floor…");
+      out.appendLine("Activation: syncing PATH Python clawagents floor (user confirmed)…");
       const result = await ensurePathPythonFloor(python, out);
       if (result.failed.length > 0) {
         void vscode.window.showWarningMessage(
           formatDriftWarning(result.failed, python),
           "Doctor…",
           "Dismiss",
-        ).then((choice) => {
-          if (choice === "Doctor…") {
+        ).then((pick) => {
+          if (pick === "Doctor…") {
             void vscode.commands.executeCommand("clawagents.doctorPython");
           }
         });

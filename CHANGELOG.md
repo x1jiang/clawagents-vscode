@@ -1,5 +1,14 @@
 ## Unreleased
 
+## 1.0.85
+
+- Require `clawagents>=6.20.9` (capabilities contract + workspace-scoped tool artifacts).
+- **No legacy turn lock / chdir:** sidecar always uses `workspace=`; refuses older wheels without it.
+- **PATH Python sync opt-in:** `syncPathPythons` defaults off and confirms before upgrading other interpreters.
+- **Bridge:** Gemini shim only when `GET /capabilities` lacks `gemini_array_items` (no unconditional monkeypatch).
+- **Protocol types:** webview re-exports `src/protocol.ts` (single source).
+- Extract `providerCatalog.ts` + `autoOpenFiles.ts`; README companion defaults aligned.
+
 ## 1.0.84
 
 - Require `clawagents>=6.20.8` (artifact path containment + raw tool archival).
