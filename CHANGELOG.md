@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 1.0.99
+
+- Require `clawagents>=6.20.17` — seatbelt ``/dev/null`` allow + clearer sandbox hints.
+- ``mode=full_access`` + Settings → Allow Full Access now sets ``sandbox_profile=off`` (gcloud/deploy can use ``~/.config``).
+- Checkbox label clarifies Full Access also disables the OS sandbox.
+
 ## 1.0.98
 
 - Provider switch: reset incompatible leftover models (e.g. Ollama ``llama3.1`` when switching to OpenAI) instead of sending them to api.openai.com (404).
@@ -519,6 +525,12 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.99
+
+- Require `clawagents>=6.20.17` — seatbelt ``/dev/null`` allow + clearer sandbox hints.
+- ``mode=full_access`` + Settings → Allow Full Access now sets ``sandbox_profile=off`` (gcloud/deploy can use ``~/.config``).
+- Checkbox label clarifies Full Access also disables the OS sandbox.
 
 ## 1.0.98
 

@@ -1050,6 +1050,17 @@ async def run_chat_turn(
     if action_mode == "code" and "action_mode" in _agent_params:
         kwargs["action_mode"] = "code"
 
+    # UI mode=full_access previously only auto-approved write tools — the
+    # default ``workspace`` seatbelt profile still blocked ~/.config/gcloud
+    # and similar. When the user opted in (allow_full_access), also turn the
+    # OS sandbox off so deploy/auth CLIs can run.
+    if (
+        mode == "full_access"
+        and bool(settings.get("allow_full_access"))
+        and "sandbox_profile" in _agent_params
+    ):
+        kwargs["sandbox_profile"] = "off"
+
     # Browser tools (Playwright). Opt-in via Settings → Enable browser tools.
     if settings.get("browser_tools"):
         try:
@@ -1253,10 +1264,10 @@ async def run_chat_turn(
 
         return await agent.invoke(augmented, **invoke_kwargs)
 
-    # Floor is clawagents≥6.20.16 — workspace= is required. No process chdir / turn lock.
+    # Floor is clawagents≥6.20.17 — workspace= is required. No process chdir / turn lock.
     if not supports_workspace:
         raise RuntimeError(
-            "ClawAgents sidecar requires clawagents≥6.20.16 with workspace= support. "
+            "ClawAgents sidecar requires clawagents≥6.20.17 with workspace= support. "
             "Run ClawAgents: Install/Upgrade Python Dependencies."
         )
     result = await _run_turn()

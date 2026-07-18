@@ -3561,7 +3561,7 @@ export function App() {
             </label>
             <label
               className="check"
-              title="Required before mode=full_access is honored (otherwise demoted to auto)."
+              title="Required before mode=full_access is honored (otherwise demoted to auto). Also disables the OS seatbelt sandbox so gcloud/deploy can use ~/.config."
             >
               <input
                 type="checkbox"
@@ -3570,7 +3570,7 @@ export function App() {
                   setSettings((s) => ({ ...s, allow_full_access: e.target.checked }))
                 }
               />
-              Allow Full Access mode
+              Allow Full Access mode (also disables OS sandbox)
             </label>
             <label
               className="check"
