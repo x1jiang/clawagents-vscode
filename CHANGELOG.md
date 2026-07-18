@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.75
+
+- Require `clawagents>=6.20.4` (cancel kills orphan execute; bg shell-session sync)
+- **Settings save reliability:** stop optimistic commit before host confirms (blocked retries after stale echoes); trust-modal Cancel applies prior settings via `saveOutcome: "cancelled"`
+
 ## 1.0.74
 
 - **Fix Mantle model dropdown showing Native IAM models:** when Access mode is Mantle, chat model list uses Mantle IDs (live `/models` on catalog change + after Test endpoint). Client fallback no longer shows Nova/Claude US while in Mantle mode.

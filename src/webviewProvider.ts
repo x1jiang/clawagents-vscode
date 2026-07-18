@@ -1101,6 +1101,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               this.post({
                 type: "settings",
                 settings: previous,
+                saveOutcome: "cancelled",
               });
               return;
             }

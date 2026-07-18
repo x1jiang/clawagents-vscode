@@ -462,10 +462,12 @@ export function App() {
   /** Last settings patch we asked the host to persist — verified on `settings` reply. */
   const pendingSettingsPatch = useRef<Record<string, unknown> | null>(null);
   /**
-   * Fingerprint of last committed settings (host echo or outbound save).
+   * Fingerprint of last *confirmed* settings (host ok / cancelled revert).
    * Autosave only runs when local settings differ — prevents forever PUT loops.
    */
   const committedSettingsKey = useRef<string>("");
+  /** Fingerprint of in-flight save — not committed until host confirms. */
+  const inflightSettingsKey = useRef<string>("");
   /** Latest settings for message-handler stale-echo checks (avoid clobber). */
   const settingsRef = useRef<Record<string, unknown>>({});
   /** One-shot preferred-model fill (empty model only) — never loop on catalog mismatch. */
@@ -612,17 +614,35 @@ export function App() {
           if (msg.providers) {
             setProviders(msg.providers as Provider[]);
           }
+          // Trust-modal cancel (or explicit host revert) — always apply snapshot.
+          if (msg.saveOutcome === "cancelled") {
+            pendingSettingsPatch.current = null;
+            inflightSettingsKey.current = "";
+            skipSettingsAutosave.current = true;
+            settingsAutosaveReady.current = true;
+            committedSettingsKey.current = settingsSaveKey(incoming);
+            settingsRef.current = incoming;
+            setSettings(incoming);
+            if (typeof incoming.model === "string" && incoming.model) {
+              setModel(incoming.model);
+            }
+            setVerifyMsg("Settings save cancelled");
+            break;
+          }
           const pending = pendingSettingsPatch.current;
           if (pending) {
             const failed = settingsPatchMismatches(pending, incoming);
             if (failed.length > 0) {
-              // Stale reply (e.g. IAM echo after user chose Mantle) — keep local UI.
+              // Stale reply (e.g. IAM echo after user chose Mantle) — keep local
+              // UI and keep pending so a matching reply can still land. Clear
+              // inflight only after a short window via retry (local ≠ committed).
               setVerifyMsg(
                 `Ignoring stale settings (${failed.join(", ")}) — keeping your Access mode`,
               );
               break;
             }
             pendingSettingsPatch.current = null;
+            inflightSettingsKey.current = "";
             skipSettingsAutosave.current = true;
             settingsAutosaveReady.current = true;
             committedSettingsKey.current = settingsSaveKey(incoming);
@@ -636,7 +656,11 @@ export function App() {
           }
           // Unsolicited push (load/ready) — never clobber in-progress edits.
           const localKey = settingsSaveKey(settingsRef.current);
-          if (localKey && localKey !== committedSettingsKey.current) {
+          if (
+            localKey &&
+            (localKey !== committedSettingsKey.current ||
+              Boolean(inflightSettingsKey.current))
+          ) {
             break;
           }
           skipSettingsAutosave.current = true;
@@ -1104,8 +1128,9 @@ export function App() {
     return () => window.clearTimeout(persistTimer.current);
   }, [items, draft, mode, chatId, autoApprove, interaction, caveman, goalMode]);
 
-  // Debounced autosave — only when local settings differ from last commit.
-  // Host echoes update committedSettingsKey and must never re-PUT.
+  // Debounced autosave — only when local settings differ from last *confirmed*
+  // commit. Do not optimistically commit before the host replies (that blocked
+  // retries when a stale echo was ignored).
   useEffect(() => {
     if (!settingsAutosaveReady.current) {
       return;
@@ -1115,24 +1140,37 @@ export function App() {
       return;
     }
     const key = settingsSaveKey(settings);
-    if (!key || key === committedSettingsKey.current) {
+    if (
+      !key ||
+      key === committedSettingsKey.current ||
+      key === inflightSettingsKey.current
+    ) {
       return;
     }
     window.clearTimeout(settingsSaveTimer.current);
     settingsSaveTimer.current = window.setTimeout(() => {
       const patch = normalizeSettingsForSave(settings);
       const keyNow = settingsSaveKey(settings);
-      if (!keyNow || keyNow === committedSettingsKey.current) {
+      if (
+        !keyNow ||
+        keyNow === committedSettingsKey.current ||
+        keyNow === inflightSettingsKey.current
+      ) {
         return;
       }
-      // Commit before post so in-flight echoes / re-renders cannot loop.
-      committedSettingsKey.current = keyNow;
+      inflightSettingsKey.current = keyNow;
       pendingSettingsPatch.current = patch;
       setVerifyMsg("Saving…");
       post({
         type: "save_settings",
         settings: patch,
       });
+      // If the host never confirms, clear inflight so a later effect can retry.
+      window.setTimeout(() => {
+        if (inflightSettingsKey.current === keyNow && pendingSettingsPatch.current) {
+          inflightSettingsKey.current = "";
+        }
+      }, 15_000);
     }, 500);
     return () => window.clearTimeout(settingsSaveTimer.current);
   }, [settings]);
@@ -1352,7 +1390,7 @@ export function App() {
     setModel(preferredPick.model);
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
-    committedSettingsKey.current = settingsSaveKey(nextSettings);
+    inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
     post({ type: "save_settings", settings: patch });
   }, [preferredPick.model, preferredPick.effort, post, settings]);
@@ -1395,7 +1433,7 @@ export function App() {
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
-    committedSettingsKey.current = settingsSaveKey(nextSettings);
+    inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
     post({ type: "save_settings", settings: patch });
@@ -1405,7 +1443,7 @@ export function App() {
     const nextSettings = { ...settings, reasoning_effort: next };
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
-    committedSettingsKey.current = settingsSaveKey(nextSettings);
+    inflightSettingsKey.current = settingsSaveKey(nextSettings);
     const patch = { reasoning_effort: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
@@ -1417,7 +1455,7 @@ export function App() {
     skipSettingsAutosave.current = true;
     const nextSettings = { ...settings, wire_api: next };
     setSettings(nextSettings);
-    committedSettingsKey.current = settingsSaveKey(nextSettings);
+    inflightSettingsKey.current = settingsSaveKey(nextSettings);
     const patch = { wire_api: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
@@ -1428,7 +1466,7 @@ export function App() {
     skipSettingsAutosave.current = true;
     const nextSettings = { ...settings, ssl_verify: next };
     setSettings(nextSettings);
-    committedSettingsKey.current = settingsSaveKey(nextSettings);
+    inflightSettingsKey.current = settingsSaveKey(nextSettings);
     const patch = { ssl_verify: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
@@ -2225,7 +2263,7 @@ export function App() {
                       // were snapping Mantle back to Native IAM.
                       skipSettingsAutosave.current = true;
                       settingsRef.current = next;
-                      committedSettingsKey.current = settingsSaveKey(next);
+                      inflightSettingsKey.current = settingsSaveKey(next);
                       setSettings(next);
                       setModel(String(next.model || ""));
                       const patch = normalizeSettingsForSave(next);

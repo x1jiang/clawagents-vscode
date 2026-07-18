@@ -125,7 +125,13 @@ export type HostToWebview =
       sessionCostUsd?: number;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
-  | { type: "settings"; settings: Record<string, unknown>; providers?: unknown[] }
+  | {
+      type: "settings";
+      settings: Record<string, unknown>;
+      providers?: unknown[];
+      /** Host rejected/cancelled a save (e.g. trust modal) — apply snapshot. */
+      saveOutcome?: "ok" | "cancelled";
+    }
   | {
       type: "skills_preview";
       folders: Array<{ path: string; origin: string }>;
