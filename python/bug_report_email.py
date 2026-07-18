@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send ClawAgents bug reports using alpaca_deploy email credentials.
+"""Send ClawAgents bug reports using alpaca_deploy SMTP credentials.
 
 Reads JSON from stdin:
   {
@@ -8,11 +8,12 @@ Reads JSON from stdin:
     "meta": {"vscode": "...", "clawagents": "...", "workspace": "..."}
   }
 
-Credential source (same as alpaca_deploy EMAIL_CONFIG):
-  alpaca_deploy/.env → EMAIL_SENDER, EMAIL_PASSWORD, RECIPIENT_EMAILS, EMAIL_SMTP_*
+Uses alpaca_deploy/.env for SMTP login only (EMAIL_SENDER, EMAIL_PASSWORD,
+EMAIL_SMTP_*). Does NOT use alpaca send_alert_email (that prefixes
+[alpaca-autotrading] and fans out to trading RECIPIENT_EMAILS).
 
-When alpaca_deploy.utils.helpers is importable, text-only reports use send_alert_email.
-Otherwise (and always for attachments) uses the same SMTP login pattern.
+Subject: [ClawAgents-bug-report] …
+To: EMAIL_SENDER only (the report author), never the trading recipient list.
 
 Exit 0 on success; print JSON {"ok": true/false, "detail": "..."} to stdout.
 """
@@ -79,22 +80,21 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
 
 
 def _email_config_from_alpaca(root: Path) -> dict:
-    """Mirror alpaca_deploy.config.settings.EMAIL_CONFIG without importing it."""
+    """SMTP credentials from alpaca .env; bug reports go only to EMAIL_SENDER."""
     file_env = _parse_dotenv(root / ".env")
 
     def get(key: str, default: str = "") -> str:
         return (os.environ.get(key) or file_env.get(key) or default).strip()
 
     password = get("EMAIL_PASSWORD")
-    recipients = [
-        e.strip()
-        for e in get("RECIPIENT_EMAILS", "xiaoqian.jiang@gmail.com").split(",")
-        if e.strip()
-    ]
+    sender = get("EMAIL_SENDER", "xiaoqian.jiang@gmail.com")
+    # Optional override; never fall back to trading RECIPIENT_EMAILS (may include others).
+    to_raw = get("CLAWAGENTS_BUG_REPORT_EMAIL") or sender
+    recipients = [e.strip() for e in to_raw.split(",") if e.strip()]
     enabled = get("EMAIL_ENABLED", "true").lower() == "true" and bool(password)
     return {
         "enabled": enabled,
-        "sender_email": get("EMAIL_SENDER", "xiaoqian.jiang@gmail.com"),
+        "sender_email": sender,
         "sender_password": password,
         "recipient_emails": recipients,
         "smtp_server": get("EMAIL_SMTP_SERVER", "smtp.gmail.com"),
@@ -157,24 +157,6 @@ def _send_smtp(
         smtp.send_message(msg)
 
 
-def _try_alpaca_send_alert(root: Path, subject: str, body: str) -> bool | None:
-    """Return True/False if helpers imported; None if import unavailable."""
-    root_s = str(root)
-    if root_s not in sys.path:
-        sys.path.insert(0, root_s)
-    # Load .env into os.environ so settings sees credentials if helpers import settings.
-    for k, v in _parse_dotenv(root / ".env").items():
-        os.environ.setdefault(k, v)
-    try:
-        from utils.helpers import send_alert_email  # type: ignore
-    except Exception:
-        return None
-    try:
-        return bool(send_alert_email(subject, body))
-    except Exception:
-        return False
-
-
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
@@ -215,22 +197,17 @@ def main() -> int:
             lines.append(f"{key}: {meta[key]}")
     lines.append(f"alpaca_deploy: {root}")
     body = "\n".join(lines)
-    subject_short = text[:72].replace("\n", " ")
-    subject = f"[clawagents-bug] {subject_short}"
+    subject_short = text[:72].replace("\n", " ").strip() or "bug report"
+    subject = f"[ClawAgents-bug-report] {subject_short}"
 
     try:
-        if not screenshots:
-            used = _try_alpaca_send_alert(root, subject_short, body)
-            if used is True:
-                return _result(True, "sent via alpaca_deploy.send_alert_email")
-            # Fall through to SMTP (import failed or send returned False)
-
         _send_smtp(cfg=cfg, subject=subject, body=body, screenshots=screenshots)
         n = len(screenshots)
+        to = ", ".join(cfg.get("recipient_emails") or [])
         detail = (
-            f"sent via alpaca_deploy EMAIL_* SMTP ({n} screenshot(s))"
+            f"sent to {to} ({n} screenshot(s))"
             if n
-            else "sent via alpaca_deploy EMAIL_* SMTP"
+            else f"sent to {to}"
         )
         return _result(True, detail)
     except Exception as exc:
