@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.92
+
+- **Catalog merge:** on zero curated∩live overlap, prefer the live ``/models`` list instead of advertising the full unconfirmed curated set.
+
 ## 1.0.91
 
 - **Cost estimates for Bedrock / Mantle:** price table uses [Bedrock on-demand rates](https://aws.amazon.com/bedrock/pricing/) (e.g. Claude Opus 4.8 = $6/$30 per 1M); strips ``anthropic.`` / geo prefixes so Mantle ids match. Unknown models omit ``~$0.00`` instead of faking zero.
@@ -490,6 +494,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.92
+
+- **Catalog merge:** on zero curated∩live overlap, prefer the live ``/models`` list instead of advertising the full unconfirmed curated set.
 
 ## 1.0.91
 

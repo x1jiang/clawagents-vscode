@@ -372,7 +372,11 @@ def _probe_compatible_endpoint(
 def _merge_curated_with_remote(
     curated: list[dict[str, Any]], remote: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Keep curated labels/order for models confirmed by a live endpoint."""
+    """Keep curated labels/order for models confirmed by a live endpoint.
+
+    On zero overlap, prefer the live catalog over the full curated list so we
+    do not advertise unconfirmed model ids for the current key/endpoint.
+    """
     remote_ids = {
         str(model.get("id") or "").strip()
         for model in remote
@@ -383,7 +387,11 @@ def _merge_curated_with_remote(
         for model in curated
         if str(model.get("id") or "").strip() in remote_ids
     ]
-    return merged or curated
+    if merged:
+        return merged
+    if remote:
+        return list(remote)
+    return curated
 
 
 def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
