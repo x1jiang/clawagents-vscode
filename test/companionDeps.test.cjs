@@ -16,6 +16,7 @@ fs.writeFileSync(
   window: {
     withProgress: (_opts, task) => task({ report() {} }),
     showInformationMessage() {},
+    showWarningMessage: async () => "Skip",
   },
   workspace: {
     getConfiguration: () => ({ get: (_k, d) => d }),
@@ -36,6 +37,10 @@ buildSync({
 const deps = require(outputFile);
 
 test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+
+test("ensureCompanions defaults to probe-only (off)", () => {
+  assert.equal(deps.ensureCompanionsEnabled(), false);
+});
 
 test("companion floors match lockstep constants", () => {
   assert.deepEqual(deps.MIN_CONTEXT_MODE_VERSION, [1, 0, 169]);

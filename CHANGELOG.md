@@ -1,5 +1,14 @@
 ## Unreleased
 
+## 1.0.84
+
+- Require `clawagents>=6.20.8` (artifact path containment + raw tool archival).
+- **No silent global installs:** `ensureCompanions` defaults off; npm/brew installs ask for confirmation; pip `--break-system-packages` requires consent.
+- **Parallel turns:** pass `workspace=` to the agent and skip process-wide `chdir`/turn lock when supported.
+- **Chat search:** stream UI logs with chat/hit caps (no full JSONL load per chat).
+- Sidecar pip includes `media` (Pillow) for image attach resize.
+- README / requirements version docs aligned to the floor constant.
+
 ## 1.0.83
 
 - **Provider-switch hardening (all vendors):** leaving Bedrock clears Mantle/BAG Base URL, resets `bedrock_mode` + `wire_api`; host never force-restores Mantle under OpenAI/Anthropic/Gemini; webview ignores stale pushes that hijack back to Bedrock.

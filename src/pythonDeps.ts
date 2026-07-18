@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 7];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 8];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 export const MIN_CLAWAGENTS_VERSION_STR = MIN_CLAWAGENTS_VERSION.join(".");
 
@@ -13,9 +13,9 @@ export const CLAWAGENTS_GITHUB_WHEEL =
 
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
-  // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION:
-  // 6.20.1: Grok harness hardening (marker trailers, sticky caps, grep bounds).
-  `clawagents[gemini,anthropic,bedrock,mcp]>=${MIN_CLAWAGENTS_VERSION_STR},<7`,
+  // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION.
+  // `media` pulls Pillow so image attach resize/recompress works in the sidecar.
+  `clawagents[gemini,anthropic,bedrock,mcp,media]>=${MIN_CLAWAGENTS_VERSION_STR},<7`,
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -29,6 +29,7 @@ export const SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK = [
   "anthropic>=0.40.0",
   "boto3>=1.34.0",
   "mcp>=1.0.0",
+  "Pillow>=10.0.0",
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -242,15 +243,27 @@ async function installWithWritableFallbacks(
       title,
     });
   }
-  // Homebrew / Debian PEP 668 — --user alone is not enough on recent Homebrew.
+  // Homebrew / Debian PEP 668 — never apply --break-system-packages without consent.
   if (!result.ok && looksLikeExternallyManaged(result.detail)) {
-    output.appendLine(
-      "Retrying pip with --break-system-packages (externally-managed / PEP 668)…",
+    const choice = await vscode.window.showWarningMessage(
+      "This Python is externally managed (PEP 668). Allow pip --break-system-packages, or cancel and use a venv / clawagents.pythonPath?",
+      { modal: true },
+      "Allow --break-system-packages",
+      "Cancel",
     );
-    result = await runPipInstall(python, packages, output, {
-      breakSystemPackages: true,
-      title,
-    });
+    if (choice === "Allow --break-system-packages") {
+      output.appendLine(
+        "Retrying pip with --break-system-packages (user confirmed)…",
+      );
+      result = await runPipInstall(python, packages, output, {
+        breakSystemPackages: true,
+        title,
+      });
+    } else {
+      output.appendLine(
+        "Skipped --break-system-packages — set clawagents.pythonPath to a venv, then Install Python Deps.",
+      );
+    }
   }
   return result;
 }

@@ -186,8 +186,19 @@ function runCommand(
   });
 }
 
+async function confirmGlobalInstall(detail: string): Promise<boolean> {
+  const choice = await vscode.window.showWarningMessage(
+    detail,
+    { modal: true },
+    "Install",
+    "Skip",
+  );
+  return choice === "Install";
+}
+
 async function ensureContextMode(
   output: { appendLine(s: string): void },
+  options?: { force?: boolean },
 ): Promise<CompanionProbe> {
   let probe = probeContextMode();
   if (probe.ok) {
@@ -196,6 +207,16 @@ async function ensureContextMode(
   const npm = whichSync("npm");
   if (!npm) {
     output.appendLine("context-mode: npm not found — skip auto-install");
+    return probe;
+  }
+  // Never mutate the global npm prefix without consent (startup used to install silently).
+  const ok = options?.force
+    ? true
+    : await confirmGlobalInstall(
+        "ClawAgents wants to run `npm install -g context-mode@latest` (global). Continue?",
+      );
+  if (!ok) {
+    output.appendLine("context-mode: install skipped (user declined or probe-only)");
     return probe;
   }
   const result = await vscode.window.withProgress(
@@ -217,6 +238,7 @@ async function ensureContextMode(
 
 async function ensureRtk(
   output: { appendLine(s: string): void },
+  options?: { force?: boolean },
 ): Promise<CompanionProbe> {
   let probe = probeRtk();
   if (probe.ok) {
@@ -232,6 +254,15 @@ async function ensureRtk(
   const args = probe.found
     ? ["upgrade", "rtk"]
     : ["install", "rtk"];
+  const ok = options?.force
+    ? true
+    : await confirmGlobalInstall(
+        `ClawAgents wants to run \`brew ${args.join(" ")}\` (Homebrew). Continue?`,
+      );
+  if (!ok) {
+    output.appendLine("rtk: install skipped (user declined or probe-only)");
+    return probe;
+  }
   const result = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -249,9 +280,10 @@ async function ensureRtk(
   return probe;
 }
 
+/** Default false — startup probes only; Install via Ensure Companions or opt-in setting. */
 export function ensureCompanionsEnabled(): boolean {
-  return vscode.workspace.getConfiguration("clawagents").get<boolean>("ensureCompanions", true)
-    !== false;
+  return vscode.workspace.getConfiguration("clawagents").get<boolean>("ensureCompanions", false)
+    === true;
 }
 
 const ensureInFlight = new Map<string, Promise<CompanionProbe[]>>();
@@ -293,12 +325,12 @@ async function ensureCompanionsOnce(
 
   const results: CompanionProbe[] = [];
   if (!before[0]?.ok) {
-    results.push(await ensureContextMode(output));
+    results.push(await ensureContextMode(output, options));
   } else {
     results.push(before[0]);
   }
   if (!before[1]?.ok) {
-    results.push(await ensureRtk(output));
+    results.push(await ensureRtk(output, options));
   } else {
     results.push(before[1]);
   }

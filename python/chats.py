@@ -76,8 +76,8 @@ def _apply_aws_settings(settings: dict[str, Any]) -> None:
         os.environ["AWS_PROFILE"] = profile
 
 
-# os.chdir is process-global: serialize agent turns so concurrent streams
-# cannot interleave workspace switches or clobber each other's cwd.
+# Legacy fallback only: os.chdir is process-global. Prefer create_claw_agent(
+# workspace=…) which scopes tools without chdir — then this lock is unused.
 _turn_lock = threading.Lock()
 
 
@@ -240,21 +240,55 @@ def read_ui_events(chat_id: str) -> list[dict[str, Any]]:
     return events
 
 
-def search_chats(query: str) -> list[dict[str, Any]]:
+def _ui_log_contains(chat_id: str, needle: str, *, max_bytes: int = 512_000) -> bool:
+    """Stream-scan a chat UI log for ``needle`` without loading the whole file."""
+    try:
+        path = chat_ui_log_path(chat_id)
+    except ValueError:
+        return False
+    if not path.exists():
+        return False
+    needle_l = needle.lower()
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            read = 0
+            for line in f:
+                read += len(line.encode("utf-8", errors="replace"))
+                if read > max_bytes:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    if needle_l in line.lower():
+                        return True
+                    continue
+                text = str(ev.get("text") or ev.get("content") or "")
+                if needle_l in text.lower():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def search_chats(
+    query: str,
+    *,
+    max_chats: int = 200,
+    max_hits: int = 50,
+) -> list[dict[str, Any]]:
     q = query.lower().strip()
     if not q:
-        return list_chats()
+        return list_chats()[:max_hits]
     hits: list[dict[str, Any]] = []
-    for meta in list_chats():
+    for meta in list_chats()[: max(1, max_chats)]:
         blob = (meta.get("title") or "").lower()
-        if q in blob:
+        if q in blob or _ui_log_contains(str(meta["id"]), q):
             hits.append(meta)
-            continue
-        for ev in read_ui_events(str(meta["id"])):
-            text = str(ev.get("text") or ev.get("content") or "")
-            if q in text.lower():
-                hits.append(meta)
-                break
+        if len(hits) >= max(1, max_hits):
+            break
     return hits
 
 
@@ -889,6 +923,11 @@ async def run_chat_turn(
     # Capability probe once — older clawagents wheels omit newer kwargs.
     _agent_params = inspect.signature(create_claw_agent).parameters
 
+    # Prefer workspace-scoped agent (no process chdir) when the library supports it.
+    supports_workspace = "workspace" in _agent_params
+    if supports_workspace:
+        kwargs["workspace"] = str(WORKSPACE)
+
     # Goal autopilot — long-horizon completion path.
     if goal and "goal_mode" in _agent_params:
         kwargs["goal_mode"] = True
@@ -1103,78 +1142,83 @@ async def run_chat_turn(
             return
         _forward_legacy(kind, data or {})
 
-    with _turn_lock:
-        # Capture cwd *inside* the lock: with concurrent turns, capturing it
-        # outside could snapshot another turn's WORKSPACE chdir and "restore"
-        # to the wrong directory afterwards.
-        prev = os.getcwd()
-        try:
-            os.chdir(WORKSPACE)
-            # Drop kwargs unsupported by the installed clawagents version
-            # (PyPI lag vs extension features).
-            allowed = set(inspect.signature(create_claw_agent).parameters)
-            agent = create_claw_agent(
-                **{k: v for k, v in kwargs.items() if k in allowed}
+    async def _run_turn() -> Any:
+        # Drop kwargs unsupported by the installed clawagents version
+        # (PyPI lag vs extension features).
+        allowed = set(inspect.signature(create_claw_agent).parameters)
+        agent = create_claw_agent(
+            **{k: v for k, v in kwargs.items() if k in allowed}
+        )
+        bt = before_tool_factory(mode=mode, grants=GrantStore())
+        agent.before_tool = bt
+        # Route declarative permission "ask" into the VS Code approval UI.
+        ask_h = getattr(bt, "ask_handler", None)
+        pe = getattr(agent, "_permission_engine", None)
+        if pe is None:
+            pe = getattr(agent.tools, "_permission_engine", None)
+        if pe is not None and callable(ask_h):
+            pe.ask_handler = ask_h
+            agent.tools._permission_engine = pe  # type: ignore[attr-defined]
+        if ask_user_factory is not None:
+            # Sidecar has no stdin — replace CLI ask_user with webview HITL.
+            agent.tools.register(ask_user_factory())
+
+        invoke_kwargs: dict[str, Any] = {
+            "on_event": _on_legacy_event,
+            "on_stream_event": _on_stream_event,
+            "session": session,
+            "features": {"session_persistence": True, "file_snapshots": True},
+        }
+        if "run_context" in inspect.signature(agent.invoke).parameters:
+            invoke_kwargs["run_context"] = run_context
+        # Image attachments require a newer clawagents (invoke(images=…));
+        # older installs simply ignore them rather than crashing the turn.
+        clean_images = _normalize_images(images)
+        if clean_images and "images" in inspect.signature(agent.invoke).parameters:
+            invoke_kwargs["images"] = clean_images
+        elif clean_images:
+            on_event(
+                "warn",
+                {
+                    "message": (
+                        "Image attachments need clawagents≥6.12.12; "
+                        "the installed version ignored them."
+                    )
+                },
             )
-            bt = before_tool_factory(mode=mode, grants=GrantStore())
-            agent.before_tool = bt
-            # Route declarative permission "ask" into the VS Code approval UI.
-            ask_h = getattr(bt, "ask_handler", None)
-            pe = getattr(agent, "_permission_engine", None)
-            if pe is None:
-                pe = getattr(agent.tools, "_permission_engine", None)
-            if pe is not None and callable(ask_h):
-                pe.ask_handler = ask_h
-                agent.tools._permission_engine = pe  # type: ignore[attr-defined]
-            if ask_user_factory is not None:
-                # Sidecar has no stdin — replace CLI ask_user with webview HITL.
-                agent.tools.register(ask_user_factory())
 
-            invoke_kwargs: dict[str, Any] = {
-                "on_event": _on_legacy_event,
-                "on_stream_event": _on_stream_event,
-                "session": session,
-                "features": {"session_persistence": True, "file_snapshots": True},
-            }
-            if "run_context" in inspect.signature(agent.invoke).parameters:
-                invoke_kwargs["run_context"] = run_context
-            # Image attachments require a newer clawagents (invoke(images=…));
-            # older installs simply ignore them rather than crashing the turn.
-            clean_images = _normalize_images(images)
-            if clean_images and "images" in inspect.signature(agent.invoke).parameters:
-                invoke_kwargs["images"] = clean_images
-            elif clean_images:
-                on_event(
-                    "warn",
-                    {
-                        "message": (
-                            "Image attachments need clawagents≥6.12.12; "
-                            "the installed version ignored them."
-                        )
-                    },
-                )
+        # File attachments (PDF/DOCX) follow the same capability gate.
+        clean_files = _normalize_files(files)
+        if clean_files and "files" in inspect.signature(agent.invoke).parameters:
+            invoke_kwargs["files"] = clean_files
+        elif clean_files:
+            on_event(
+                "warn",
+                {
+                    "message": (
+                        "File attachments need clawagents≥6.12.12; "
+                        "the installed version ignored them."
+                    )
+                },
+            )
 
-            # File attachments (PDF/DOCX) follow the same capability gate.
-            clean_files = _normalize_files(files)
-            if clean_files and "files" in inspect.signature(agent.invoke).parameters:
-                invoke_kwargs["files"] = clean_files
-            elif clean_files:
-                on_event(
-                    "warn",
-                    {
-                        "message": (
-                            "File attachments need clawagents≥6.12.12; "
-                            "the installed version ignored them."
-                        )
-                    },
-                )
+        return await agent.invoke(augmented, **invoke_kwargs)
 
-            result = await agent.invoke(augmented, **invoke_kwargs)
-        finally:
+    if supports_workspace:
+        # No process-global cwd mutation — concurrent turns can run in parallel.
+        result = await _run_turn()
+    else:
+        # Legacy clawagents: serialize turns around os.chdir(WORKSPACE).
+        with _turn_lock:
+            prev = os.getcwd()
             try:
-                os.chdir(prev)
-            except OSError:
-                pass
+                os.chdir(WORKSPACE)
+                result = await _run_turn()
+            finally:
+                try:
+                    os.chdir(prev)
+                except OSError:
+                    pass
 
     status = getattr(result, "status", "done")
     iterations = getattr(result, "iterations", 0)
