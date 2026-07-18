@@ -10,7 +10,7 @@
 
 ## 1.0.91
 
-- **Cost estimates for Bedrock / Mantle:** price table uses [Bedrock on-demand rates](https://aws.amazon.com/bedrock/pricing/) (e.g. Claude Opus 4.8 = $6/$30 per 1M); strips ``anthropic.`` / geo prefixes so Mantle ids match. Unknown models omit ``~$0.00`` instead of faking zero.
+- **Cost estimates for Bedrock / Mantle:** price table + prefix strip so Mantle ids match (Opus briefly used GovCloud \$6/\$30 by mistake; corrected to commercial Global \$5/\$25 in 1.0.93). Unknown models omit ``~$0.00`` instead of faking zero.
 
 ## 1.0.90
 
@@ -509,7 +509,7 @@
 
 ## 1.0.91
 
-- **Cost estimates for Bedrock / Mantle:** price table uses [Bedrock on-demand rates](https://aws.amazon.com/bedrock/pricing/) (e.g. Claude Opus 4.8 = $6/$30 per 1M); strips ``anthropic.`` / geo prefixes so Mantle ids match. Unknown models omit ``~$0.00`` instead of faking zero.
+- **Cost estimates for Bedrock / Mantle:** price table + prefix strip so Mantle ids match (Opus briefly used GovCloud \$6/\$30 by mistake; corrected to commercial Global \$5/\$25 in 1.0.93). Unknown models omit ``~$0.00`` instead of faking zero.
 
 ## 1.0.90
 
