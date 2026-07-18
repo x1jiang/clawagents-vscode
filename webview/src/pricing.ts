@@ -1,7 +1,8 @@
 /** USD per 1M tokens — mirrors python/pricing.py for offline header estimates.
  *
- * Bedrock / Mantle on-demand from https://aws.amazon.com/bedrock/pricing/
- * (2026-07-18). Direct OpenAI / Anthropic API rates differ slightly.
+ * Bedrock / Mantle = commercial us-east-1 Global Standard (Claude parity with
+ * Anthropic). GovCloud Opus $6/$30 is NOT used — that is a different table.
+ * OpenAI-on-Bedrock is ~+10% vs OpenAI API.
  */
 
 type Rates = { input: number; output: number };
@@ -38,13 +39,13 @@ const PRICES: Record<string, Rates> = {
   "gemini-2.5-flash": { input: 0.3, output: 2.5 },
 };
 
-/** Bedrock / Mantle on-demand (US East). */
+/** Bedrock / Mantle commercial Global Standard (OneHUB us-east-1). */
 const BEDROCK_PRICES: Record<string, Rates> = {
-  "claude-opus-4": { input: 6, output: 30 },
-  "claude-opus-4-5": { input: 6, output: 30 },
-  "claude-opus-4-6": { input: 6, output: 30 },
-  "claude-opus-4-7": { input: 6, output: 30 },
-  "claude-opus-4-8": { input: 6, output: 30 },
+  "claude-opus-4": { input: 5, output: 25 },
+  "claude-opus-4-5": { input: 5, output: 25 },
+  "claude-opus-4-6": { input: 5, output: 25 },
+  "claude-opus-4-7": { input: 5, output: 25 },
+  "claude-opus-4-8": { input: 5, output: 25 },
   "claude-sonnet-4": { input: 3, output: 15 },
   "claude-sonnet-4-5": { input: 3, output: 15 },
   "claude-sonnet-4-6": { input: 3, output: 15 },

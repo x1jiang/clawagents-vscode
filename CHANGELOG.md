@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.93
+
+- **Cost estimates:** Mantle/Bedrock Claude uses commercial Global rates ($5/$25 Opus), not the GovCloud row ($6/$30) that was scraped from the pricing page by mistake.
+
 ## 1.0.92
 
 - **Catalog merge:** on zero curated∩live overlap, prefer the live ``/models`` list instead of advertising the full unconfirmed curated set.
@@ -494,6 +498,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.93
+
+- **Cost estimates:** Mantle/Bedrock Claude uses commercial Global rates ($5/$25 Opus), not the GovCloud row ($6/$30) that was scraped from the pricing page by mistake.
 
 ## 1.0.92
 

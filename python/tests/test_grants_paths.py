@@ -157,17 +157,16 @@ class GrantPathTests(unittest.TestCase):
             sys.modules.pop(mod, None)
         import pricing as pricing_mod  # noqa: WPS433
 
-        # Bedrock list: Opus 4.8 = $6 / $30 per 1M (aws.amazon.com/bedrock/pricing).
+        # Commercial Global (Mantle/OneHUB): Opus 4.8 = $5/$25 — not GovCloud $6/$30.
         self.assertEqual(
-            pricing_mod.price_for("anthropic.claude-opus-4-8"), (6.0, 30.0)
+            pricing_mod.price_for("anthropic.claude-opus-4-8"), (5.0, 25.0)
         )
         self.assertEqual(
             pricing_mod.price_for("us.anthropic.claude-opus-4-8-20260501-v1:0"),
-            (6.0, 30.0),
+            (5.0, 25.0),
         )
-        # Direct Anthropic API stays at $5 / $25.
         self.assertEqual(pricing_mod.price_for("claude-opus-4-8"), (5.0, 25.0))
-        # Mantle OpenAI on Bedrock markup vs direct API.
+        # Mantle OpenAI on Bedrock ~+10% vs direct API.
         self.assertEqual(
             pricing_mod.price_for("openai.gpt-5.6-luna"), (1.1, 6.6)
         )
@@ -175,7 +174,7 @@ class GrantPathTests(unittest.TestCase):
         cost = pricing_mod.estimate_usd(
             "anthropic.claude-opus-4-8", prompt_tokens=1_000_000, completion_tokens=0
         )
-        self.assertEqual(cost, 6.0)
+        self.assertEqual(cost, 5.0)
 
 
 if __name__ == "__main__":

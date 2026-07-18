@@ -4,9 +4,11 @@ Used for sidebar cost estimates. Not a billing system — rates drift; verify on
 the provider's pricing page. Cache discounts and long-context multipliers are
 ignored (estimate is an upper bound for uncached short-context traffic).
 
-Bedrock / Mantle on-demand rates from:
-https://aws.amazon.com/bedrock/pricing/ (fetched 2026-07-18).
-Anthropic / OpenAI direct API rates are separate (often slightly lower).
+Bedrock / Mantle defaults = commercial us-east-1 **Global** Standard
+(Claude parity with Anthropic API). Do not use the GovCloud Anthropic row
+($6/$30 Opus) — that is not OneHUB/Mantle. Regional is typically +10%.
+See aws_management/BEDROCK_COST_COMPARISON.md and
+https://aws.amazon.com/bedrock/pricing/
 """
 
 from __future__ import annotations
@@ -50,20 +52,22 @@ PRICES: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash": (0.3, 2.5),
 }
 
-# Amazon Bedrock / Mantle on-demand (US East) — from aws.amazon.com/bedrock/pricing
+# Amazon Bedrock / Mantle — commercial us-east-1 Global Standard (OneHUB).
+# GovCloud Opus is $6/$30 — intentionally NOT used here.
+# Regional Claude would be ~+10% ($5.50/$27.50 Opus); we estimate Global.
 BEDROCK_PRICES: dict[str, tuple[float, float]] = {
-    # Anthropic on Bedrock (Opus 4.8 listed at $6/$30)
-    "claude-opus-4": (6.0, 30.0),
-    "claude-opus-4-5": (6.0, 30.0),
-    "claude-opus-4-6": (6.0, 30.0),
-    "claude-opus-4-7": (6.0, 30.0),
-    "claude-opus-4-8": (6.0, 30.0),
+    # Anthropic on Bedrock Global (= Claude API)
+    "claude-opus-4": (5.0, 25.0),
+    "claude-opus-4-5": (5.0, 25.0),
+    "claude-opus-4-6": (5.0, 25.0),
+    "claude-opus-4-7": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
     "claude-sonnet-4": (3.0, 15.0),
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-sonnet-5": (2.0, 10.0),  # promo through 2026-08-31 → then $3/$15
     "claude-haiku-4-5": (1.0, 5.0),
-    # OpenAI on Bedrock (in-region US East)
+    # OpenAI on Bedrock (~+10% vs OpenAI API)
     "gpt-5.6": (5.5, 33.0),
     "gpt-5.6-sol": (5.5, 33.0),
     "gpt-5.6-terra": (2.75, 16.5),
