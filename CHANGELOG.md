@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.98
+
+- Provider switch: reset incompatible leftover models (e.g. Ollama ``llama3.1`` when switching to OpenAI) instead of sending them to api.openai.com (404).
+- Sidecar: clear error when Provider=OpenAI + Model is an Ollama-style id.
+
 ## 1.0.97
 
 - Require `clawagents>=6.20.16` — ``snapshot_diff`` ``showing 40 of N`` file-cap note.
@@ -514,6 +519,11 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.98
+
+- Provider switch: reset incompatible leftover models (e.g. Ollama ``llama3.1`` when switching to OpenAI) instead of sending them to api.openai.com (404).
+- Sidecar: clear error when Provider=OpenAI + Model is an Ollama-style id.
 
 ## 1.0.97
 

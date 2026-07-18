@@ -83,6 +83,15 @@ test("applyKeyFlagsToFallback leaves Ollama available without a key slot", () =>
   assert.equal(rows.find((r) => r.id === "ollama").available, true);
 });
 
+test("modelFitsProvider rejects ollama leftovers on OpenAI", () => {
+  assert.equal(mod.modelLooksLikeOllamaLocalId("llama3.1"), true);
+  assert.equal(mod.modelLooksLikeOllamaLocalId("meta.llama3-1-8b"), false);
+  assert.equal(mod.modelFitsProvider("llama3.1", "openai"), false);
+  assert.equal(mod.modelFitsProvider("gpt-5.6-luna", "openai"), true);
+  assert.equal(mod.modelFitsProvider("llama3.1", "ollama"), true);
+  assert.equal(mod.defaultModelForProvider("openai"), mod.PREFERRED_OPENAI_MODEL);
+});
+
 test("effectiveProviderLabel shows OpenAI for auto + gpt model", () => {
   assert.equal(
     mod.effectiveProviderLabel(

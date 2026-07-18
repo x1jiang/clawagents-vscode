@@ -887,6 +887,30 @@ async def run_chat_turn(
         append_ui_event(chat_id, {"kind": "error", "text": msg})
         return {"ok": False, "error": msg}
 
+    # Stale Settings: Provider=OpenAI (api.openai.com) but Model still an
+    # Ollama local id (e.g. llama3.1) → opaque 404 from the API.
+    _prov = provider.strip().lower()
+    _ml = effective_model.lower()
+    _ollama_local = bool(_ml) and not re.match(
+        r"^(openai|anthropic|amazon|meta|deepseek|xai|zai|us|eu|apac|global)\.",
+        _ml,
+    ) and bool(
+        re.match(
+            r"^(llama|llava|qwen|mistral|mixtral|phi|deepseek|"
+            r"codellama|gemma|nomic|tinyllama)",
+            _ml,
+        )
+    )
+    if _prov == "openai" and not base_url and _ollama_local:
+        msg = (
+            f"Model '{effective_model}' looks like an Ollama id, but Provider "
+            "is OpenAI (api.openai.com). Pick an OpenAI model in Settings "
+            "(e.g. gpt-5.6-luna), or switch Provider to Ollama."
+        )
+        on_event({"kind": "error", "text": msg})
+        append_ui_event(chat_id, {"kind": "error", "text": msg})
+        return {"ok": False, "error": msg}
+
     meta = get_chat(chat_id) or create_chat(
         chat_id=chat_id, title=_title_from_text(content), mode=mode
     )

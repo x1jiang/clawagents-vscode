@@ -83,7 +83,6 @@ type ChatItem =
 import {
   type Provider,
   PREFERRED_OPENAI_MODEL,
-  PREFERRED_GEMINI_MODEL,
   FALLBACK_PROVIDERS,
   MANTLE_DEFAULT_MODEL,
   BEDROCK_SELECT_IAM,
@@ -96,14 +95,14 @@ import {
   isMantleSettings,
   mantleWireApiForModel,
   providerSelectValue,
-  isNativeBedrockModelId,
-  isMantleCatalogModelId,
   expandBedrockProviderChoices,
   modelsForKeys,
   pickPreferredModel,
   applyKeyFlagsToFallback,
   overlayHostKeyAvailability,
   effectiveProviderLabel,
+  defaultModelForProvider,
+  modelFitsProvider,
 } from "./providerCatalog";
 
 
@@ -2471,22 +2470,15 @@ export function App() {
                     next.base_url = "";
                     next.bedrock_mode = "iam";
                     next.wire_api = "auto";
-                    if (
-                      isMantleCatalogModelId(prevModel) ||
-                      isNativeBedrockModelId(prevModel)
-                    ) {
-                      if (choice === "openai") {
-                        next.model = PREFERRED_OPENAI_MODEL;
-                      } else if (choice === "gemini") {
-                        next.model = PREFERRED_GEMINI_MODEL;
-                      } else if (choice === "anthropic") {
-                        next.model = "claude-sonnet-4-5";
-                      } else if (choice === "ollama") {
-                        next.model = "llama3.1";
-                      } else {
-                        next.model = PREFERRED_OPENAI_MODEL;
-                      }
-                    }
+                  }
+                  // Drop leftover models from another vendor (e.g. Ollama
+                  // llama3.1 after switching Provider to OpenAI → 404).
+                  if (
+                    choice !== "auto" &&
+                    prevModel &&
+                    !modelFitsProvider(prevModel, choice)
+                  ) {
+                    next.model = defaultModelForProvider(choice);
                   }
                   skipSettingsAutosave.current = true;
                   settingsRef.current = next;

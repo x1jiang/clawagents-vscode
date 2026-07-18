@@ -194,6 +194,68 @@ export function isMantleCatalogModelId(id: string): boolean {
   );
 }
 
+/** Local Ollama-style ids (not Bedrock ``meta.llama…`` / Mantle ``openai.…``). */
+export function modelLooksLikeOllamaLocalId(id: string): boolean {
+  const m = String(id || "").trim().toLowerCase();
+  if (!m) return false;
+  // Vendor-prefixed / geo-prefixed ids belong to Bedrock / Mantle, not Ollama.
+  // Version dots like ``llama3.1`` are still local.
+  if (
+    /^(openai|anthropic|amazon|meta|deepseek|xai|zai)\./.test(m) ||
+    /^(us|eu|apac|global)\./.test(m)
+  ) {
+    return false;
+  }
+  return /^(llama|llava|qwen|mistral|mixtral|phi|deepseek|codellama|gemma|nomic|tinyllama)/.test(
+    m,
+  );
+}
+
+export function defaultModelForProvider(provider: string): string {
+  switch (String(provider || "").trim().toLowerCase()) {
+    case "openai":
+      return PREFERRED_OPENAI_MODEL;
+    case "gemini":
+      return PREFERRED_GEMINI_MODEL;
+    case "anthropic":
+      return "claude-sonnet-4-5";
+    case "ollama":
+      return "llama3.1";
+    case "bedrock":
+      return "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+    default:
+      return PREFERRED_OPENAI_MODEL;
+  }
+}
+
+/**
+ * True when ``model`` is plausible for ``provider``. Used when switching
+ * vendors so a leftover ``llama3.1`` is not sent to api.openai.com.
+ */
+export function modelFitsProvider(model: string, provider: string): boolean {
+  const m = String(model || "").trim();
+  if (!m) return false;
+  const p = String(provider || "").trim().toLowerCase();
+  const ml = m.toLowerCase();
+  switch (p) {
+    case "openai":
+      if (isMantleCatalogModelId(m) || isNativeBedrockModelId(m)) return false;
+      if (modelLooksLikeOllamaLocalId(m)) return false;
+      if (ml.startsWith("claude") || ml.includes("gemini")) return false;
+      return true;
+    case "anthropic":
+      return ml.includes("claude") || ml.startsWith("anthropic.");
+    case "gemini":
+      return ml.includes("gemini");
+    case "ollama":
+      return modelLooksLikeOllamaLocalId(m);
+    case "bedrock":
+      return isNativeBedrockModelId(m) || isMantleCatalogModelId(m);
+    default:
+      return true;
+  }
+}
+
 /** Per-access-mode Bedrock credential flags (do not OR them into one boolean). */
 export type BedrockCredFlags = {
   /** Native AWS credential chain (IAM / profile / env). */
