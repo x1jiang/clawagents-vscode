@@ -1,3 +1,7 @@
+## 1.0.61
+
+- Bug report email: parse alpaca_deploy `.env` quoted values + trailing `#` comments (Gmail 535 was from swallowing the comment into `EMAIL_PASSWORD`)
+
 ## 1.0.60
 
 - Restore full composer placeholder hints (mic / paste / attach / send / Esc stop)

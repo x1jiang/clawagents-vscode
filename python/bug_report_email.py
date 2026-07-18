@@ -50,6 +50,8 @@ def _resolve_alpaca_root() -> Path | None:
 
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
+    """Minimal .env reader. Handles quoted values + trailing `#` comments
+    (alpaca_deploy style: EMAIL_PASSWORD=\"xxxx xxxx\" # App password…)."""
     out: dict[str, str] = {}
     if not path.is_file():
         return out
@@ -59,7 +61,18 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
             continue
         k, v = s.split("=", 1)
         k = k.strip()
-        v = v.strip().strip("'").strip('"')
+        v = v.strip()
+        if len(v) >= 2 and v[0] in "\"'" and v.count(v[0]) >= 2:
+            q = v[0]
+            end = v.find(q, 1)
+            if end > 0:
+                v = v[1:end]
+        else:
+            if " #" in v:
+                v = v.split(" #", 1)[0].rstrip()
+            elif "#" in v:
+                v = v.split("#", 1)[0].rstrip()
+            v = v.strip("'").strip('"')
         if k:
             out[k] = v
     return out
