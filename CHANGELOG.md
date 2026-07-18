@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.100
+
+- Composer Auto-approve panel: **Full access** checkbox (same as Settings) — enables Edit/Execute, sets ``mode=full_access``, disables OS sandbox for gcloud/deploy.
+
 ## 1.0.99
 
 - Require `clawagents>=6.20.17` — seatbelt ``/dev/null`` allow + clearer sandbox hints.
@@ -525,6 +529,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.100
+
+- Composer Auto-approve panel: **Full access** checkbox (same as Settings) — enables Edit/Execute, sets ``mode=full_access``, disables OS sandbox for gcloud/deploy.
 
 ## 1.0.99
 

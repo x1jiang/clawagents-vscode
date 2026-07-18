@@ -1444,6 +1444,8 @@ export function App() {
   const planAct: "plan" | "act" = workMode === "plan" ? "plan" : "act";
   const effectiveInteraction: InteractionStyle =
     planAct === "plan" ? "interactive" : interaction;
+  const actModeForAccess = (): AgentMode =>
+    settings.allow_full_access ? "full_access" : "auto";
   const setWorkMode = (next: "goal" | "plan" | "act") => {
     if (next === "goal") {
       setGoalMode(true);
@@ -1454,7 +1456,8 @@ export function App() {
     }
     setGoalMode(false);
     post({ type: "set_goal", goal: false });
-    const nextMode: AgentMode = next === "plan" ? "read_only" : "auto";
+    const nextMode: AgentMode =
+      next === "plan" ? "read_only" : actModeForAccess();
     setMode(nextMode);
     post({ type: "set_mode", mode: nextMode });
     if (next === "plan") {
@@ -1471,6 +1474,30 @@ export function App() {
   };
   const toggleApprove = (key: keyof AutoApprove) =>
     setAutoApprove((a) => ({ ...a, [key]: !a[key] }));
+  const setAllowFullAccess = (on: boolean) => {
+    const nextSettings: Record<string, unknown> = {
+      ...settings,
+      allow_full_access: on,
+    };
+    skipSettingsAutosave.current = true;
+    settingsRef.current = nextSettings;
+    setSettings(nextSettings);
+    const patch = normalizeSettingsForSave(nextSettings);
+    inflightSettingsKey.current = settingsSaveKey(nextSettings);
+    pendingSettingsPatch.current = patch;
+    post({ type: "save_settings", settings: patch });
+    if (on) {
+      // Full access = auto-approve edits/commands + OS sandbox off (sidecar).
+      setAutoApprove((a) => ({ ...a, edit: true, execute: true }));
+      if (workMode !== "plan") {
+        setMode("full_access");
+        post({ type: "set_mode", mode: "full_access" });
+      }
+    } else if (mode === "full_access") {
+      setMode("auto");
+      post({ type: "set_mode", mode: "auto" });
+    }
+  };
 
   const keepSkillFolder = (folderPath: string) => {
     setSettings((s) => {
@@ -1902,10 +1929,24 @@ export function App() {
       return;
     }
     flushPendingSettingsSave();
+    // Keep send mode in sync with the Auto-approve Full access checkbox
+    // (Settings allow_full_access + Act → full_access → OS sandbox off).
+    const sendMode: AgentMode =
+      planAct === "plan"
+        ? "read_only"
+        : settings.allow_full_access
+          ? "full_access"
+          : mode === "full_access"
+            ? "auto"
+            : mode;
+    if (sendMode !== mode) {
+      setMode(sendMode);
+      post({ type: "set_mode", mode: sendMode });
+    }
     post({
       type: "send",
       text: value,
-      mode,
+      mode: sendMode,
       includeContext,
       chatId,
       autoApprove,
@@ -3809,6 +3850,7 @@ export function App() {
                   {planAct === "plan"
                     ? "— (Plan: reads + read-only shell)"
                     : [
+                        settings.allow_full_access && "Full access",
                         autoApprove.edit && "Edit",
                         autoApprove.execute && "Execute",
                         autoApprove.web && "Web",
@@ -3872,6 +3914,19 @@ export function App() {
                   </label>
                   <label
                     className="check"
+                    title="Mode=full_access + disable OS seatbelt so gcloud/deploy can use ~/.config. Also turns on Edit + Execute auto-approve."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.allow_full_access)}
+                      onChange={(e) => setAllowFullAccess(e.target.checked)}
+                      disabled={planAct === "plan"}
+                    />
+                    Full access{" "}
+                    <span className="muted tiny">(no OS sandbox · gcloud/deploy)</span>
+                  </label>
+                  <label
+                    className="check"
                     title="Terse caveman-style replies — fewer tokens, same technical accuracy (juliusbrussee/caveman)"
                   >
                     <input
@@ -3890,6 +3945,8 @@ export function App() {
                     first.
                     In <strong>Act + Auto</strong>, ask_user is skipped; Auto-approve toggles still
                     apply.
+                    <strong> Full access</strong> disables the OS sandbox (needed for gcloud
+                    credentials under <code>~/.config</code>).
                     <strong> Caveman</strong> makes the agent reply ultra-brief.
                     Enable browser tools under Settings; install{" "}
                     <code>clawagents[browser]</code> + Chromium for Playwright.
