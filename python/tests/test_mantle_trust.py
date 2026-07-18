@@ -28,9 +28,25 @@ class TestMantleTrust(unittest.TestCase):
 
     def test_mantle_base_from_mode(self) -> None:
         url = providers._mantle_base_from_settings(
-            "", {"bedrock_mode": "mantle", "aws_region": "us-east-1"}
+            "",
+            {
+                "provider": "bedrock",
+                "bedrock_mode": "mantle",
+                "aws_region": "us-east-1",
+            },
         )
         self.assertEqual(url, "https://bedrock-mantle.us-east-1.api.aws/v1")
+
+    def test_mantle_base_ignored_when_provider_openai(self) -> None:
+        url = providers._mantle_base_from_settings(
+            "https://bedrock-mantle.us-east-1.api.aws/v1",
+            {
+                "provider": "openai",
+                "bedrock_mode": "mantle",
+                "aws_region": "us-east-1",
+            },
+        )
+        self.assertEqual(url, "")
 
     def test_mantle_catalog_nonempty(self) -> None:
         self.assertTrue(any(m["id"] == "openai.gpt-5.6-sol" for m in providers._MANTLE_MODELS))

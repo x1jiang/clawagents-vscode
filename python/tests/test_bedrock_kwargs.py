@@ -58,6 +58,45 @@ class TestBedrockResolveKwargs(unittest.TestCase):
         )
         self.assertTrue(str(kwargs["model"]).startswith("us.anthropic."))
 
+    def test_openai_drops_stale_mantle_base_url(self):
+        kwargs = chats._resolve_model_kwargs(
+            None,
+            {
+                "provider": "openai",
+                "model": "gpt-5.6-luna",
+                "bedrock_mode": "mantle",
+                "base_url": "https://bedrock-mantle.us-east-1.api.aws/v1",
+                "trust_custom_base_url": True,
+            },
+        )
+        self.assertNotIn("base_url", kwargs)
+        self.assertEqual(kwargs["model"], "gpt-5.6-luna")
+
+    def test_anthropic_drops_stale_bag_base_url(self):
+        kwargs = chats._resolve_model_kwargs(
+            None,
+            {
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-5",
+                "bedrock_mode": "bag",
+                "base_url": "http://localhost:8000/api/v1",
+                "trust_custom_base_url": True,
+            },
+        )
+        self.assertNotIn("base_url", kwargs)
+
+    def test_mantle_does_not_use_openai_key_fallback(self):
+        with patch(
+            "spawn_secrets.get_secret",
+            side_effect=lambda k: {
+                "OPENAI_API_KEY": "sk-openai-only",
+                "BEDROCK_API_KEY": "",
+                "MANTLE_API_KEY": "",
+            }.get(k, ""),
+        ):
+            self.assertEqual(chats._bedrock_api_key(mantle=True), "bedrock")
+            self.assertEqual(chats._bedrock_api_key(mantle=False), "sk-openai-only")
+
 
 if __name__ == "__main__":
     unittest.main()

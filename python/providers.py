@@ -64,10 +64,21 @@ def _is_mantle_base_url(base_url: str) -> bool:
 
 
 def _mantle_base_from_settings(settings_base: str, settings: dict[str, Any]) -> str:
+    """Mantle catalog URL — only when Provider is Bedrock (or unset/auto).
+
+    Stale ``bedrock_mode=mantle`` after switching to OpenAI must not keep the
+    Bedrock row on Mantle or cause OpenAI ``use_custom`` to probe Mantle.
+    """
+    provider = str(settings.get("provider") or "auto").strip().lower()
+    if provider in {"openai", "anthropic", "gemini", "ollama"}:
+        return ""
     if settings_base and _is_mantle_base_url(settings_base):
+        # Leftover Mantle URL under non-Bedrock already excluded above.
+        if provider not in {"bedrock", "auto", ""}:
+            return ""
         return settings_base.rstrip("/")
     mode = str(settings.get("bedrock_mode") or "").strip().lower()
-    if mode == "mantle":
+    if mode == "mantle" and provider in {"bedrock", "auto", ""}:
         region = str(settings.get("aws_region") or "").strip() or "us-east-1"
         return f"https://bedrock-mantle.{region}.api.aws/v1"
     return ""
@@ -403,7 +414,14 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
         pid = str(p["id"])
 
         # Custom OpenAI-compatible base URL (Settings) → probe + list that host.
-        use_custom = bool(settings_base and pid == "openai")
+        # Never treat a Mantle host as OpenAI's custom base (wrong key → 401).
+        use_custom = bool(
+            settings_base
+            and pid == "openai"
+            and not _is_mantle_base_url(settings_base)
+            and str(settings.get("provider") or "auto").strip().lower()
+            in {"openai", "auto", "ollama", ""}
+        )
         use_mantle = bool(pid == "bedrock" and mantle_base)
 
         if use_mantle:

@@ -48,21 +48,34 @@ def get_secret(key: str) -> str:
 
 
 def resolve_api_key(provider: str, model: str | None = None) -> str | None:
-    """Pick the host-injected key for this provider/model, if any."""
+    """Pick the host-injected key for this provider/model, if any.
+
+    Provider wins over model-name heuristics so Bedrock Mantle models like
+    ``anthropic.claude-*`` do not accidentally select ``ANTHROPIC_API_KEY``.
+    """
     p = (provider or "auto").strip().lower()
     m = (model or "").strip().lower()
 
-    if p == "anthropic" or m.startswith("claude") or m.startswith("anthropic"):
+    if p == "bedrock":
+        # Mantle/BAG key only — never fall back to OPENAI_API_KEY (401 on Mantle).
+        key = get_secret("BEDROCK_API_KEY")
+        return key or None
+    if p == "anthropic":
         key = get_secret("ANTHROPIC_API_KEY")
         return key or None
-    if p == "gemini" or m.startswith("gemini"):
+    if p == "gemini":
         key = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
         return key or None
-    if p == "bedrock":
-        key = get_secret("BEDROCK_API_KEY") or get_secret("OPENAI_API_KEY")
-        return key or None
-    if p in ("openai", "ollama", "auto") or not p:
+    if p in ("openai", "ollama"):
         key = get_secret("OPENAI_API_KEY")
+        return key or None
+
+    # auto / unknown — infer from model id
+    if m.startswith("claude") or m.startswith("anthropic"):
+        key = get_secret("ANTHROPIC_API_KEY")
+        return key or None
+    if m.startswith("gemini"):
+        key = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
         return key or None
     key = get_secret("OPENAI_API_KEY")
     return key or None

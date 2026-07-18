@@ -225,11 +225,119 @@ function providerIsAvailable(provider: Provider): boolean {
   return provider.available !== false;
 }
 
-function modelsForKeys(providers: Provider[], selectedProvider: string) {
+/** UI-only provider ids for Bedrock access modes (saved provider stays `bedrock`). */
+const BEDROCK_SELECT_IAM = "bedrock-iam";
+const BEDROCK_SELECT_MANTLE = "bedrock-mantle";
+const BEDROCK_SELECT_BAG = "bedrock-bag";
+
+function bedrockModeFromSettings(settings: Record<string, unknown>): "iam" | "mantle" | "bag" {
+  const mode = String(settings.bedrock_mode || "iam").toLowerCase();
+  if (mode === "mantle" || isMantleSettings(settings)) return "mantle";
+  if (mode === "bag") return "bag";
+  return "iam";
+}
+
+function providerSelectValue(settings: Record<string, unknown>): string {
+  const p = String(settings.provider || "auto");
+  if (p !== "bedrock") return p;
+  const mode = bedrockModeFromSettings(settings);
+  if (mode === "mantle") return BEDROCK_SELECT_MANTLE;
+  if (mode === "bag") return BEDROCK_SELECT_BAG;
+  return BEDROCK_SELECT_IAM;
+}
+
+function isNativeBedrockModelId(id: string): boolean {
+  const m = String(id || "").trim();
+  if (!m) return false;
+  if (/^(us|eu|ap|global)\./i.test(m)) return true;
+  if (/^(amazon|meta)\./i.test(m)) return true;
+  // Bedrock-hosted OSS (inference profile style)
+  if (/gpt-oss/i.test(m) && (m.includes(":") || m.startsWith("openai.gpt-oss"))) {
+    return true;
+  }
+  return false;
+}
+
+function isMantleCatalogModelId(id: string): boolean {
+  const m = String(id || "").trim().toLowerCase();
+  if (!m || /^(us|eu|ap|global)\./.test(m)) return false;
+  return (
+    m.startsWith("openai.") ||
+    m.startsWith("anthropic.") ||
+    m.startsWith("deepseek.") ||
+    m.startsWith("xai.") ||
+    m.startsWith("zai.")
+  );
+}
+
+/** Split sidecar `bedrock` into IAM / Mantle / Gateway rows in the Provider menu. */
+function expandBedrockProviderChoices(
+  providers: Provider[],
+  hasBedrockCreds: boolean,
+): Provider[] {
+  const fallbackIam =
+    FALLBACK_PROVIDERS.find((p) => p.id === "bedrock")?.models || [];
+  const out: Provider[] = [];
+  for (const p of providers) {
+    if (p.id !== "bedrock") {
+      out.push(p);
+      continue;
+    }
+    const avail = hasBedrockCreds || p.available !== false;
+    const catalog = p.models || [];
+    const iamModels = catalog.filter((m) => isNativeBedrockModelId(m.id));
+    const mantleModels = catalog.filter((m) => isMantleCatalogModelId(m.id));
+    const mark = (
+      models: Array<{
+        id: string;
+        label?: string;
+        available?: boolean;
+        input_per_mtok?: number;
+        output_per_mtok?: number;
+      }>,
+    ) =>
+      models.map((m) => ({
+        ...m,
+        label: m.label || m.id,
+        available: avail && ("available" in m ? m.available !== false : true),
+      }));
+    out.push({
+      id: BEDROCK_SELECT_IAM,
+      name: "AWS Bedrock (IAM)",
+      available: avail,
+      models: mark(iamModels.length ? iamModels : fallbackIam),
+    });
+    out.push({
+      id: BEDROCK_SELECT_MANTLE,
+      name: "AWS Bedrock Mantle",
+      available: avail,
+      models: mark(
+        mantleModels.length ? mantleModels : MANTLE_FALLBACK_MODELS,
+      ),
+    });
+    out.push({
+      id: BEDROCK_SELECT_BAG,
+      name: "AWS Bedrock Gateway",
+      available: avail,
+      models: mark(iamModels.length ? iamModels : fallbackIam),
+    });
+  }
+  return out;
+}
+
+function modelsForKeys(
+  providers: Provider[],
+  selectedProvider: string,
+  autoBedrockSelectId?: string,
+) {
   const visibleProviders = providers.filter(providerIsAvailable);
   const selected =
     selectedProvider === "auto"
-      ? visibleProviders
+      ? visibleProviders.filter(
+          (p) =>
+            !p.id.startsWith("bedrock-") ||
+            p.id === (autoBedrockSelectId || BEDROCK_SELECT_IAM),
+        )
       : visibleProviders.filter((p) => p.id === selectedProvider);
   const seen = new Set<string>();
   return selected.flatMap((p) =>
@@ -1014,6 +1122,17 @@ export function App() {
           ) {
             break;
           }
+          // Inverse: never hijack OpenAI/Anthropic/Gemini back to Bedrock on a
+          // stale push (same class of bug as Mantle URL sticking after switch).
+          const localProv = String(settingsRef.current.provider || "").toLowerCase();
+          const incomingProv = String(incoming.provider || "").toLowerCase();
+          if (
+            msg.saveOutcome !== "ok" &&
+            ["openai", "anthropic", "gemini", "ollama"].includes(localProv) &&
+            incomingProv === "bedrock"
+          ) {
+            break;
+          }
           skipSettingsAutosave.current = true;
           settingsAutosaveReady.current = true;
           committedSettingsKey.current = settingsSaveKey(incoming);
@@ -1701,54 +1820,29 @@ export function App() {
   };
 
   const selectedProvider = String(settings.provider || "auto");
+  const providerMenuValue = providerSelectValue(settings);
   const keyFlags = {
     openai: hasOpenAIKey,
     anthropic: hasAnthropicKey,
     gemini: hasGeminiKey,
     bedrock: hasBedrockKey || hasAwsCreds,
   };
-  const mantleUi = isMantleSettings(settings);
   const providerCatalog = (() => {
     const base = providers.length
       ? providers
       : applyKeyFlagsToFallback(FALLBACK_PROVIDERS, keyFlags);
-    // Never show Native IAM model IDs while Access mode is Mantle — that was
-    // the bug (fallback / stale catalog looked like Nova/Claude US).
-    if (!mantleUi) {
-      return base;
-    }
-    return base.map((p) => {
-      if (p.id !== "bedrock") {
-        return p;
-      }
-      const models = (p.models || []).filter(
-        (m) =>
-          m?.id &&
-          !String(m.id).startsWith("us.anthropic.") &&
-          !String(m.id).startsWith("amazon.nova") &&
-          !String(m.id).startsWith("meta.llama"),
-      );
-      const useMantle =
-        models.length > 0 &&
-        models.some(
-          (m) =>
-            String(m.id).startsWith("openai.") ||
-            String(m.id).startsWith("anthropic.claude"),
-        );
-      return {
-        ...p,
-        name: "AWS Bedrock Mantle",
-        available: hasBedrockKey || p.available !== false,
-        models: (useMantle ? models : MANTLE_FALLBACK_MODELS).map((m) => ({
-          ...m,
-          available:
-            hasBedrockKey ||
-            ("available" in m ? m.available !== false : true),
-        })),
-      };
-    });
+    // Distinct Provider rows for IAM / Mantle / Gateway (saved provider = bedrock).
+    return expandBedrockProviderChoices(base, hasBedrockKey || hasAwsCreds);
   })();
-  const allModels = modelsForKeys(providerCatalog, selectedProvider);
+  const modelFilterId =
+    selectedProvider === "bedrock" ? providerMenuValue : selectedProvider;
+  const allModels = modelsForKeys(
+    providerCatalog,
+    modelFilterId,
+    providerMenuValue.startsWith("bedrock-")
+      ? providerMenuValue
+      : BEDROCK_SELECT_IAM,
+  );
   const providerModels = allModels;
   const preferredPick = pickPreferredModel(providerCatalog);
 
@@ -2552,60 +2646,85 @@ export function App() {
             <label>
               Provider
               <select
-                value={selectedProvider}
+                value={providerMenuValue}
                 onChange={(e) => {
-                  const provider = e.target.value;
+                  const choice = e.target.value;
                   setProviderKeyDraft("");
                   setProviderSetupMsg("");
-                  setSettings((s) => {
-                    const next: Record<string, unknown> = { ...s, provider };
-                    if (provider === "bedrock") {
-                      const mode = String(s.bedrock_mode || "iam").toLowerCase();
-                      if (!String(s.aws_region || "").trim()) {
-                        next.aws_region = "us-east-1";
-                      }
-                      const region = String(next.aws_region || "us-east-1");
-                      if (mode === "mantle") {
-                        next.bedrock_mode = "mantle";
-                        next.base_url = `https://bedrock-mantle.${region}.api.aws/v1`;
-                        if (
-                          !String(s.model || "").trim() ||
-                          String(s.model).startsWith("us.anthropic.")
-                        ) {
-                          next.model = MANTLE_DEFAULT_MODEL;
-                        }
-                        next.wire_api = mantleWireApiForModel(
-                          String(next.model || MANTLE_DEFAULT_MODEL),
-                        );
+                  // Bedrock IAM / Mantle / Gateway are separate menu rows.
+                  if (
+                    choice === BEDROCK_SELECT_IAM ||
+                    choice === BEDROCK_SELECT_MANTLE ||
+                    choice === BEDROCK_SELECT_BAG
+                  ) {
+                    const mode =
+                      choice === BEDROCK_SELECT_MANTLE
+                        ? "mantle"
+                        : choice === BEDROCK_SELECT_BAG
+                          ? "bag"
+                          : "iam";
+                    applyBedrockMode(mode);
+                    return;
+                  }
+                  // Immediate save — autosave alone left stale bedrock_mode=mantle
+                  // which the host used to rewrite provider back to Bedrock.
+                  const prev = settingsRef.current;
+                  const leavingBedrock =
+                    String(prev.provider || "") === "bedrock";
+                  const prevUrl = String(prev.base_url || "");
+                  const prevModel = String(prev.model || "");
+                  const next: Record<string, unknown> = {
+                    ...prev,
+                    provider: choice,
+                  };
+                  if (
+                    leavingBedrock ||
+                    /bedrock-mantle\./i.test(prevUrl) ||
+                    /\/api\/v1\/?$/i.test(prevUrl)
+                  ) {
+                    next.base_url = "";
+                    next.bedrock_mode = "iam";
+                    next.wire_api = "auto";
+                    if (
+                      isMantleCatalogModelId(prevModel) ||
+                      isNativeBedrockModelId(prevModel)
+                    ) {
+                      if (choice === "openai") {
+                        next.model = PREFERRED_OPENAI_MODEL;
+                      } else if (choice === "gemini") {
+                        next.model = PREFERRED_GEMINI_MODEL;
+                      } else if (choice === "anthropic") {
+                        next.model = "claude-sonnet-4-5";
+                      } else if (choice === "ollama") {
+                        next.model = "llama3.1";
                       } else {
-                        // Native IAM by default — clear leftover BAG/Mantle URL.
-                        next.bedrock_mode = mode === "bag" ? "bag" : "iam";
-                        const prev = String(s.base_url || "").trim();
-                        if (
-                          !prev ||
-                          prev === "http://localhost:8000/api/v1" ||
-                          prev === "http://127.0.0.1:8000/api/v1" ||
-                          prev.includes("bedrock-mantle.")
-                        ) {
-                          next.base_url = mode === "bag" ? "http://localhost:8000/api/v1" : "";
-                        }
-                        if (!String(s.model || "").trim()) {
-                          next.model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
-                        }
+                        next.model = PREFERRED_OPENAI_MODEL;
                       }
                     }
-                  return next;
-                  });
-                  if (provider === "bedrock") {
+                  }
+                  skipSettingsAutosave.current = true;
+                  settingsRef.current = next;
+                  inflightSettingsKey.current = settingsSaveKey(next);
+                  setSettings(next);
+                  if (typeof next.model === "string" && next.model) {
+                    setModel(next.model);
+                  }
+                  const patch = normalizeSettingsForSave(next);
+                  pendingSettingsPatch.current = patch;
+                  setVerifyMsg("Saving…");
+                  post({ type: "save_settings", settings: patch });
+                  if (choice === "openai") {
                     setProviderSetupMsg(
-                      "AWS Bedrock: choose Native IAM, Mantle (OneHUB), or optional BAG below.",
+                      "OpenAI — uses OPENAI_API_KEY (api.openai.com). Base URL left empty.",
                     );
-                  } else if (provider === "openai") {
+                  } else if (choice === "gemini") {
                     setProviderSetupMsg(
-                      "OpenAI or any OpenAI-compatible endpoint (Ollama, BAG, OpenRouter, …).",
+                      "Paste a Gemini API key below (Google AI Studio).",
                     );
-                  } else if (provider === "gemini") {
-                    setProviderSetupMsg("Paste a Gemini API key below (Google AI Studio).");
+                  } else if (choice === "anthropic") {
+                    setProviderSetupMsg(
+                      "Paste an Anthropic API key below.",
+                    );
                   }
                 }}
               >
@@ -2778,10 +2897,10 @@ export function App() {
                 </div>
                 <p className="settings-hint">
                   {String(settings.bedrock_mode || "iam") === "mantle"
-                    ? "Mantle routes by model: Claude → /anthropic/v1/messages, GPT-5.x → /openai/v1/responses, others → /v1/chat/completions. Paste Mantle API key below. Best catalog: us-east-1."
+                    ? "Provider → AWS Bedrock Mantle. Routes by model: Claude → Messages, GPT-5.x → Responses, others → chat. Paste Mantle API key below."
                     : String(settings.bedrock_mode || "iam") === "bag"
-                      ? "Local or remote Bedrock Access Gateway / LiteLLM — Base URL + gateway key."
-                      : "Native IAM (HIPAA-friendly). Uses ~/.aws credentials, env keys, or instance role. pip install 'clawagents[bedrock]'."}
+                      ? "Provider → AWS Bedrock Gateway. Local/remote BAG / LiteLLM — Base URL + gateway key."
+                      : "Provider → AWS Bedrock (IAM). Native Converse via ~/.aws credentials, env keys, or instance role."}
                 </p>
                 <label>
                   AWS region

@@ -1059,54 +1059,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             typeof incoming.base_url === "string" ? incoming.base_url.trim() : "";
           const prevBaseUrl =
             typeof previous.base_url === "string" ? previous.base_url.trim() : "";
-          // Bedrock Access Gateway / OpenAI-compatible: normalize pasted URLs.
-          if (baseUrlProvided && baseUrl) {
-            const provider = String(incoming.provider || previous.provider || "");
-            if (provider === "bedrock") {
-              const {
-                normalizeBagBaseUrl,
-                normalizeMantleBaseUrl,
-                isMantleBaseUrl,
-              } = await import("./bedrockGateway");
-              const mode = String(
-                incoming.bedrock_mode || previous.bedrock_mode || "iam",
-              ).toLowerCase();
-              const region = String(
-                incoming.aws_region || previous.aws_region || "us-east-1",
-              );
-              if (mode === "mantle" || isMantleBaseUrl(baseUrl)) {
-                // Mantle is OpenAI-style /v1 — never rewrite to BAG /api/v1.
-                incoming.base_url = normalizeMantleBaseUrl(baseUrl, region);
-                incoming.bedrock_mode = "mantle";
-              } else {
-                incoming.base_url = normalizeBagBaseUrl(baseUrl);
-              }
-            } else if (provider === "openai" || provider === "ollama") {
-              const {
-                normalizeOpenAICompatibleBaseUrl,
-                normalizeBagBaseUrl,
-                isMantleBaseUrl,
-                normalizeMantleBaseUrl,
-              } = await import("./bedrockGateway");
-              if (isMantleBaseUrl(baseUrl)) {
-                incoming.base_url = normalizeMantleBaseUrl(baseUrl);
-              } else {
-                incoming.base_url = baseUrl.includes("/api/v1")
-                  ? normalizeBagBaseUrl(baseUrl)
-                  : normalizeOpenAICompatibleBaseUrl(baseUrl);
-              }
-            }
-          } else if (
-            Object.prototype.hasOwnProperty.call(incoming, "bedrock_mode") &&
-            String(incoming.bedrock_mode || "").toLowerCase() === "mantle"
-          ) {
-            const { mantleBaseUrlForRegion } = await import("./bedrockGateway");
-            const region = String(
-              incoming.aws_region || previous.aws_region || "us-east-1",
-            );
-            incoming.base_url = mantleBaseUrlForRegion(region);
-            incoming.provider = "bedrock";
-          }
+          // Bedrock / OpenAI-compatible: normalize pasted URLs. Also drops a
+          // leftover Mantle host when Provider is OpenAI/Anthropic/Gemini so a
+          // stale bedrock_mode=mantle cannot force provider back to Bedrock.
+          const { reconcileProviderGatewaySettings } = await import(
+            "./bedrockGateway"
+          );
+          reconcileProviderGatewaySettings(incoming, previous);
           const normalizedBase = baseUrlProvided
             ? typeof incoming.base_url === "string"
               ? incoming.base_url.trim()

@@ -1,5 +1,18 @@
 ## Unreleased
 
+## 1.0.83
+
+- **Provider-switch hardening (all vendors):** leaving Bedrock clears Mantle/BAG Base URL, resets `bedrock_mode` + `wire_api`; host never force-restores Mantle under OpenAI/Anthropic/Gemini; webview ignores stale pushes that hijack back to Bedrock.
+- **Sidecar:** drop stale Mantle/BAG URLs for non-Bedrock providers; Mantle auth no longer falls back to `OPENAI_API_KEY`; `resolve_api_key` prefers provider over model-name heuristics; catalog will not probe Mantle as OpenAI custom base.
+
+## 1.0.82
+
+- **Fix OpenAI after Mantle:** switching Provider to OpenAI no longer keeps/restores the Mantle Base URL (was causing 404 / 401 invalid bearer). Clears Mantle URL + resets `bedrock_mode`; sidecar ignores Mantle hosts for non-Bedrock providers.
+
+## 1.0.81
+
+- **Provider menu:** separate choices for **AWS Bedrock (IAM)**, **AWS Bedrock Mantle**, and **AWS Bedrock Gateway** (each sets `bedrock_mode` + Base URL). Access-mode segment still works as a shortcut.
+
 ## 1.0.80
 
 - **Bug report fallback:** when no SMTP/mailto recipient is set, open a GitHub issue draft (never empty `mailto:?`). Harden: validate email shape; never use `EMAIL_SENDER` as To; bound GitHub draft URL length; safe `openExternal`.

@@ -37,24 +37,32 @@ OnEvent = Callable[[str, dict[str, Any]], None]
 _PROFILE_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "ollama", "bedrock"})
 
 
-def _bedrock_api_key() -> str:
-    """Gateway / Mantle token for OpenAI-compatible Bedrock proxies."""
+def _bedrock_api_key(*, mantle: bool = False) -> str:
+    """Gateway / Mantle token for OpenAI-compatible Bedrock proxies.
+
+    Mantle must not fall back to ``OPENAI_API_KEY`` — that yields
+    ``invalid bearer token`` (401) against bedrock-mantle hosts.
+    BAG / LiteLLM still allows OpenAI-key fallback (common local setup).
+    """
     try:
         from spawn_secrets import get_secret
 
-        return (
-            get_secret("BEDROCK_API_KEY")
-            or get_secret("MANTLE_API_KEY")
-            or get_secret("OPENAI_API_KEY")
-            or "bedrock"
-        )
+        key = get_secret("BEDROCK_API_KEY") or get_secret("MANTLE_API_KEY")
+        if key:
+            return key
+        if not mantle:
+            return get_secret("OPENAI_API_KEY") or "bedrock"
+        return "bedrock"
     except Exception:  # noqa: BLE001
-        return (
+        key = (
             (os.environ.get("BEDROCK_API_KEY") or "").strip()
             or (os.environ.get("MANTLE_API_KEY") or "").strip()
-            or (os.environ.get("OPENAI_API_KEY") or "").strip()
-            or "bedrock"
         )
+        if key:
+            return key
+        if not mantle:
+            return (os.environ.get("OPENAI_API_KEY") or "").strip() or "bedrock"
+        return "bedrock"
 
 
 def _apply_aws_settings(settings: dict[str, Any]) -> None:
@@ -594,19 +602,30 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     effective_model = model or settings.get("model") or MODEL
     if effective_model:
         kwargs["model"] = effective_model
+    provider = str(settings.get("provider") or "auto").strip().lower()
     base_url = (settings.get("base_url") or "").strip() or None
+    mode = str(settings.get("bedrock_mode") or "iam").strip().lower()
+    non_bedrock = provider in {"openai", "anthropic", "gemini", "ollama"}
+    # Stale Mantle/BAG after Provider switch must not ride along.
+    if base_url and non_bedrock:
+        bag_like = (
+            base_url.rstrip("/").endswith("/api/v1")
+            and "bedrock-mantle." not in base_url
+        )
+        if "bedrock-mantle." in base_url:
+            base_url = None
+        elif provider in {"anthropic", "gemini"} and bag_like:
+            base_url = None
     if base_url:
         from url_trust import is_trusted_base_url
 
         if is_trusted_base_url(base_url) or settings.get("trust_custom_base_url"):
             kwargs["base_url"] = base_url
         # else: drop untrusted URL (do not send API keys to attacker host)
-    provider = str(settings.get("provider") or "auto")
     if provider.startswith("profile:"):
         kwargs["profile"] = provider.split(":", 1)[1]
     elif provider == "bedrock":
         _apply_aws_settings(settings)
-        mode = str(settings.get("bedrock_mode") or "iam").strip().lower()
         if mode == "mantle" and not kwargs.get("base_url"):
             region = str(settings.get("aws_region") or "").strip() or "us-east-1"
             kwargs["base_url"] = f"https://bedrock-mantle.{region}.api.aws/v1"
@@ -622,13 +641,12 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
             else:
                 kwargs["model"] = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
         if kwargs.get("base_url"):
+            mantle_host = "bedrock-mantle." in str(kwargs.get("base_url") or "")
             # OpenAI-compatible gateway (Mantle / BAG / LiteLLM)
-            kwargs["api_key"] = _bedrock_api_key()
+            kwargs["api_key"] = _bedrock_api_key(mantle=mantle_host)
             # Mantle is multi-path: only default wire_api for chat-ok models.
             # Claude → Anthropic Messages; openai.gpt-5.* → Responses.
-            if "bedrock-mantle." in str(kwargs.get("base_url") or "") and not str(
-                settings.get("wire_api") or ""
-            ).strip():
+            if mantle_host and not str(settings.get("wire_api") or "").strip():
                 model_l = str(kwargs.get("model") or effective_model or "").lower()
                 if model_l.startswith("anthropic.") or model_l.startswith("claude"):
                     pass  # Messages API; wire_api unused

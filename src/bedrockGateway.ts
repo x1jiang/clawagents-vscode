@@ -15,6 +15,13 @@ export const MANTLE_DEFAULT_MODEL = "openai.gpt-oss-20b";
 export type CompatibleUrlStyle = "openai" | "bag" | "mantle";
 export type BedrockAccessMode = "iam" | "mantle" | "bag";
 
+const NON_BEDROCK_PROVIDERS = new Set([
+  "openai",
+  "anthropic",
+  "gemini",
+  "ollama",
+]);
+
 /** True for `bedrock-mantle.<region>.api.aws` hosts. */
 export function isMantleHost(hostname: string): boolean {
   const host = (hostname || "").toLowerCase();
@@ -34,6 +41,22 @@ export function isMantleBaseUrl(raw: string): boolean {
     return isMantleHost(new URL(withScheme).hostname);
   } catch {
     return false;
+  }
+}
+
+/** Bedrock Access Gateway / LiteLLM-style `…/api/v1` (not Mantle `/v1`). */
+export function isBagBaseUrl(raw: string): boolean {
+  const text = (raw || "").trim();
+  if (!text || isMantleBaseUrl(text)) {
+    return false;
+  }
+  try {
+    const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ? text : `http://${text}`;
+    const u = new URL(withScheme);
+    const path = (u.pathname || "/").replace(/\/+$/, "") || "/";
+    return path === "/api/v1" || path.endsWith("/api/v1");
+  } catch {
+    return /\/api\/v1\/?$/i.test(text);
   }
 }
 
@@ -191,4 +214,112 @@ export async function probeBagGateway(
   apiKey: string,
 ): Promise<{ ok: boolean; detail: string }> {
   return probeCompatibleEndpoint(baseUrl, apiKey, { style: "bag", label: "Bedrock Access Gateway" });
+}
+
+/**
+ * Reconcile provider + base_url + bedrock_mode on settings save.
+ *
+ * Prevents stale Mantle/BAG settings from hijacking OpenAI/Anthropic/Gemini:
+ * - clear Mantle (and Bedrock-gateway) URLs under non-Bedrock providers
+ * - reset bedrock_mode when leaving Bedrock
+ * - never force provider=bedrock from leftover bedrock_mode=mantle
+ */
+export function reconcileProviderGatewaySettings(
+  incoming: Record<string, unknown>,
+  previous: Record<string, unknown> = {},
+): void {
+  const provider = String(
+    incoming.provider ?? previous.provider ?? "",
+  ).toLowerCase();
+  const prevProvider = String(previous.provider || "").toLowerCase();
+  const baseUrlProvided = Object.prototype.hasOwnProperty.call(
+    incoming,
+    "base_url",
+  );
+  const baseUrl =
+    typeof incoming.base_url === "string" ? incoming.base_url.trim() : "";
+  const mode = String(
+    incoming.bedrock_mode ?? previous.bedrock_mode ?? "iam",
+  ).toLowerCase();
+  const region = String(
+    incoming.aws_region ?? previous.aws_region ?? MANTLE_DEFAULT_REGION,
+  );
+  const leftBedrock = prevProvider === "bedrock" && provider !== "bedrock";
+  const nonBedrock = NON_BEDROCK_PROVIDERS.has(provider);
+
+  if (nonBedrock) {
+    let url = baseUrlProvided ? baseUrl : "";
+    const clearGateway =
+      isMantleBaseUrl(url) ||
+      (leftBedrock && (isBagBaseUrl(url) || isMantleBaseUrl(url))) ||
+      ((provider === "anthropic" || provider === "gemini") &&
+        (isMantleBaseUrl(url) || isBagBaseUrl(url)));
+
+    if (baseUrlProvided && clearGateway) {
+      incoming.base_url = "";
+      url = "";
+    }
+
+    // Stale mantle/bag mode must not linger under OpenAI/etc.
+    if (
+      leftBedrock ||
+      mode === "mantle" ||
+      mode === "bag" ||
+      Object.prototype.hasOwnProperty.call(incoming, "bedrock_mode")
+    ) {
+      incoming.bedrock_mode = "iam";
+    }
+
+    // Mantle often leaves wire_api=responses|chat_completions; reset when
+    // leaving Bedrock so stock OpenAI uses Auto.
+    if (leftBedrock && Object.prototype.hasOwnProperty.call(incoming, "wire_api")) {
+      const wire = String(incoming.wire_api || "").toLowerCase();
+      if (wire === "responses" || wire === "chat_completions") {
+        incoming.wire_api = "auto";
+      }
+    }
+
+    if (provider === "openai" || provider === "ollama") {
+      const next =
+        typeof incoming.base_url === "string" ? incoming.base_url.trim() : "";
+      if (baseUrlProvided && next && !isMantleBaseUrl(next)) {
+        // Keep intentional OpenAI-compatible proxies; do not rewrite BAG→mantle.
+        incoming.base_url = next.includes("/api/v1")
+          ? normalizeBagBaseUrl(next)
+          : normalizeOpenAICompatibleBaseUrl(next);
+      }
+    }
+    return;
+  }
+
+  if (baseUrlProvided && baseUrl && provider === "bedrock") {
+    // Explicit IAM wins over URL sniffing — leftover Mantle/BAG must clear.
+    if (mode === "iam") {
+      if (isMantleBaseUrl(baseUrl) || isBagBaseUrl(baseUrl)) {
+        incoming.base_url = "";
+      }
+      return;
+    }
+    if (mode === "mantle" || isMantleBaseUrl(baseUrl)) {
+      incoming.base_url = normalizeMantleBaseUrl(baseUrl, region);
+      incoming.bedrock_mode = "mantle";
+    } else if (mode === "bag" || isBagBaseUrl(baseUrl)) {
+      incoming.base_url = normalizeBagBaseUrl(baseUrl);
+      incoming.bedrock_mode = "bag";
+    } else {
+      incoming.base_url = normalizeBagBaseUrl(baseUrl);
+    }
+    return;
+  }
+
+  // Empty/missing base_url + mantle mode → fill Mantle URL only for Bedrock/auto.
+  // Non-Bedrock providers return earlier, so this cannot hijack OpenAI/etc.
+  if (
+    Object.prototype.hasOwnProperty.call(incoming, "bedrock_mode") &&
+    mode === "mantle" &&
+    (!provider || provider === "bedrock" || provider === "auto")
+  ) {
+    incoming.base_url = mantleBaseUrlForRegion(region);
+    incoming.provider = "bedrock";
+  }
 }
