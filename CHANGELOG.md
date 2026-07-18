@@ -1,3 +1,7 @@
+## 1.0.67
+
+- Require `clawagents>=6.20.2` (fix seatbelt execute `shlex` crash)
+
 ## 1.0.66
 
 - Require `clawagents>=6.20.1` (Grok harness hardening: trailer markers, sticky caps, grep/pty bounds)
