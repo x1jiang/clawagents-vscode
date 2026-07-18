@@ -307,6 +307,7 @@ export type WebviewToHost =
   | {
       type: "dictation_toggle";
       target?: "composer" | "bug_report";
+      forcePick?: boolean;
     };
 
 interface VsCodeApi {

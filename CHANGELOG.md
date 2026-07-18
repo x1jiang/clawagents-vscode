@@ -1,3 +1,7 @@
+## 1.0.63
+
+- Mic: pick device once per session, then reuse; ⌥/Alt+Mic to change
+
 ## 1.0.62
 
 - Bug report email: subject `[ClawAgents-bug-report] …`; send only to `EMAIL_SENDER` (not alpaca trading `RECIPIENT_EMAILS`); stop using `send_alert_email` (`[alpaca-autotrading]` prefix)

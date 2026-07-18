@@ -1241,20 +1241,24 @@ export function App() {
     post({ type: "save_settings", settings: patch });
   };
 
-  /** Pick mic → OS dictation (macOS Apple Dictation / Windows Win+H). */
-  const toggleDictation = () => {
+  /** OS dictation; mic picker once per session (⌥/Alt+Mic to change). */
+  const toggleDictation = (forcePick = false) => {
     textareaRef.current?.focus();
     if (!dictating) {
       setItems((previous) => [
         ...previous.filter((it) => it.kind !== "status"),
         {
           kind: "status",
-          text: "Choose a microphone…",
+          text: forcePick ? "Choose a microphone…" : "Dictation…",
         },
       ]);
     }
     window.setTimeout(() => {
-      post({ type: "dictation_toggle", target: "composer" });
+      post({
+        type: "dictation_toggle",
+        target: "composer",
+        forcePick: forcePick || undefined,
+      });
     }, 40);
   };
 
@@ -3600,11 +3604,11 @@ export function App() {
                     title={
                       dictating
                         ? "Stop dictation (Esc / Mic)"
-                        : "Pick mic & dictate (macOS Fn Fn · Windows Win+H). ⌃␣ / F8"
+                        : "Dictate (macOS Fn Fn · Windows Win+H). ⌃␣ / F8 · ⌥/Alt+Mic to change mic"
                     }
                     aria-label={dictating ? "Stop dictation" : "Start voice dictation"}
                     aria-pressed={dictating}
-                    onClick={() => toggleDictation()}
+                    onClick={(e) => toggleDictation(e.altKey)}
                   >
                     {dictating ? <IconMicOff /> : <IconMic />}
                   </button>
@@ -3720,17 +3724,24 @@ export function App() {
                   <button
                     type="button"
                     className={`icon-btn mic-btn${bugReportDictating ? " active" : ""}`}
-                    title="Pick mic & dictate"
+                    title="Dictate (⌥/Alt+click to change mic)"
                     aria-label="Dictate bug description"
                     aria-pressed={bugReportDictating}
                     disabled={bugReportBusy}
-                    onClick={() => {
+                    onClick={(e) => {
+                      const forcePick = e.altKey;
                       bugReportTextareaRef.current?.focus();
                       if (!bugReportDictating) {
-                        setBugReportStatus("Choose a microphone…");
+                        setBugReportStatus(
+                          forcePick ? "Choose a microphone…" : "Dictation…",
+                        );
                       }
                       window.setTimeout(() => {
-                        post({ type: "dictation_toggle", target: "bug_report" });
+                        post({
+                          type: "dictation_toggle",
+                          target: "bug_report",
+                          forcePick: forcePick || undefined,
+                        });
                       }, 40);
                     }}
                   >

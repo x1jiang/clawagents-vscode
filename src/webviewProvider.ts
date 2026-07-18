@@ -1438,6 +1438,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             this.post({ type: "dictation_focus", target });
             await new Promise((r) => setTimeout(r, 220));
           },
+          Boolean(msg.forcePick),
         );
         if (result.kind === "started") {
           this.post({

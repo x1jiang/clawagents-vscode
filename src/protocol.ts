@@ -317,6 +317,8 @@ export type WebviewToHost =
   | {
       type: "dictation_toggle";
       target?: "composer" | "bug_report";
+      /** Re-show mic QuickPick (e.g. Alt/⌥+Mic). Default: reuse session mic. */
+      forcePick?: boolean;
     };
 
 const NO_PAYLOAD_MESSAGES = new Set([
@@ -383,9 +385,10 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost
         : undefined;
     case "dictation_toggle":
-      return value.target === undefined
+      return (value.target === undefined
         || value.target === "composer"
-        || value.target === "bug_report"
+        || value.target === "bug_report")
+        && (value.forcePick === undefined || typeof value.forcePick === "boolean")
         ? value as WebviewToHost
         : undefined;
     case "permission":

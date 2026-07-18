@@ -416,6 +416,8 @@ export class HostDictation {
   private target: DictationTarget = "composer";
   private extensionPath = "";
   private globalState: vscode.Memento | undefined;
+  /** Mic chosen once per extension-host session; reused until window reload. */
+  private sessionMic: AudioInputDevice | undefined;
 
   configure(extensionPath: string, globalState: vscode.Memento): void {
     this.extensionPath = extensionPath;
@@ -435,6 +437,7 @@ export class HostDictation {
     output: { appendLine(s: string): void },
     target: DictationTarget = "composer",
     onBeforeStart?: () => Promise<void>,
+    forcePick = false,
   ): Promise<
     | { kind: "started"; target: DictationTarget; detail?: string }
     | { kind: "stopped"; target: DictationTarget }
@@ -500,25 +503,35 @@ export class HostDictation {
       }
     }
 
-    // Put last-used / default near the top for fast Enter.
     devices = [...devices].sort((a, b) => {
       const score = (d: AudioInputDevice) =>
         (lastId && d.id === lastId ? 2 : 0) + (d.isDefault ? 1 : 0);
       return score(b) - score(a);
     });
 
-    const picked = await pickInputDevice(devices, lastId, process.platform);
-    if (!picked) {
-      return { kind: "cancelled", target };
-    }
-    if (picked === "settings") {
-      openSoundSettings(process.platform);
-      return {
-        kind: "error",
-        target,
-        detail:
-          "Opened sound settings — choose your mic, then click Mic again to dictate.",
-      };
+    let picked: AudioInputDevice;
+    const reuseSession = Boolean(this.sessionMic) && !forcePick;
+    if (reuseSession && this.sessionMic) {
+      picked = this.sessionMic;
+      output.appendLine(
+        `Dictation: reusing session mic → ${picked.label} (⌥/Alt+Mic to change)`,
+      );
+    } else {
+      const choice = await pickInputDevice(devices, lastId, process.platform);
+      if (!choice) {
+        return { kind: "cancelled", target };
+      }
+      if (choice === "settings") {
+        openSoundSettings(process.platform);
+        return {
+          kind: "error",
+          target,
+          detail:
+            "Opened sound settings — choose your mic, then click Mic again to dictate.",
+        };
+      }
+      picked = choice;
+      this.sessionMic = picked;
     }
 
     if (picked.id) {
@@ -526,7 +539,6 @@ export class HostDictation {
       if (process.platform === "darwin") {
         setOk = setMacInput(this.extensionPath, picked.id);
       } else {
-        // Cmdlets use numeric index; ffmpeg names cannot be set without the module.
         if (/^\d+$/.test(picked.id)) {
           setOk = setWindowsInputCmdlets(picked.id);
           if (!setOk) {
@@ -534,7 +546,7 @@ export class HostDictation {
               `Dictation: could not set Windows mic index ${picked.id} (AudioDeviceCmdlets?). Using system default.`,
             );
           }
-        } else {
+        } else if (!reuseSession) {
           output.appendLine(
             `Dictation: listed "${picked.label}" via ffmpeg — set it as default in Sound settings if needed (Install-Module AudioDeviceCmdlets for one-click switch).`,
           );
@@ -548,7 +560,9 @@ export class HostDictation {
         };
       }
       await this.globalState?.update(STATE_LAST_MIC, picked.id);
-      output.appendLine(`Dictation: mic → ${picked.label} (${picked.id || "default"})`);
+      if (!reuseSession) {
+        output.appendLine(`Dictation: mic → ${picked.label} (${picked.id || "default"})`);
+      }
     }
 
     // QuickPick steals focus — caller re-focuses the webview textarea first.
@@ -571,9 +585,11 @@ export class HostDictation {
       }
       this.listening = true;
       const detail = `Apple Dictation · ${picked.label}`;
-      void vscode.window.showInformationMessage(
-        `ClawAgents: ${detail} — speak into the box. Mic / Esc / Fn Fn to stop.`,
-      );
+      if (!reuseSession) {
+        void vscode.window.showInformationMessage(
+          `ClawAgents: ${detail} — speak into the box. Mic again to stop. ⌥/Alt+Mic to change mic.`,
+        );
+      }
       return { kind: "started", target, detail };
     }
 
@@ -587,9 +603,11 @@ export class HostDictation {
     }
     this.listening = true;
     const detail = `Windows voice typing · ${picked.label}`;
-    void vscode.window.showInformationMessage(
-      `ClawAgents: ${detail} — speak into the box. Mic / Esc / Win+H to stop.`,
-    );
+    if (!reuseSession) {
+      void vscode.window.showInformationMessage(
+        `ClawAgents: ${detail} — speak into the box. Mic again to stop. Alt+Mic to change mic.`,
+      );
+    }
     return { kind: "started", target, detail };
   }
 
