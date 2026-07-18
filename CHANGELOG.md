@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.94
+
+- Require `clawagents>=6.20.13` — clearer non-repo git notices, hashline malformed-anchor samples, execute git-128 interpretation (fewer scary fails outside git repos).
+
 ## 1.0.93
 
 - **Cost estimates:** Mantle/Bedrock Claude uses commercial Global rates ($5/$25 Opus), not the GovCloud row ($6/$30) that was scraped from the pricing page by mistake.
@@ -498,6 +502,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.94
+
+- Require `clawagents>=6.20.13` — clearer non-repo git notices, hashline malformed-anchor samples, execute git-128 interpretation (fewer scary fails outside git repos).
 
 ## 1.0.93
 
