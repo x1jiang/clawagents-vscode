@@ -1,7 +1,7 @@
 Publisher **`clawagents`** · version **1.0.57**
 
 - [x] GitHub release `v1.0.57` + VSIX
-- [ ] Publish `clawagents` **6.19.0** to PyPI (needs `TWINE_PASSWORD`)
+- [x] Publish `clawagents` **6.19.0** to PyPI
 - [ ] Marketplace / Open VSX (optional)
 
 ```bash
