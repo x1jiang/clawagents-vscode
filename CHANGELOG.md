@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.97
+
+- Require `clawagents>=6.20.16` — ``snapshot_diff`` ``showing 40 of N`` file-cap note.
+
 ## 1.0.96
 
 - Require `clawagents>=6.20.15` — skill-loading auto-continuation (no refusal loop / mid-load deadlock); ``use_skill(abort=true)``.
@@ -510,6 +514,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.97
+
+- Require `clawagents>=6.20.16` — ``snapshot_diff`` ``showing 40 of N`` file-cap note.
 
 ## 1.0.96
 
