@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.55",
+  "version": "1.0.57",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -259,6 +259,11 @@
           "type": "boolean",
           "default": true,
           "description": "On sidecar start, probe and auto-upgrade companion CLIs (npm context-mode@latest, Homebrew rtk) when missing or below the floors required by this extension."
+        },
+        "clawagents.alpacaDeployPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to alpaca_deploy (for bug-report email via its EMAIL_* / send_alert_email). Empty auto-discovers ~/Dropbox/cursor_projects/mac/alpaca_deploy or ALPACA_DEPLOY_ROOT."
         },
         "clawagents.autoOpenChangedFiles": {
           "type": "boolean",

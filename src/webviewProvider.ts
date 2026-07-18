@@ -24,6 +24,7 @@ import {
   detectImageMediaType,
   safeLocalAttachmentName,
 } from "./localAttachments";
+import { captureBugScreenshot, sendBugReportEmail } from "./bugReport";
 import { parseWebviewToHost } from "./protocol";
 import type {
   AgentMode,
@@ -1390,6 +1391,41 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "bug_report_capture_screenshot": {
+        const shot = await captureBugScreenshot();
+        if (!shot) {
+          this.post({
+            type: "bug_report_screenshot",
+            ok: false,
+            detail: "No screenshot captured",
+          });
+          break;
+        }
+        this.post({ type: "bug_report_screenshot", ok: true, screenshot: shot });
+        break;
+      }
+      case "bug_report_submit": {
+        const out = this.sidecar.output;
+        out.appendLine("Sending bug report email…");
+        const result = await sendBugReportEmail({
+          python: this.config.pythonPath,
+          extensionPath: this.context.extensionUri.fsPath,
+          text: msg.text,
+          screenshots: msg.screenshots,
+          output: out,
+        });
+        this.post({
+          type: "bug_report_result",
+          ok: result.ok,
+          detail: result.detail,
+        });
+        if (result.ok) {
+          void vscode.window.showInformationMessage("Bug report emailed.");
+        } else {
+          void vscode.window.showErrorMessage(`Bug report failed: ${result.detail}`);
+        }
+        break;
+      }
       case "persist":
         this.mode = msg.mode;
         if (msg.chatId) {

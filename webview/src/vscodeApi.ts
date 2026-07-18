@@ -153,6 +153,13 @@ export type HostToWebview =
   | { type: "verify_result"; provider: string; ok: boolean; detail?: string }
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
+  | { type: "bug_report_result"; ok: boolean; detail: string }
+  | {
+      type: "bug_report_screenshot";
+      ok: boolean;
+      screenshot?: { name: string; mediaType: string; data: string };
+      detail?: string;
+    }
   | { type: "sidecar"; state: "stopped" | "starting" | "running" | "error"; detail?: string }
   | {
       type: "checkpoints";
@@ -270,7 +277,13 @@ export type WebviewToHost =
       caveman?: boolean;
       goal?: boolean;
     }
-  | { type: "queue_send"; text: string };
+  | { type: "queue_send"; text: string }
+  | { type: "bug_report_capture_screenshot" }
+  | {
+      type: "bug_report_submit";
+      text: string;
+      screenshots: Array<{ name: string; mediaType: string; data: string }>;
+    };
 
 interface VsCodeApi {
   postMessage(message: WebviewToHost): void;

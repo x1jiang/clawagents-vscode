@@ -63,6 +63,10 @@ test("dependency versions stay inside the supported major ranges", () => {
     deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.19.0")),
   );
   assert.ok(!deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("atlas")));
+  assert.match(deps.CLAWAGENTS_GITHUB_WHEEL, /clawagents-6\.19\.0-py3-none-any\.whl$/);
+  assert.ok(
+    deps.SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.includes(deps.CLAWAGENTS_GITHUB_WHEEL),
+  );
 });
 
 test("concurrent dependency checks share one in-flight promise", async () => {

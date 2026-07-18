@@ -29,6 +29,7 @@ body,
 }
 
 .app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -583,7 +584,7 @@ summary {
   color: var(--input-fg);
   border: none;
   border-radius: 0;
-  padding: 8px 104px 8px 10px;
+  padding: 8px 120px 8px 10px;
   font: inherit;
   box-sizing: border-box;
 }
@@ -1307,4 +1308,84 @@ button.send:not(.icon-btn) {
   cursor: pointer;
   padding: 0 4px;
   font: inherit;
+}
+
+.bug-report-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.bug-report-panel {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--input-bg);
+  box-shadow: 0 8px 28px color-mix(in srgb, #000 35%, transparent);
+}
+
+.bug-report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bug-report-text {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.bug-report-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bug-report-send {
+  flex: 1;
+  height: 28px;
+  font-size: 12px;
+}
+
+.bug-report-shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bug-shot-chip {
+  position: relative;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  width: 72px;
+  height: 54px;
+  background: var(--bg);
+}
+
+.bug-shot-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bug-shot-chip .image-chip-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
 }

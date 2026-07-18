@@ -1,3 +1,12 @@
+## 1.0.57
+
+- Auto-install falls back to the GitHub release wheel when PyPI lacks `clawagents>=6.19.0` (fixes sidecar fail after fresh VSIX)
+
+## 1.0.56
+
+- Bug report comment button: type / speak / screenshot → email via alpaca_deploy `send_alert_email` + SMTP attachments
+- Setting `clawagents.alpacaDeployPath` (or `ALPACA_DEPLOY_ROOT`)
+
 ## 1.0.55
 
 - Require `clawagents>=6.19.0` (companion floors + doctor probes)

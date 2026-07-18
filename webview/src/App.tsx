@@ -381,6 +381,16 @@ export function App() {
   const dragDepth = useRef(0);
   const attachmentRequestsRef = useRef(new Set<string>());
   const [attachmentUploads, setAttachmentUploads] = useState(0);
+  const [bugReportOpen, setBugReportOpen] = useState(false);
+  const [bugReportText, setBugReportText] = useState("");
+  const [bugReportShots, setBugReportShots] = useState<
+    Array<{ name: string; mediaType: string; data: string }>
+  >([]);
+  const [bugReportBusy, setBugReportBusy] = useState(false);
+  const [bugReportStatus, setBugReportStatus] = useState("");
+  const [bugReportDictating, setBugReportDictating] = useState(false);
+  const bugReportVoiceRef = useRef<VoiceDictation | null>(null);
+  const bugReportBaseRef = useRef("");
 
   const commitRunCost = (u: {
     promptTokens?: number;
@@ -876,6 +886,24 @@ export function App() {
           streamingRef.current = false;
           commitRunCost(runUsageRef.current);
           setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
+          break;
+        case "bug_report_screenshot":
+          setBugReportBusy(false);
+          if (msg.ok && msg.screenshot) {
+            setBugReportShots((prev) => [...prev, msg.screenshot!].slice(0, 6));
+            setBugReportStatus("Screenshot attached");
+          } else {
+            setBugReportStatus(msg.detail || "Screenshot cancelled");
+          }
+          break;
+        case "bug_report_result":
+          setBugReportBusy(false);
+          setBugReportStatus(msg.detail || (msg.ok ? "Sent" : "Failed"));
+          if (msg.ok) {
+            setBugReportText("");
+            setBugReportShots([]);
+            setTimeout(() => setBugReportOpen(false), 800);
+          }
           break;
         default:
           break;
@@ -3579,6 +3607,18 @@ export function App() {
                 <div className="compose-actions">
                   <button
                     type="button"
+                    className="icon-btn"
+                    title="Report a bug (type, speak, or screenshot → email)"
+                    aria-label="Report a bug"
+                    onClick={() => {
+                      setBugReportOpen(true);
+                      setBugReportStatus("");
+                    }}
+                  >
+                    <IconComment />
+                  </button>
+                  <button
+                    type="button"
                     className={`icon-btn mic-btn${dictating ? " active" : ""}`}
                     title={
                       dictating
@@ -3638,9 +3678,187 @@ export function App() {
               </div>
             </div>
           </footer>
+
+          {bugReportOpen ? (
+            <div
+              className="bug-report-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Report a bug"
+            >
+              <div className="bug-report-panel">
+                <div className="bug-report-head">
+                  <strong>Report a bug</strong>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="Close"
+                    aria-label="Close bug report"
+                    onClick={() => {
+                      bugReportVoiceRef.current?.stop();
+                      setBugReportDictating(false);
+                      setBugReportOpen(false);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p className="tiny muted">
+                  Type, speak, or attach a screenshot. Sends email via alpaca_deploy SMTP.
+                </p>
+                <textarea
+                  className="bug-report-text"
+                  rows={5}
+                  value={bugReportText}
+                  placeholder="What went wrong?"
+                  disabled={bugReportBusy}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setBugReportText(v);
+                    if (bugReportDictating) {
+                      bugReportBaseRef.current = v;
+                    }
+                  }}
+                />
+                {bugReportShots.length > 0 ? (
+                  <div className="bug-report-shots">
+                    {bugReportShots.map((s, i) => (
+                      <span key={`${s.name}-${i}`} className="bug-shot-chip" title={s.name}>
+                        <img
+                          src={`data:${s.mediaType};base64,${s.data}`}
+                          alt={s.name}
+                        />
+                        <button
+                          type="button"
+                          className="image-chip-remove"
+                          title="Remove"
+                          onClick={() =>
+                            setBugReportShots((prev) => prev.filter((_, j) => j !== i))
+                          }
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="bug-report-actions">
+                  <button
+                    type="button"
+                    className={`icon-btn mic-btn${bugReportDictating ? " active" : ""}`}
+                    title="Dictate bug description"
+                    aria-label="Dictate bug description"
+                    aria-pressed={bugReportDictating}
+                    disabled={bugReportBusy}
+                    onClick={() => {
+                      if (bugReportDictating) {
+                        bugReportVoiceRef.current?.stop();
+                        setBugReportDictating(false);
+                        return;
+                      }
+                      if (!speechRecognitionAvailable()) {
+                        setBugReportStatus("Speech recognition unavailable in this webview");
+                        return;
+                      }
+                      bugReportBaseRef.current = bugReportText;
+                      if (!bugReportVoiceRef.current) {
+                        bugReportVoiceRef.current = new VoiceDictation(
+                          navigator.language || "en-US",
+                        );
+                      }
+                      const ok = bugReportVoiceRef.current.start({
+                        onStart: () => setBugReportDictating(true),
+                        onEnd: () => setBugReportDictating(false),
+                        onInterim: (t) => {
+                          const base = bugReportBaseRef.current;
+                          const sep = base && !base.endsWith(" ") ? " " : "";
+                          setBugReportText(base + sep + t);
+                        },
+                        onFinal: (t) => {
+                          const base = bugReportBaseRef.current;
+                          const sep = base && !base.endsWith(" ") ? " " : "";
+                          const next = (base + sep + t).trimEnd() + " ";
+                          bugReportBaseRef.current = next;
+                          setBugReportText(next);
+                        },
+                        onError: (m) => setBugReportStatus(m),
+                      });
+                      if (!ok) {
+                        setBugReportStatus("Could not start dictation");
+                      }
+                    }}
+                  >
+                    {bugReportDictating ? <IconMicOff /> : <IconMic />}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="Capture screenshot (macOS: drag region)"
+                    aria-label="Capture screenshot"
+                    disabled={bugReportBusy || bugReportShots.length >= 6}
+                    onClick={() => {
+                      setBugReportBusy(true);
+                      setBugReportStatus("Capture a region…");
+                      post({ type: "bug_report_capture_screenshot" });
+                    }}
+                  >
+                    <IconCamera />
+                  </button>
+                  <button
+                    type="button"
+                    className="primary bug-report-send"
+                    disabled={bugReportBusy || !bugReportText.trim()}
+                    onClick={() => {
+                      bugReportVoiceRef.current?.stop();
+                      setBugReportDictating(false);
+                      setBugReportBusy(true);
+                      setBugReportStatus("Sending…");
+                      post({
+                        type: "bug_report_submit",
+                        text: bugReportText.trim(),
+                        screenshots: bugReportShots,
+                      });
+                    }}
+                  >
+                    {bugReportBusy ? "…" : "Send report"}
+                  </button>
+                </div>
+                {bugReportStatus ? (
+                  <div className="tiny muted">{bugReportStatus}</div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </div>
+  );
+}
+
+function IconComment() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4H6a2 2 0 0 1-2-2V6Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconCamera() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13" r="3.5" stroke="currentColor" strokeWidth="2" />
+    </svg>
   );
 }
 

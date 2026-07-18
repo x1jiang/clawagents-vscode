@@ -160,6 +160,17 @@ export type HostToWebview =
   | { type: "verify_result"; provider: string; ok: boolean; detail?: string }
   | { type: "diagnostics"; data: unknown }
   | { type: "stats"; data: unknown }
+  | {
+      type: "bug_report_result";
+      ok: boolean;
+      detail: string;
+    }
+  | {
+      type: "bug_report_screenshot";
+      ok: boolean;
+      screenshot?: { name: string; mediaType: string; data: string };
+      detail?: string;
+    }
   | { type: "sidecar"; state: "stopped" | "starting" | "running" | "error"; detail?: string }
   | {
       type: "checkpoints";
@@ -275,13 +286,19 @@ export type WebviewToHost =
       caveman?: boolean;
       goal?: boolean;
     }
-  | { type: "queue_send"; text: string };
+  | { type: "queue_send"; text: string }
+  | { type: "bug_report_capture_screenshot" }
+  | {
+      type: "bug_report_submit";
+      text: string;
+      screenshots: Array<{ name: string; mediaType: string; data: string }>;
+    };
 
 const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "cancel", "clear", "new_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
-  "load_stats",
+  "load_stats", "bug_report_capture_screenshot",
 ]);
 const AGENT_MODES = new Set(["ask", "read_only", "auto", "full_access"]);
 const PROVIDERS = new Set(["openai", "anthropic", "gemini", "bedrock", "tavily"]);
@@ -327,6 +344,19 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost : undefined;
     case "queue_send":
       return text(value.text) ? value as WebviewToHost : undefined;
+    case "bug_report_submit":
+      return text(value.text, 100_000)
+        && Array.isArray(value.screenshots)
+        && value.screenshots.length <= 6
+        && value.screenshots.every(
+          (file) =>
+            record(file)
+            && text(file.name, 512)
+            && text(file.mediaType, 128)
+            && text(file.data, 14_000_000),
+        )
+        ? value as WebviewToHost
+        : undefined;
     case "permission":
       return opaqueId(value.requestId) && ["allow_once", "allow_always", "deny"].includes(String(value.decision))
         ? value as WebviewToHost : undefined;
