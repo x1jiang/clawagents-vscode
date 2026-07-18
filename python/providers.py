@@ -229,17 +229,18 @@ def _provider_credentials_present(
     """Whether this provider has local credentials (before live probe)."""
     if provider_id == "ollama":
         if not probe_local:
-            # Cheap catalog (probe=0): skip localhost HTTP — live check on probe=1.
-            return True
+            # Cheap catalog (probe=0): unknown — do not claim the daemon is up.
+            # Host requests probe=1 when the user switches to Ollama.
+            return False
         return _ollama_reachable()
     if env_key is None:
         return True
     if env_key == "GEMINI_API_KEY":
         return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
     if env_key == "BEDROCK_API_KEY":
-        # Do NOT treat OPENAI_API_KEY as Bedrock access — that listed every
-        # Bedrock model whenever OpenAI was configured.
-        # Mantle / OneHUB keys may arrive as MANTLE_API_KEY.
+        # Parent bedrock row is available if *any* access mode can work.
+        # The webview splits IAM vs Mantle vs BAG using separate key flags —
+        # do not treat Mantle key as making IAM "ready" in the UI.
         return bool(
             os.environ.get("BEDROCK_API_KEY")
             or os.environ.get("MANTLE_API_KEY")

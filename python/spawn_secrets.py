@@ -71,7 +71,20 @@ def resolve_api_key(provider: str, model: str | None = None) -> str | None:
         return key or None
 
     # auto / unknown — infer from model id
-    if m.startswith("claude") or m.startswith("anthropic"):
+    # Bedrock / Mantle catalog shapes must not pick Anthropic/OpenAI keys.
+    try:
+        from clawagents.config.config import is_bedrock_model_id
+
+        if is_bedrock_model_id(m):
+            key = get_secret("BEDROCK_API_KEY")
+            return key or None
+    except Exception:  # noqa: BLE001
+        if m.startswith(("us.", "eu.", "apac.", "global.", "bedrock/")) or m.startswith(
+            ("anthropic.", "amazon.", "meta.", "openai.")
+        ):
+            key = get_secret("BEDROCK_API_KEY")
+            return key or None
+    if m.startswith("claude") or m.startswith("anthropic/"):
         key = get_secret("ANTHROPIC_API_KEY")
         return key or None
     if m.startswith("gemini"):

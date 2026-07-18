@@ -624,6 +624,24 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
     }
 
 
+def _model_looks_bedrock(model: str | None) -> bool:
+    """True when the model id is a Bedrock / Mantle catalog shape."""
+    m = str(model or "").strip()
+    if not m:
+        return False
+    try:
+        from clawagents.config.config import is_bedrock_model_id
+
+        return bool(is_bedrock_model_id(m))
+    except Exception:  # noqa: BLE001
+        lower = m.lower()
+        if lower.startswith(("us.", "eu.", "apac.", "global.", "bedrock/")):
+            return True
+        return lower.startswith(
+            ("anthropic.", "amazon.", "meta.", "openai.", "deepseek.", "qwen.")
+        )
+
+
 def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[str, Any]:
     """Translate settings (model / provider / base_url) into agent kwargs."""
     kwargs: dict[str, Any] = {}
@@ -650,9 +668,22 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         if is_trusted_base_url(base_url) or settings.get("trust_custom_base_url"):
             kwargs["base_url"] = base_url
         # else: drop untrusted URL (do not send API keys to attacker host)
+    # provider=auto still needs Bedrock wiring when the selected model / mode /
+    # base_url clearly target Mantle, BAG, or native Bedrock IDs.
+    use_bedrock = provider == "bedrock" or (
+        provider == "auto"
+        and (
+            mode in ("mantle", "bag")
+            or (
+                kwargs.get("base_url")
+                and "bedrock-mantle." in str(kwargs.get("base_url") or "")
+            )
+            or _model_looks_bedrock(str(effective_model or ""))
+        )
+    )
     if provider.startswith("profile:"):
         kwargs["profile"] = provider.split(":", 1)[1]
-    elif provider == "bedrock":
+    elif use_bedrock:
         _apply_aws_settings(settings)
         if mode == "mantle" and not kwargs.get("base_url"):
             region = str(settings.get("aws_region") or "").strip() or "us-east-1"
@@ -1198,10 +1229,10 @@ async def run_chat_turn(
 
         return await agent.invoke(augmented, **invoke_kwargs)
 
-    # Floor is clawagents≥6.20.9 — workspace= is required. No process chdir / turn lock.
+    # Floor is clawagents≥6.20.10 — workspace= is required. No process chdir / turn lock.
     if not supports_workspace:
         raise RuntimeError(
-            "ClawAgents sidecar requires clawagents≥6.20.9 with workspace= support. "
+            "ClawAgents sidecar requires clawagents≥6.20.10 with workspace= support. "
             "Run ClawAgents: Install/Upgrade Python Dependencies."
         )
     result = await _run_turn()

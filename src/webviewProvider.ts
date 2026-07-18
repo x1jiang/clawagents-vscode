@@ -515,6 +515,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         if (this.mode === "read_only") {
           this.interaction = "interactive";
         }
+        // Drain in-flight settings saves first — sidecar reads disk per turn.
+        await this.saveSettingsChain.catch(() => undefined);
         await this.runTask(msg.text, msg.includeContext, msg.chatId, msg.model);
         break;
       case "queue_send":
@@ -1132,13 +1134,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           const mantleMode =
             String(settings.bedrock_mode || "").toLowerCase() === "mantle" ||
             /bedrock-mantle\./i.test(String(settings.base_url || ""));
-          // On provider/endpoint change: refresh catalog. Mantle uses live
-          // /models (probe=1); others stay cheap (probe=0).
+          const ollamaMode =
+            String(settings.provider || "").toLowerCase() === "ollama";
+          // On provider/endpoint change: refresh catalog. Mantle + Ollama use
+          // live probes; others stay cheap (probe=0).
           let providers: unknown[] | undefined;
           if (catalogChanged) {
             try {
               providers = await this.gateway.getProviders({
-                probe: mantleMode,
+                probe: mantleMode || ollamaMode,
               });
             } catch {
               /* catalog refresh is best-effort */
@@ -1360,45 +1364,62 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "test_compatible_endpoint": {
-        const { probeCompatibleEndpoint } = await import("./bedrockGateway");
-        const style = msg.style === "bag" ? "bag" : "openai";
-        const env = await this.config.getApiKeyEnv();
-        const provider = msg.provider || (style === "bag" ? "bedrock" : "openai");
-        const key =
-          (msg.apiKey || "").trim() ||
-          (provider === "bedrock"
-            ? env.BEDROCK_API_KEY
-            : provider === "gemini"
-              ? env.GEMINI_API_KEY || env.GOOGLE_API_KEY
-              : env.OPENAI_API_KEY) ||
-          "";
-        const result = await probeCompatibleEndpoint(msg.baseUrl || "", key, {
-          style,
-          allowEmptyKey: style === "openai" && /localhost|127\.0\.0\.1/.test(msg.baseUrl || ""),
-          label:
-            style === "bag"
-              ? "Bedrock Access Gateway"
-              : /bedrock-mantle\./i.test(msg.baseUrl || "")
-                ? "Mantle / OneHUB"
-                : "OpenAI-compatible endpoint",
-        });
-        this.post({
-          type: "verify_result",
-          provider,
-          ok: result.ok,
-          detail: result.detail,
-        });
-        // Refresh provider catalog so the model dropdown matches the endpoint.
-        if (result.ok) {
-          try {
-            await this.sidecar.ensureStarted();
-            const providers = await this.gateway.getProviders({ probe: true });
-            const settings = await this.gateway.getSettings();
-            this.post({ type: "settings", settings, providers });
-          } catch {
-            /* best-effort */
-          }
-        }
+        const testedUrl = (msg.baseUrl || "").trim();
+        // Serialize with settings saves so a late probe cannot overwrite the
+        // catalog after the user has already switched providers/endpoints.
+        this.saveSettingsChain = this.saveSettingsChain
+          .catch(() => undefined)
+          .then(async () => {
+            const { probeCompatibleEndpoint } = await import("./bedrockGateway");
+            const style = msg.style === "bag" ? "bag" : "openai";
+            const env = await this.config.getApiKeyEnv();
+            const provider =
+              msg.provider || (style === "bag" ? "bedrock" : "openai");
+            const key =
+              (msg.apiKey || "").trim() ||
+              (provider === "bedrock"
+                ? env.BEDROCK_API_KEY
+                : provider === "gemini"
+                  ? env.GEMINI_API_KEY || env.GOOGLE_API_KEY
+                  : env.OPENAI_API_KEY) ||
+              "";
+            const result = await probeCompatibleEndpoint(testedUrl, key, {
+              style,
+              allowEmptyKey:
+                style === "openai" &&
+                /localhost|127\.0\.0\.1/.test(testedUrl),
+              label:
+                style === "bag"
+                  ? "Bedrock Access Gateway"
+                  : /bedrock-mantle\./i.test(testedUrl)
+                    ? "Mantle / OneHUB"
+                    : "OpenAI-compatible endpoint",
+            });
+            this.post({
+              type: "verify_result",
+              provider,
+              ok: result.ok,
+              detail: result.detail,
+            });
+            if (!result.ok) {
+              return;
+            }
+            try {
+              await this.sidecar.ensureStarted();
+              const settings = await this.gateway.getSettings();
+              const current = String(settings.base_url || "").trim();
+              const norm = (u: string) => u.replace(/\/+$/, "").toLowerCase();
+              if (norm(current) !== norm(testedUrl)) {
+                // User switched away while the probe ran — keep their catalog.
+                return;
+              }
+              const providers = await this.gateway.getProviders({ probe: true });
+              this.post({ type: "settings", settings, providers });
+            } catch {
+              /* best-effort */
+            }
+          });
+        await this.saveSettingsChain.catch(() => undefined);
         break;
       }
       case "clear_api_key":

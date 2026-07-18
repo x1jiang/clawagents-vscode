@@ -1,5 +1,14 @@
 ## Unreleased
 
+## 1.0.86
+
+- Require `clawagents>=6.20.10` (canonical model classifier + PromptHook/PROVIDER fixes).
+- **Send/settings race:** flush pending save before send; host awaits `saveSettingsChain`.
+- **Bedrock availability:** IAM / Mantle / Gateway use separate cred flags (not one OR).
+- **provider=auto** applies Bedrock/Mantle wiring for Bedrock-shaped models.
+- Test-endpoint probe serialized + abandoned-URL guard; Ollama switch live-probes.
+- Fix `apac.` geo prefix in webview classifier (was `ap.`).
+
 ## 1.0.85
 
 - Require `clawagents>=6.20.9` (capabilities contract + workspace-scoped tool artifacts).
@@ -457,6 +466,15 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.86
+
+- Require `clawagents>=6.20.10` (canonical model classifier + PromptHook/PROVIDER fixes).
+- **Send/settings race:** flush pending save before send; host awaits `saveSettingsChain`.
+- **Bedrock availability:** IAM / Mantle / Gateway use separate cred flags (not one OR).
+- **provider=auto** applies Bedrock/Mantle wiring for Bedrock-shaped models.
+- Test-endpoint probe serialized + abandoned-URL guard; Ollama switch live-probes.
+- Fix `apac.` geo prefix in webview classifier (was `ap.`).
 
 ## 1.0.0 — 2026-07-11
 

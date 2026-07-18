@@ -119,7 +119,8 @@ export function isMantleAnthropicModel(id: string): boolean {
     .trim()
     .toLowerCase();
   if (m.startsWith("bedrock/")) m = m.slice("bedrock/".length);
-  for (const p of ["us.", "eu.", "ap.", "global."] as const) {
+  // AWS APAC geo prefix is ``apac.`` (not ``ap.``).
+  for (const p of ["us.", "eu.", "apac.", "global."] as const) {
     if (m.startsWith(p)) {
       m = m.slice(p.length);
       break;
@@ -171,7 +172,7 @@ export function providerSelectValue(settings: Record<string, unknown>): string {
 export function isNativeBedrockModelId(id: string): boolean {
   const m = String(id || "").trim();
   if (!m) return false;
-  if (/^(us|eu|ap|global)\./i.test(m)) return true;
+  if (/^(us|eu|apac|global)\./i.test(m)) return true;
   if (/^(amazon|meta)\./i.test(m)) return true;
   // Bedrock-hosted OSS (inference profile style)
   if (/gpt-oss/i.test(m) && (m.includes(":") || m.startsWith("openai.gpt-oss"))) {
@@ -182,7 +183,7 @@ export function isNativeBedrockModelId(id: string): boolean {
 
 export function isMantleCatalogModelId(id: string): boolean {
   const m = String(id || "").trim().toLowerCase();
-  if (!m || /^(us|eu|ap|global)\./.test(m)) return false;
+  if (!m || /^(us|eu|apac|global)\./.test(m)) return false;
   return (
     m.startsWith("openai.") ||
     m.startsWith("anthropic.") ||
@@ -192,11 +193,25 @@ export function isMantleCatalogModelId(id: string): boolean {
   );
 }
 
+/** Per-access-mode Bedrock credential flags (do not OR them into one boolean). */
+export type BedrockCredFlags = {
+  /** Native AWS credential chain (IAM / profile / env). */
+  iam: boolean;
+  /** Mantle / OneHUB API key (BEDROCK_API_KEY or MANTLE_API_KEY). */
+  mantle: boolean;
+  /** Bedrock Access Gateway API key. */
+  bag: boolean;
+};
+
 /** Split sidecar `bedrock` into IAM / Mantle / Gateway rows in the Provider menu. */
 export function expandBedrockProviderChoices(
   providers: Provider[],
-  hasBedrockCreds: boolean,
+  creds: boolean | BedrockCredFlags,
 ): Provider[] {
+  const flags: BedrockCredFlags =
+    typeof creds === "boolean"
+      ? { iam: creds, mantle: creds, bag: creds }
+      : creds;
   const fallbackIam =
     FALLBACK_PROVIDERS.find((p) => p.id === "bedrock")?.models || [];
   const out: Provider[] = [];
@@ -205,7 +220,6 @@ export function expandBedrockProviderChoices(
       out.push(p);
       continue;
     }
-    const avail = hasBedrockCreds || p.available !== false;
     const catalog = p.models || [];
     const iamModels = catalog.filter((m) => isNativeBedrockModelId(m.id));
     const mantleModels = catalog.filter((m) => isMantleCatalogModelId(m.id));
@@ -217,31 +231,33 @@ export function expandBedrockProviderChoices(
         input_per_mtok?: number;
         output_per_mtok?: number;
       }>,
+      modeAvail: boolean,
     ) =>
       models.map((m) => ({
         ...m,
         label: m.label || m.id,
-        available: avail && ("available" in m ? m.available !== false : true),
+        available: modeAvail && ("available" in m ? m.available !== false : true),
       }));
     out.push({
       id: BEDROCK_SELECT_IAM,
       name: "AWS Bedrock (IAM)",
-      available: avail,
-      models: mark(iamModels.length ? iamModels : fallbackIam),
+      available: flags.iam,
+      models: mark(iamModels.length ? iamModels : fallbackIam, flags.iam),
     });
     out.push({
       id: BEDROCK_SELECT_MANTLE,
       name: "AWS Bedrock Mantle",
-      available: avail,
+      available: flags.mantle,
       models: mark(
         mantleModels.length ? mantleModels : MANTLE_FALLBACK_MODELS,
+        flags.mantle,
       ),
     });
     out.push({
       id: BEDROCK_SELECT_BAG,
       name: "AWS Bedrock Gateway",
-      available: avail,
-      models: mark(iamModels.length ? iamModels : fallbackIam),
+      available: flags.bag,
+      models: mark(iamModels.length ? iamModels : fallbackIam, flags.bag),
     });
   }
   return out;

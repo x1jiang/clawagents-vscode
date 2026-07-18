@@ -1,6 +1,6 @@
-Publisher **`clawagents`** · version **1.0.85**
+Publisher **`clawagents`** · version **1.0.86**
 
-- [x] Publish `clawagents` **6.20.9** to GitHub (wheel + sdist)
-- [ ] Publish `clawagents` **6.20.9** to PyPI (needs `TWINE_PASSWORD` / API token)
-- [x] GitHub release `v1.0.85` + VSIX (audit remainder; require 6.20.9)
+- [ ] Publish `clawagents` **6.20.10** to GitHub (wheel + sdist)
+- [ ] Publish `clawagents` **6.20.10** to PyPI (needs `TWINE_PASSWORD` / API token)
+- [ ] GitHub release `v1.0.86` + VSIX (provider/model resolution hardening)
 - [ ] Marketplace / Open VSX (optional)

@@ -32,8 +32,10 @@ const EFFORT_OPTIONS = [
 ] as const;
 
 function modelSupportsEffort(model: string): boolean {
-  const m = model.trim().toLowerCase();
+  let m = model.trim().toLowerCase();
   if (!m) return false;
+  // Mantle catalog prefixes the OpenAI id (openai.gpt-5.6-…).
+  if (m.startsWith("openai.")) m = m.slice("openai.".length);
   if (m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) return true;
   if (m.startsWith("gpt-5.5") || m.startsWith("gpt-5.6")) return true;
   if (m === "gpt-5" || m.startsWith("gpt-5-")) return true;
@@ -1554,6 +1556,8 @@ export function App() {
     openai: hasOpenAIKey,
     anthropic: hasAnthropicKey,
     gemini: hasGeminiKey,
+    // Fallback catalog only: any Bedrock-related cred makes the parent row exist;
+    // expandBedrockProviderChoices splits IAM vs Mantle vs BAG availability.
     bedrock: hasBedrockKey || hasAwsCreds,
   };
   const providerCatalog = (() => {
@@ -1561,7 +1565,11 @@ export function App() {
       ? providers
       : applyKeyFlagsToFallback(FALLBACK_PROVIDERS, keyFlags);
     // Distinct Provider rows for IAM / Mantle / Gateway (saved provider = bedrock).
-    return expandBedrockProviderChoices(base, hasBedrockKey || hasAwsCreds);
+    return expandBedrockProviderChoices(base, {
+      iam: hasAwsCreds,
+      mantle: hasBedrockKey,
+      bag: hasBedrockKey,
+    });
   })();
   const modelFilterId =
     selectedProvider === "bedrock" ? providerMenuValue : selectedProvider;
@@ -1797,6 +1805,25 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  const flushPendingSettingsSave = () => {
+    // Cancel debounced autosave and push the latest patch before send so the
+    // sidecar cannot pair a new model with a stale base_url / bedrock_mode.
+    window.clearTimeout(settingsSaveTimer.current);
+    settingsSaveTimer.current = undefined;
+    const patch =
+      pendingSettingsPatch.current || normalizeSettingsForSave(settings);
+    const keyNow = settingsSaveKey(settings);
+    if (
+      patch &&
+      keyNow &&
+      keyNow !== committedSettingsKey.current
+    ) {
+      inflightSettingsKey.current = keyNow;
+      pendingSettingsPatch.current = patch;
+      post({ type: "save_settings", settings: patch });
+    }
+  };
+
   const send = () => {
     if (attachmentRequestsRef.current.size > 0) {
       setItems((previous) => [
@@ -1853,6 +1880,7 @@ export function App() {
       post({ type: "interject", text: value });
       return;
     }
+    flushPendingSettingsSave();
     post({
       type: "send",
       text: value,
