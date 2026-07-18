@@ -1,6 +1,6 @@
-Publisher **`clawagents`** · version **1.0.94**
+Publisher **`clawagents`** · version **1.0.95**
 
-- [x] Publish `clawagents` **6.20.13** to GitHub (wheel + sdist)
-- [x] Publish `clawagents` **6.20.13** to PyPI — https://pypi.org/project/clawagents/6.20.13/
-- [x] GitHub release `v1.0.94` + VSIX
+- [x] Publish `clawagents` **6.20.14** to GitHub (wheel + sdist)
+- [ ] Publish `clawagents` **6.20.14** to PyPI (needs token)
+- [x] GitHub release `v1.0.95` + VSIX
 - [ ] Marketplace / Open VSX (optional)

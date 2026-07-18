@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.95
+
+- Require `clawagents>=6.20.14` — strict apply_patch (empty REPLACE / fence guard), ``snapshot_diff``, code crush floor, /tmp sandbox allow.
+
 ## 1.0.94
 
 - Require `clawagents>=6.20.13` — clearer non-repo git notices, hashline malformed-anchor samples, execute git-128 interpretation (fewer scary fails outside git repos).
@@ -502,6 +506,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.95
+
+- Require `clawagents>=6.20.14` — strict apply_patch (empty REPLACE / fence guard), ``snapshot_diff``, code crush floor, /tmp sandbox allow.
 
 ## 1.0.94
 

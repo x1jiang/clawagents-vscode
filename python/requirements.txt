@@ -1,9 +1,9 @@
 # ClawAgents sidecar dependencies (auto-installed into clawagents.pythonPath)
 #
 # On first start / Restart Sidecar, the extension runs:
-#   python -m pip install -U 'clawagents[gemini,anthropic,bedrock,mcp,media]>=6.20.13,<7' ...
+#   python -m pip install -U 'clawagents[gemini,anthropic,bedrock,mcp,media]>=6.20.14,<7' ...
 #
-clawagents>=6.20.13,<7
+clawagents>=6.20.14,<7
 fastapi>=0.115.0,<1
 uvicorn>=0.30.0,<1
 pydantic>=2.7.0,<3
