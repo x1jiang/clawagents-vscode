@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.74
+
+- **Fix Mantle model dropdown showing Native IAM models:** when Access mode is Mantle, chat model list uses Mantle IDs (live `/models` on catalog change + after Test endpoint). Client fallback no longer shows Nova/Claude US while in Mantle mode.
+- Status line: in Mantle mode, stop implying IAM is required
+
 ## 1.0.73
 
 - **Fix Mantle Access mode snapping back to Native IAM:** stale `settings` echoes no longer overwrite a newer Mantle/BAG choice; Access mode saves immediately; `bedrock_mode` / `base_url` are critical save-verify keys

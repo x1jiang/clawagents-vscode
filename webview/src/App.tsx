@@ -165,6 +165,27 @@ const FALLBACK_PROVIDERS: Provider[] = [
   },
 ];
 
+/** Client fallback when sidecar catalog is empty but Settings say Mantle. */
+const MANTLE_FALLBACK_MODELS: Array<{ id: string; label: string }> = [
+  { id: "openai.gpt-5.6-sol", label: "GPT-5.6 Sol (Mantle)" },
+  { id: "openai.gpt-5.6-luna", label: "GPT-5.6 Luna (Mantle)" },
+  { id: "openai.gpt-5.6-terra", label: "GPT-5.6 Terra (Mantle)" },
+  { id: "openai.gpt-5.5", label: "GPT-5.5 (Mantle)" },
+  { id: "anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (Mantle)" },
+  { id: "anthropic.claude-opus-4-8", label: "Claude Opus 4.8 (Mantle)" },
+  { id: "anthropic.claude-haiku-4-5", label: "Claude Haiku 4.5 (Mantle)" },
+  { id: "anthropic.claude-fable-5", label: "Claude Fable 5 (Mantle)" },
+  { id: "deepseek.v3.2", label: "DeepSeek V3.2 (Mantle)" },
+  { id: "xai.grok-4.3", label: "xAI Grok 4.3 (Mantle)" },
+  { id: "zai.glm-5", label: "Z.ai GLM-5 (Mantle)" },
+];
+
+function isMantleSettings(settings: Record<string, unknown>): boolean {
+  const mode = String(settings.bedrock_mode || "").toLowerCase();
+  const base = String(settings.base_url || "");
+  return mode === "mantle" || /bedrock-mantle\./i.test(base);
+}
+
 function providerIsAvailable(provider: Provider): boolean {
   return provider.available !== false;
 }
@@ -1251,14 +1272,53 @@ export function App() {
   };
 
   const selectedProvider = String(settings.provider || "auto");
-  const providerCatalog = providers.length
-    ? providers
-    : applyKeyFlagsToFallback(FALLBACK_PROVIDERS, {
-        openai: hasOpenAIKey,
-        anthropic: hasAnthropicKey,
-        gemini: hasGeminiKey,
-        bedrock: hasBedrockKey || hasAwsCreds,
-      });
+  const keyFlags = {
+    openai: hasOpenAIKey,
+    anthropic: hasAnthropicKey,
+    gemini: hasGeminiKey,
+    bedrock: hasBedrockKey || hasAwsCreds,
+  };
+  const mantleUi = isMantleSettings(settings);
+  const providerCatalog = (() => {
+    const base = providers.length
+      ? providers
+      : applyKeyFlagsToFallback(FALLBACK_PROVIDERS, keyFlags);
+    // Never show Native IAM model IDs while Access mode is Mantle — that was
+    // the bug (fallback / stale catalog looked like Nova/Claude US).
+    if (!mantleUi) {
+      return base;
+    }
+    return base.map((p) => {
+      if (p.id !== "bedrock") {
+        return p;
+      }
+      const models = (p.models || []).filter(
+        (m) =>
+          m?.id &&
+          !String(m.id).startsWith("us.anthropic.") &&
+          !String(m.id).startsWith("amazon.nova") &&
+          !String(m.id).startsWith("meta.llama"),
+      );
+      const useMantle =
+        models.length > 0 &&
+        models.some(
+          (m) =>
+            String(m.id).startsWith("openai.") ||
+            String(m.id).startsWith("anthropic.claude"),
+        );
+      return {
+        ...p,
+        name: "AWS Bedrock Mantle",
+        available: hasBedrockKey || p.available !== false,
+        models: (useMantle ? models : MANTLE_FALLBACK_MODELS).map((m) => ({
+          ...m,
+          available:
+            hasBedrockKey ||
+            ("available" in m ? m.available !== false : true),
+        })),
+      };
+    });
+  })();
   const allModels = modelsForKeys(providerCatalog, selectedProvider);
   const providerModels = allModels;
   const preferredPick = pickPreferredModel(providerCatalog);
@@ -2325,7 +2385,11 @@ export function App() {
                   </button>
                 </div>
                 <p className="settings-hint">
-                  AWS IAM: {hasAwsCreds ? "detected" : "not detected"}
+                  {String(settings.bedrock_mode || "iam") === "mantle"
+                    ? "Mantle mode (IAM credentials not required)"
+                    : String(settings.bedrock_mode || "iam") === "bag"
+                      ? "BAG mode"
+                      : `AWS IAM: ${hasAwsCreds ? "detected" : "not detected"}`}
                   {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
                 </p>
                 {String(settings.bedrock_mode || "iam") !== "iam" && (

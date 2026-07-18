@@ -1157,11 +1157,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             keys.some((k) => JSON.stringify(previous[k] ?? null) !== JSON.stringify(settings[k] ?? null));
           const skillsChanged = changed(skillKeys);
           const catalogChanged = changed(catalogKeys);
-          // Cheap catalog only — and only when provider/model/endpoint changed.
+          const mantleMode =
+            String(settings.bedrock_mode || "").toLowerCase() === "mantle" ||
+            /bedrock-mantle\./i.test(String(settings.base_url || ""));
+          // On provider/endpoint change: refresh catalog. Mantle uses live
+          // /models (probe=1); others stay cheap (probe=0).
           let providers: unknown[] | undefined;
           if (catalogChanged) {
             try {
-              providers = await this.gateway.getProviders({ probe: false });
+              providers = await this.gateway.getProviders({
+                probe: mantleMode,
+              });
             } catch {
               /* catalog refresh is best-effort */
             }
@@ -1400,7 +1406,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           label:
             style === "bag"
               ? "Bedrock Access Gateway"
-              : "OpenAI-compatible endpoint",
+              : /bedrock-mantle\./i.test(msg.baseUrl || "")
+                ? "Mantle / OneHUB"
+                : "OpenAI-compatible endpoint",
         });
         this.post({
           type: "verify_result",
@@ -1408,6 +1416,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           ok: result.ok,
           detail: result.detail,
         });
+        // Refresh provider catalog so the model dropdown matches the endpoint.
+        if (result.ok) {
+          try {
+            await this.sidecar.ensureStarted();
+            const providers = await this.gateway.getProviders({ probe: true });
+            const settings = await this.gateway.getSettings();
+            this.post({ type: "settings", settings, providers });
+          } catch {
+            /* best-effort */
+          }
+        }
         break;
       }
       case "clear_api_key":
