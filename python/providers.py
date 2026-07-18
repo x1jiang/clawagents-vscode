@@ -13,6 +13,66 @@ from pricing import attach_prices
 from url_trust import is_trusted_base_url
 
 
+# Curated AWS Bedrock Mantle (OneHUB) models — us-east-1 has the fullest list.
+# Live GET {base}/models still merges/extends when a Mantle key is present.
+_MANTLE_MODELS: list[dict[str, Any]] = [
+    # Anthropic
+    {"id": "anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (Mantle)"},
+    {"id": "anthropic.claude-opus-4-8", "label": "Claude Opus 4.8 (Mantle)"},
+    {"id": "anthropic.claude-opus-4-7", "label": "Claude Opus 4.7 (Mantle)"},
+    {"id": "anthropic.claude-haiku-4-5", "label": "Claude Haiku 4.5 (Mantle)"},
+    {"id": "anthropic.claude-fable-5", "label": "Claude Fable 5 (Mantle)"},
+    # OpenAI
+    {"id": "openai.gpt-5.6-sol", "label": "GPT-5.6 Sol (Mantle)"},
+    {"id": "openai.gpt-5.6-luna", "label": "GPT-5.6 Luna (Mantle)"},
+    {"id": "openai.gpt-5.6-terra", "label": "GPT-5.6 Terra (Mantle)"},
+    {"id": "openai.gpt-5.5", "label": "GPT-5.5 (Mantle)"},
+    {"id": "openai.gpt-5.5-2026-04-23", "label": "GPT-5.5 (2026-04-23)"},
+    {"id": "openai.gpt-5.4", "label": "GPT-5.4 (Mantle)"},
+    {"id": "openai.gpt-5.4-2026-03-05", "label": "GPT-5.4 (2026-03-05)"},
+    {"id": "openai.gpt-oss-120b", "label": "GPT-OSS 120B (Mantle)"},
+    {"id": "openai.gpt-oss-20b", "label": "GPT-OSS 20B (Mantle)"},
+    {"id": "openai.gpt-oss-safeguard-120b", "label": "GPT-OSS Safeguard 120B"},
+    {"id": "openai.gpt-oss-safeguard-20b", "label": "GPT-OSS Safeguard 20B"},
+    # Other Mantle vendors (common IDs)
+    {"id": "xai.grok-4.3", "label": "xAI Grok 4.3 (Mantle)"},
+    {"id": "moonshot.kimi-k2.5", "label": "Kimi K2.5 (Mantle)"},
+    {"id": "moonshot.kimi-k2-thinking", "label": "Kimi K2 Thinking (Mantle)"},
+    {"id": "deepseek.v3.2", "label": "DeepSeek V3.2 (Mantle)"},
+    {"id": "deepseek.v3.1", "label": "DeepSeek V3.1 (Mantle)"},
+    {"id": "zai.glm-5", "label": "Z.ai GLM-5 (Mantle)"},
+    {"id": "zai.glm-4.7", "label": "Z.ai GLM-4.7 (Mantle)"},
+    {"id": "zai.glm-4.7-flash", "label": "Z.ai GLM-4.7 Flash (Mantle)"},
+    {"id": "zai.glm-4.6", "label": "Z.ai GLM-4.6 (Mantle)"},
+]
+
+
+def _is_mantle_base_url(base_url: str) -> bool:
+    try:
+        host = (urlparse(base_url).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+    if host == "bedrock-mantle.api.aws":
+        return True
+    parts = host.split(".")
+    return (
+        len(parts) >= 4
+        and parts[0] == "bedrock-mantle"
+        and parts[-2] == "api"
+        and parts[-1] == "aws"
+    )
+
+
+def _mantle_base_from_settings(settings_base: str, settings: dict[str, Any]) -> str:
+    if settings_base and _is_mantle_base_url(settings_base):
+        return settings_base.rstrip("/")
+    mode = str(settings.get("bedrock_mode") or "").strip().lower()
+    if mode == "mantle":
+        region = str(settings.get("aws_region") or "").strip() or "us-east-1"
+        return f"https://bedrock-mantle.{region}.api.aws/v1"
+    return ""
+
+
 _CATALOG: list[dict[str, Any]] = [
     {
         "id": "openai",
@@ -163,7 +223,12 @@ def _provider_credentials_present(provider_id: str, env_key: str | None) -> bool
     if env_key == "BEDROCK_API_KEY":
         # Do NOT treat OPENAI_API_KEY as Bedrock access — that listed every
         # Bedrock model whenever OpenAI was configured.
-        return bool(os.environ.get("BEDROCK_API_KEY") or _has_aws_credentials())
+        # Mantle / OneHUB keys may arrive as MANTLE_API_KEY.
+        return bool(
+            os.environ.get("BEDROCK_API_KEY")
+            or os.environ.get("MANTLE_API_KEY")
+            or _has_aws_credentials()
+        )
     return bool(os.environ.get(str(env_key)))
 
 
@@ -312,11 +377,18 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
     lists models from available providers.
 
     When Settings ``base_url`` is a trusted OpenAI-compatible endpoint, OpenAI
-    (and Bedrock gateway mode) probe/list models from that host instead of
+    (and Bedrock gateway / Mantle mode) probe/list models from that host instead of
     api.openai.com. Stock OpenAI retains curated labels/order while intersecting
     its catalog with live ``/v1/models`` for the saved key.
     """
     settings_base, ssl_verify = _settings_base_url()
+    try:
+        from settings_store import load_settings
+
+        settings = load_settings()
+    except Exception:  # noqa: BLE001
+        settings = {}
+    mantle_base = _mantle_base_from_settings(settings_base, settings)
     out: list[dict[str, Any]] = []
     for p in _CATALOG:
         env_key = p.get("env_key")
@@ -327,8 +399,35 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
 
         # Custom OpenAI-compatible base URL (Settings) → probe + list that host.
         use_custom = bool(settings_base and pid == "openai")
+        use_mantle = bool(pid == "bedrock" and mantle_base)
 
-        if use_custom and available:
+        if use_mantle:
+            # Mantle needs an API key (not bare IAM). Still mark available when
+            # a Mantle/BEDROCK key exists so the dropdown shows Mantle IDs.
+            has_mantle_key = bool(
+                _sanitize_api_key(os.environ.get("BEDROCK_API_KEY"))
+                or _sanitize_api_key(os.environ.get("MANTLE_API_KEY"))
+            )
+            available = has_mantle_key or available
+            models = list(_MANTLE_MODELS)
+            if has_mantle_key and probe_keys:
+                key = _sanitize_api_key(
+                    os.environ.get("BEDROCK_API_KEY") or os.environ.get("MANTLE_API_KEY")
+                )
+                ok, _detail, remote_models = _probe_compatible_endpoint(
+                    mantle_base, key or "", ssl_verify=ssl_verify
+                )
+                if ok and remote_models:
+                    # Prefer curated labels; append remote-only Mantle IDs.
+                    merged = _merge_curated_with_remote(models, remote_models)
+                    seen = {str(m.get("id") or "") for m in merged}
+                    for rm in remote_models:
+                        rid = str(rm.get("id") or "").strip()
+                        if rid and rid not in seen:
+                            merged.append(rm)
+                            seen.add(rid)
+                    models = merged
+        elif use_custom and available:
             key = _sanitize_api_key(os.environ.get("OPENAI_API_KEY"))
             ok, _detail, remote_models = _probe_compatible_endpoint(
                 settings_base, key or "", ssl_verify=ssl_verify
@@ -358,9 +457,17 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
         out.append(
             {
                 "id": pid,
-                "name": p["name"],
+                "name": (
+                    "AWS Bedrock Mantle"
+                    if use_mantle
+                    else p["name"]
+                ),
                 "available": available,
-                "base_url": settings_base if use_custom else p.get("base_url"),
+                "base_url": (
+                    mantle_base
+                    if use_mantle
+                    else (settings_base if use_custom else p.get("base_url"))
+                ),
                 "models": attach_prices(
                     [{**m, "available": available} for m in models]
                 ),
@@ -486,16 +593,37 @@ def verify_api_key(provider: str, *, probe: bool = False) -> dict[str, Any]:
     key = _sanitize_api_key(
         os.environ.get(key_name)
         or (os.environ.get("GOOGLE_API_KEY") if key_name == "GEMINI_API_KEY" else None)
+        or (
+            os.environ.get("MANTLE_API_KEY")
+            if key_name == "BEDROCK_API_KEY"
+            else None
+        )
         or (os.environ.get("OPENAI_API_KEY") if key_name == "BEDROCK_API_KEY" else None)
     )
     if provider == "bedrock" and not key:
+        settings_base, _ssl = _settings_base_url()
+        try:
+            from settings_store import load_settings
+
+            mode = str(load_settings().get("bedrock_mode") or "iam").lower()
+        except Exception:  # noqa: BLE001
+            mode = "iam"
+        if mode == "mantle" or _is_mantle_base_url(settings_base):
+            return {
+                "ok": False,
+                "provider": provider,
+                "detail": (
+                    "Mantle mode needs a Mantle API key (BEDROCK_API_KEY or "
+                    "MANTLE_API_KEY). Native IAM credentials are not used for Mantle."
+                ),
+            }
         if _has_aws_credentials():
             return {
                 "ok": True,
                 "provider": provider,
                 "detail": (
                     "Native AWS credentials detected — Base URL empty uses Bedrock IAM "
-                    "(HIPAA). Set Base URL only for BAG / LiteLLM gateway."
+                    "(HIPAA). Use Mantle mode for OneHUB, or BAG Base URL for a gateway."
                 ),
             }
         return {
@@ -503,7 +631,8 @@ def verify_api_key(provider: str, *, probe: bool = False) -> dict[str, Any]:
             "provider": provider,
             "detail": (
                 "No AWS credentials (~/.aws or AWS_*) and no BEDROCK_API_KEY. "
-                "Configure IAM for native Bedrock, or a gateway key + Base URL."
+                "Configure IAM for native Bedrock, Mantle key + Mantle mode, "
+                "or a gateway key + Base URL."
             ),
         }
     if not key:

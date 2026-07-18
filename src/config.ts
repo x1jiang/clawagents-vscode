@@ -134,6 +134,8 @@ export const DOTENV_ALLOWLIST = new Set([
   "GOOGLE_API_KEY",
   "GOOGLE_GENAI_API_KEY",
   "BEDROCK_API_KEY",
+  // Alias used by AWS Mantle / OneHUB docs; mapped to BEDROCK_API_KEY at spawn.
+  "MANTLE_API_KEY",
   "TAVILY_API_KEY",
   // Native Amazon Bedrock (IAM / shared credentials / SSO).
   "AWS_REGION",
@@ -189,7 +191,7 @@ export function pathUnderRoot(root: string, ...parts: string[]): string | null {
   return target;
 }
 
-/** Empty / loopback / unix-socket-style base URLs are trusted for API keys. */
+/** Empty / loopback / AWS Bedrock Mantle hosts are trusted for API keys. */
 export function isTrustedBaseUrl(raw: string): boolean {
   const text = (raw || "").trim();
   if (!text) {
@@ -199,12 +201,19 @@ export function isTrustedBaseUrl(raw: string): boolean {
     const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text) ? text : `http://${text}`;
     const u = new URL(withScheme);
     const host = (u.hostname || "").toLowerCase();
-    return (
+    if (
       host === "localhost" ||
       host === "127.0.0.1" ||
       host === "::1" ||
       host === "[::1]" ||
       host === "0.0.0.0"
+    ) {
+      return true;
+    }
+    // Official AWS Mantle (OneHUB) OpenAI-compatible endpoint.
+    return (
+      host === "bedrock-mantle.api.aws" ||
+      /^bedrock-mantle\.[a-z0-9-]+\.api\.aws$/.test(host)
     );
   } catch {
     return false;

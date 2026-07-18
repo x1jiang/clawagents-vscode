@@ -1,3 +1,15 @@
+## Unreleased
+
+## 1.0.69
+
+- **Fix sidecar hang / socket exhaustion (root cause):** settings autosave was calling `GET /providers` with live Mantle/OpenAI `/models` probes on every keystroke. Concurrent probes stampeded the sidecar thread pool → hung event loop → `ETIMEDOUT` / `EADDRNOTAVAIL`.
+  - `/providers` defaults to cheap catalog (`probe=0`); live probes only with `?probe=1` (ready / open Settings)
+  - Serialize settings saves; post-save catalog refresh never probes
+  - Reuse sidecar only if `/health` responds; invalidate + restart on transport errors
+  - HTTP `Connection: close` to avoid keep-alive pileups
+- AWS Bedrock settings: **Native IAM** vs **Mantle / OneHUB** (`bedrock-mantle.<region>.api.aws/v1` + Mantle API key) vs optional **BAG**. Mantle hosts trusted; curated Mantle models + live `/models` merge.
+- Compact: immediate “Compacting…” ack; compact HTTP timeout 180s; progress chip
+
 ## 1.0.68
 
 - Require `clawagents>=6.20.3` (execute/sandbox hardening)

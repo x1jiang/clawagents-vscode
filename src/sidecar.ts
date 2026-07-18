@@ -94,6 +94,8 @@ export class SidecarManager {
   private lastLog = "";
   private starting: Promise<SidecarHandle> | undefined;
   private readonly startGeneration = new StartGeneration();
+  private lastHealthyAt = 0;
+  private restartCooldownUntil = 0;
 
   constructor(
     private readonly extensionPath: string,
@@ -106,14 +108,67 @@ export class SidecarManager {
     return this.handle;
   }
 
+  /** Drop a wedged handle so the next ensureStarted() respawns. */
+  invalidate(reason?: string): void {
+    if (!this.handle && !this.child) {
+      return;
+    }
+    this.output.appendLine(
+      `Sidecar invalidated${reason ? `: ${reason}` : ""} — will respawn on next use`,
+    );
+    this.stopChild();
+    this.lastHealthyAt = 0;
+  }
+
+  private async pingHealth(timeoutMs = 2_000): Promise<boolean> {
+    const handle = this.handle;
+    if (!handle || !this.child || this.child.killed) {
+      return false;
+    }
+    return new Promise((resolve) => {
+      const req = http.get(
+        `${handle.baseUrl}/health`,
+        {
+          headers: {
+            Authorization: `Bearer ${handle.token}`,
+            Connection: "close",
+          },
+          timeout: timeoutMs,
+        },
+        (res) => {
+          res.resume();
+          resolve(Boolean(res.statusCode && res.statusCode >= 200 && res.statusCode < 300));
+        },
+      );
+      req.on("error", () => resolve(false));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(false);
+      });
+    });
+  }
+
   async ensureStarted(): Promise<SidecarHandle> {
     if (this.handle && this.child && !this.child.killed) {
-      return this.handle;
+      // Process alive ≠ healthy. A hung event loop kept returning ETIMEDOUT.
+      const fresh = Date.now() - this.lastHealthyAt < 2_500;
+      if (fresh || (await this.pingHealth(1_500))) {
+        this.lastHealthyAt = Date.now();
+        return this.handle;
+      }
+      this.output.appendLine(
+        "Sidecar process alive but /health failed — restarting (hung sidecar)",
+      );
+      this.stopChild();
     }
     // Concurrent callers (activation + command) must share one spawn —
     // otherwise two sidecars race for the same handle slot.
     if (this.starting) {
       return this.starting;
+    }
+    const now = Date.now();
+    if (now < this.restartCooldownUntil) {
+      await new Promise((r) => setTimeout(r, this.restartCooldownUntil - now));
     }
     const generation = this.startGeneration.begin();
     let tracked: Promise<SidecarHandle>;
@@ -169,7 +224,7 @@ export class SidecarManager {
       openai: ["OPENAI_API_KEY"],
       anthropic: ["ANTHROPIC_API_KEY"],
       gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-      bedrock: ["BEDROCK_API_KEY"],
+      bedrock: ["BEDROCK_API_KEY", "MANTLE_API_KEY"],
       tavily: ["TAVILY_API_KEY"],
       aws: [...AWS_ENV_KEYS],
     };
@@ -213,6 +268,10 @@ export class SidecarManager {
     });
     if (model) {
       env.CLAW_MODEL = model;
+    }
+    // Mantle / OneHUB docs use MANTLE_API_KEY; clawagents gateway path reads BEDROCK_API_KEY.
+    if (!env.BEDROCK_API_KEY && env.MANTLE_API_KEY) {
+      env.BEDROCK_API_KEY = env.MANTLE_API_KEY;
     }
     this.output.appendLine(
       `PATH pin: CLAWAGENTS_PYTHON=${env.CLAWAGENTS_PYTHON || python} ` +
@@ -287,6 +346,8 @@ export class SidecarManager {
       baseUrl,
       stop: () => this.stop(),
     };
+    this.lastHealthyAt = Date.now();
+    this.restartCooldownUntil = Date.now() + 1_500;
     return this.handle;
   }
 

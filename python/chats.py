@@ -38,18 +38,20 @@ _PROFILE_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "ollama", "bedr
 
 
 def _bedrock_api_key() -> str:
-    """Gateway token for OpenAI-compatible Bedrock proxies."""
+    """Gateway / Mantle token for OpenAI-compatible Bedrock proxies."""
     try:
         from spawn_secrets import get_secret
 
         return (
             get_secret("BEDROCK_API_KEY")
+            or get_secret("MANTLE_API_KEY")
             or get_secret("OPENAI_API_KEY")
             or "bedrock"
         )
     except Exception:  # noqa: BLE001
         return (
             (os.environ.get("BEDROCK_API_KEY") or "").strip()
+            or (os.environ.get("MANTLE_API_KEY") or "").strip()
             or (os.environ.get("OPENAI_API_KEY") or "").strip()
             or "bedrock"
         )
@@ -604,11 +606,26 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         kwargs["profile"] = provider.split(":", 1)[1]
     elif provider == "bedrock":
         _apply_aws_settings(settings)
+        mode = str(settings.get("bedrock_mode") or "iam").strip().lower()
+        if mode == "mantle" and not kwargs.get("base_url"):
+            region = str(settings.get("aws_region") or "").strip() or "us-east-1"
+            kwargs["base_url"] = f"https://bedrock-mantle.{region}.api.aws/v1"
         if not effective_model:
-            kwargs["model"] = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+            if mode == "mantle" or (
+                kwargs.get("base_url")
+                and "bedrock-mantle." in str(kwargs.get("base_url") or "")
+            ):
+                kwargs["model"] = "openai.gpt-5.6-sol"
+            else:
+                kwargs["model"] = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
         if kwargs.get("base_url"):
-            # OpenAI-compatible gateway (BAG / LiteLLM)
+            # OpenAI-compatible gateway (Mantle / BAG / LiteLLM)
             kwargs["api_key"] = _bedrock_api_key()
+            # Mantle speaks chat completions; leave wire_api if user set it.
+            if "bedrock-mantle." in str(kwargs.get("base_url") or "") and not str(
+                settings.get("wire_api") or ""
+            ).strip():
+                kwargs["wire_api"] = "chat_completions"
         # else: native IAM — clawagents routes Bedrock model IDs via
         # AsyncAnthropicBedrock / Converse; do not force a gateway api_key.
     elif provider in _PROFILE_PROVIDERS and not effective_model:

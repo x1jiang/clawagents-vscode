@@ -7,6 +7,27 @@ export type StreamHandlers = {
   signal?: AbortSignal;
 };
 
+/** True for local sidecar transport failures that mean "restart me". */
+export function isSidecarTransportError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code?: unknown }).code || "")
+      : "";
+  return (
+    code === "ETIMEDOUT" ||
+    code === "ECONNREFUSED" ||
+    code === "EADDRNOTAVAIL" ||
+    code === "ECONNRESET" ||
+    code === "EPIPE" ||
+    /timed out after \d+ms/i.test(msg) ||
+    /\bETIMEDOUT\b/.test(msg) ||
+    /\bECONNREFUSED\b/.test(msg) ||
+    /\bEADDRNOTAVAIL\b/.test(msg) ||
+    /\bECONNRESET\b/.test(msg)
+  );
+}
+
 function requestJson<T>(
   handle: SidecarHandle,
   method: string,
@@ -24,6 +45,8 @@ function requestJson<T>(
         method,
         headers: {
           Authorization: `Bearer ${handle.token}`,
+          // Avoid keep-alive pileups when the sidecar hangs mid-response.
+          Connection: "close",
           ...(payload
             ? {
                 "Content-Type": "application/json",
@@ -262,8 +285,13 @@ export class GatewayClient {
     );
   }
 
-  getProviders() {
-    return requestJson<unknown[]>(this.requireHandle(), "GET", "/providers");
+  getProviders(opts?: { probe?: boolean }) {
+    const probe = opts?.probe ? "1" : "0";
+    return requestJson<unknown[]>(
+      this.requireHandle(),
+      "GET",
+      `/providers?probe=${probe}`,
+    );
   }
 
   getSettings() {
@@ -370,11 +398,14 @@ export class GatewayClient {
   }
 
   compactChat(chatId: string) {
+    // Compact may call the LLM for a session summary — far slower than the
+    // default 8s JSON timeout used for lightweight sidecar RPCs.
     return requestJson<Record<string, unknown>>(
       this.requireHandle(),
       "POST",
       `/chats/${encodeURIComponent(chatId)}/compact`,
       {},
+      180_000,
     );
   }
 

@@ -768,8 +768,13 @@ def create_app() -> FastAPI:
             return denied
         import asyncio as _asyncio
 
-        # Live key probes (network) — keep them off the event loop.
-        return await _asyncio.to_thread(build_provider_catalog, probe_keys=True)
+        # Default: cheap catalog (no live network). Autosave used to call this
+        # with probes on every settings keystroke → Mantle/OpenAI /models
+        # stampeded the thread pool, hung the sidecar, and exhausted sockets
+        # (ETIMEDOUT / EADDRNOTAVAIL). Pass ?probe=1 only for explicit refresh.
+        probe_raw = (request.query_params.get("probe") or "0").strip().lower()
+        probe_keys = probe_raw in ("1", "true", "yes", "on")
+        return await _asyncio.to_thread(build_provider_catalog, probe_keys=probe_keys)
 
     @app.post("/settings/verify-key")
     async def verify_key(body: VerifyBody, request: Request):

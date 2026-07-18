@@ -17,7 +17,7 @@ import {
   wrapCurrentFileRef,
   wrapSelectionBlock,
 } from "./config";
-import { GatewayClient } from "./gatewayClient";
+import { GatewayClient, isSidecarTransportError } from "./gatewayClient";
 import {
   decodeLocalAttachment,
   detectDocumentMediaType,
@@ -122,6 +122,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   /** File attachments (PDF/DOCX) staged for the next send — same contract. */
   private pendingFiles: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   private readonly gateway: GatewayClient;
+  /** Serialize settings saves — concurrent autosaves + live /providers probes
+   *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
+  private saveSettingsChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -428,6 +431,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private async pushReady(): Promise<void> {
     let health: { model?: string; workspace?: string; provider?: string } | undefined;
     try {
+      await this.sidecar.ensureStarted();
       health = await this.gateway.fetchHealth();
     } catch {
       health = undefined;
@@ -441,7 +445,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     try {
       chats = (await this.gateway.listChats()) as ChatSummary[];
       settings = await this.gateway.getSettings();
-      providers = await this.gateway.getProviders();
+      // One live probe on ready is fine; autosave must NOT probe (see save_settings).
+      providers = await this.gateway.getProviders({ probe: true });
       diagnostics = await this.gateway.getDiagnostics();
       stats = await this.gateway.getStats();
       mcp = await this.gateway.getMcp();
@@ -817,6 +822,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           if (!this.chatId) {
             throw new Error("No active chat");
           }
+          // Immediate ack so the Compact chip doesn't look dead while the
+          // sidecar (possibly) waits on an LLM summary.
+          this.post({ type: "compact_progress", phase: "start" });
+          this.post({
+            type: "status",
+            message: "Compacting session…",
+          });
           const res = await this.gateway.compactChat(this.chatId);
           const compacted = Boolean(res.compacted);
           this.post({
@@ -827,6 +839,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                   ? ` (~${String(res.est_tokens_before)} → ~${String(res.est_tokens_after)} tokens)`
                   : "")
               : `Compact skipped: ${String(res.reason || "")}`,
+          });
+          this.post({
+            type: "compact_progress",
+            phase: compacted ? "end" : "dropped",
           });
           if (compacted || res.meter_reset) {
             // Context % is last LLM prompt size — reset so Compact isn't stuck at 100%.
@@ -839,6 +855,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             });
           }
         } catch (err) {
+          this.post({ type: "compact_progress", phase: "failed" });
           this.post({
             type: "error",
             message: err instanceof Error ? err.message : String(err),
@@ -957,12 +974,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "load_settings":
         try {
+          await this.sidecar.ensureStarted();
           const settings = await this.gateway.getSettings();
-          const providers = await this.gateway.getProviders();
+          // Explicit Settings open — allow one live credential probe.
+          const providers = await this.gateway.getProviders({ probe: true });
           this.post({ type: "settings", settings, providers });
           const skills = await this.gateway.getSkills();
           this.post({ type: "skills_preview", ...skills });
         } catch (err) {
+          if (isSidecarTransportError(err)) {
+            this.sidecar.invalidate("load_settings transport failure");
+          }
           this.post({
             type: "error",
             message: err instanceof Error ? err.message : String(err),
@@ -980,14 +1002,25 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
-      case "save_settings":
+      case "save_settings": {
+        // Queue saves — never run overlapping putSettings + catalog refresh.
+        this.saveSettingsChain = this.saveSettingsChain
+          .catch(() => undefined)
+          .then(async () => {
         try {
+          await this.sidecar.ensureStarted();
           const incoming = { ...(msg.settings || {}) } as Record<string, unknown>;
           let previous: Record<string, unknown> = {};
           try {
             previous = (await this.gateway.getSettings()) as Record<string, unknown>;
-          } catch {
-            previous = {};
+          } catch (err) {
+            if (isSidecarTransportError(err)) {
+              this.sidecar.invalidate("getSettings during save");
+              await this.sidecar.ensureStarted();
+              previous = (await this.gateway.getSettings()) as Record<string, unknown>;
+            } else {
+              previous = {};
+            }
           }
           const baseUrlProvided = Object.prototype.hasOwnProperty.call(incoming, "base_url");
           const baseUrl =
@@ -998,15 +1031,49 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           if (baseUrlProvided && baseUrl) {
             const provider = String(incoming.provider || previous.provider || "");
             if (provider === "bedrock") {
-              const { normalizeBagBaseUrl } = await import("./bedrockGateway");
-              incoming.base_url = normalizeBagBaseUrl(baseUrl);
+              const {
+                normalizeBagBaseUrl,
+                normalizeMantleBaseUrl,
+                isMantleBaseUrl,
+              } = await import("./bedrockGateway");
+              const mode = String(
+                incoming.bedrock_mode || previous.bedrock_mode || "iam",
+              ).toLowerCase();
+              const region = String(
+                incoming.aws_region || previous.aws_region || "us-east-1",
+              );
+              if (mode === "mantle" || isMantleBaseUrl(baseUrl)) {
+                // Mantle is OpenAI-style /v1 — never rewrite to BAG /api/v1.
+                incoming.base_url = normalizeMantleBaseUrl(baseUrl, region);
+                incoming.bedrock_mode = "mantle";
+              } else {
+                incoming.base_url = normalizeBagBaseUrl(baseUrl);
+              }
             } else if (provider === "openai" || provider === "ollama") {
-              const { normalizeOpenAICompatibleBaseUrl, normalizeBagBaseUrl } =
-                await import("./bedrockGateway");
-              incoming.base_url = baseUrl.includes("/api/v1")
-                ? normalizeBagBaseUrl(baseUrl)
-                : normalizeOpenAICompatibleBaseUrl(baseUrl);
+              const {
+                normalizeOpenAICompatibleBaseUrl,
+                normalizeBagBaseUrl,
+                isMantleBaseUrl,
+                normalizeMantleBaseUrl,
+              } = await import("./bedrockGateway");
+              if (isMantleBaseUrl(baseUrl)) {
+                incoming.base_url = normalizeMantleBaseUrl(baseUrl);
+              } else {
+                incoming.base_url = baseUrl.includes("/api/v1")
+                  ? normalizeBagBaseUrl(baseUrl)
+                  : normalizeOpenAICompatibleBaseUrl(baseUrl);
+              }
             }
+          } else if (
+            Object.prototype.hasOwnProperty.call(incoming, "bedrock_mode") &&
+            String(incoming.bedrock_mode || "").toLowerCase() === "mantle"
+          ) {
+            const { mantleBaseUrlForRegion } = await import("./bedrockGateway");
+            const region = String(
+              incoming.aws_region || previous.aws_region || "us-east-1",
+            );
+            incoming.base_url = mantleBaseUrlForRegion(region);
+            incoming.provider = "bedrock";
           }
           const normalizedBase = baseUrlProvided
             ? typeof incoming.base_url === "string"
@@ -1035,7 +1102,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 type: "settings",
                 settings: previous,
               });
-              break;
+              return;
             }
             incoming.trust_custom_base_url = true;
             // Corporate / private-CA gateways usually fail default TLS verify.
@@ -1070,10 +1137,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           // .clawagents/vscode_settings.json. Persist the effective grants in
           // workspace-scoped VS Code SecretStorage for sidecar restarts.
           await this.config.storeRuntimeTrust(settings, { revokeGatewayTrust });
-          // Re-fetch providers so custom base_url / TLS changes update the model list.
+          // Cheap catalog only — never live-probe Mantle/OpenAI on autosave.
+          // Probes belong on ready / Check credentials / Test endpoint.
           let providers: unknown[] = [];
           try {
-            providers = await this.gateway.getProviders();
+            providers = await this.gateway.getProviders({ probe: false });
           } catch {
             /* catalog refresh is best-effort */
           }
@@ -1086,12 +1154,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             /* preview is best-effort after save */
           }
         } catch (err) {
+          if (isSidecarTransportError(err)) {
+            this.sidecar.invalidate("save_settings transport failure");
+          }
           this.post({
             type: "error",
             message: err instanceof Error ? err.message : String(err),
           });
         }
+          });
         break;
+      }
       case "pick_skill_dir": {
         const uris = await vscode.window.showOpenDialog({
           canSelectFiles: false,

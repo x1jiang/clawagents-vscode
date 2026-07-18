@@ -1297,6 +1297,7 @@ export function App() {
     }
     if (value === "/compact") {
       setDraft("");
+      setCompactPhase("start");
       post({ type: "compact_chat" });
       return;
     }
@@ -1474,7 +1475,11 @@ export function App() {
                     ).toLocaleString()} / ${ctx.window.toLocaleString()}) — compact session`
                   : "Compact session (/compact)"
               }
-              onClick={() => post({ type: "compact_chat" })}
+              disabled={compactPhase === "start"}
+              onClick={() => {
+                setCompactPhase("start");
+                post({ type: "compact_chat" });
+              }}
             >
               {ctx && ctxPct != null ? (
                 <span className="context-meter in-chip" aria-hidden>
@@ -1795,28 +1800,43 @@ export function App() {
                   setSettings((s) => {
                     const next: Record<string, unknown> = { ...s, provider };
                     if (provider === "bedrock") {
-                      // Native IAM by default — clear leftover BAG URL if it was
-                      // auto-filled from an older extension version.
-                      const prev = String(s.base_url || "").trim();
-                      if (
-                        !prev ||
-                        prev === "http://localhost:8000/api/v1" ||
-                        prev === "http://127.0.0.1:8000/api/v1"
-                      ) {
-                        next.base_url = "";
-                      }
-                      if (!String(s.model || "").trim()) {
-                        next.model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
-                      }
+                      const mode = String(s.bedrock_mode || "iam").toLowerCase();
                       if (!String(s.aws_region || "").trim()) {
                         next.aws_region = "us-east-1";
                       }
+                      const region = String(next.aws_region || "us-east-1");
+                      if (mode === "mantle") {
+                        next.bedrock_mode = "mantle";
+                        next.base_url = `https://bedrock-mantle.${region}.api.aws/v1`;
+                        next.wire_api = String(s.wire_api || "") || "chat_completions";
+                        if (
+                          !String(s.model || "").trim() ||
+                          String(s.model).startsWith("us.anthropic.")
+                        ) {
+                          next.model = "openai.gpt-5.6-sol";
+                        }
+                      } else {
+                        // Native IAM by default — clear leftover BAG/Mantle URL.
+                        next.bedrock_mode = mode === "bag" ? "bag" : "iam";
+                        const prev = String(s.base_url || "").trim();
+                        if (
+                          !prev ||
+                          prev === "http://localhost:8000/api/v1" ||
+                          prev === "http://127.0.0.1:8000/api/v1" ||
+                          prev.includes("bedrock-mantle.")
+                        ) {
+                          next.base_url = mode === "bag" ? "http://localhost:8000/api/v1" : "";
+                        }
+                        if (!String(s.model || "").trim()) {
+                          next.model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+                        }
+                      }
                     }
-                    return next;
+                  return next;
                   });
                   if (provider === "bedrock") {
                     setProviderSetupMsg(
-                      "Native AWS Bedrock (IAM). Leave Base URL empty. Optional: BAG gateway.",
+                      "AWS Bedrock: choose Native IAM, Mantle (OneHUB), or optional BAG below.",
                     );
                   } else if (provider === "openai") {
                     setProviderSetupMsg(
@@ -1894,7 +1914,11 @@ export function App() {
                 onChange={(e) => setSettings((s) => ({ ...s, base_url: e.target.value }))}
                 placeholder={
                   selectedProvider === "bedrock"
-                    ? "empty = native AWS IAM · or http://localhost:8000/api/v1 for BAG"
+                    ? String(settings.bedrock_mode || "iam") === "mantle"
+                      ? "https://bedrock-mantle.us-east-1.api.aws/v1"
+                      : String(settings.bedrock_mode || "iam") === "bag"
+                        ? "http://localhost:8000/api/v1"
+                        : "empty = native AWS IAM"
                     : selectedProvider === "openai"
                       ? "empty = api.openai.com · or http://localhost:11434/v1"
                       : selectedProvider === "gemini"
@@ -1944,186 +1968,311 @@ export function App() {
             {selectedProvider === "bedrock" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">AWS Bedrock</h4>
+                <label>
+                  Access mode
+                  <select
+                    value={String(settings.bedrock_mode || "iam")}
+                    onChange={(e) => {
+                      const mode = e.target.value;
+                      const region =
+                        String(settings.aws_region || "").trim() || "us-east-1";
+                      if (mode === "mantle") {
+                        const next = {
+                          ...settings,
+                          provider: "bedrock",
+                          bedrock_mode: "mantle",
+                          aws_region: region,
+                          base_url: `https://bedrock-mantle.${region}.api.aws/v1`,
+                          wire_api:
+                            String(settings.wire_api || "") || "chat_completions",
+                          model:
+                            String(settings.model || "").includes("anthropic.claude-") &&
+                            !String(settings.model || "").startsWith("us.")
+                              ? String(settings.model)
+                              : "openai.gpt-5.6-sol",
+                        };
+                        setSettings(next);
+                        setModel(String(next.model));
+                        setProviderSetupMsg(
+                          `Mantle (OneHUB) — ${next.base_url}. Paste Mantle API key below.`,
+                        );
+                      } else if (mode === "bag") {
+                        const next = {
+                          ...settings,
+                          provider: "bedrock",
+                          bedrock_mode: "bag",
+                          aws_region: region,
+                          base_url: "http://localhost:8000/api/v1",
+                          model:
+                            String(settings.model || "") ||
+                            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        };
+                        setSettings(next);
+                        setModel(String(next.model));
+                        setProviderSetupMsg(
+                          "BAG / LiteLLM gateway — save gateway key, then Test.",
+                        );
+                      } else {
+                        const next = {
+                          ...settings,
+                          provider: "bedrock",
+                          bedrock_mode: "iam",
+                          aws_region: region,
+                          base_url: "",
+                          model:
+                            String(settings.model || "").startsWith("openai.") ||
+                            String(settings.model || "").startsWith("anthropic.")
+                              ? "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+                              : String(settings.model || "") ||
+                                "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        };
+                        setSettings(next);
+                        setModel(String(next.model));
+                        setProviderSetupMsg(
+                          "Native IAM — uses ~/.aws credentials (no Mantle/BAG key).",
+                        );
+                      }
+                    }}
+                  >
+                    <option value="iam">Native IAM (classic Bedrock)</option>
+                    <option value="mantle">Mantle / OneHUB (API key)</option>
+                    <option value="bag">Access Gateway / BAG (optional)</option>
+                  </select>
+                </label>
                 <p className="settings-hint">
-                  Default: native IAM (HIPAA-friendly). Uses ~/.aws credentials, env keys, or
-                  instance role. Install{" "}
-                  <code>pip install &apos;clawagents[bedrock]&apos;</code>. Enable model access in
-                  the Bedrock console for your account/region.
+                  {String(settings.bedrock_mode || "iam") === "mantle"
+                    ? "Mantle is OpenAI-compatible: base_url + Mantle API key. Best catalog in us-east-1 (~54 models). Install clawagents with OpenAI client (no boto3 required for Mantle)."
+                    : String(settings.bedrock_mode || "iam") === "bag"
+                      ? "Local or remote Bedrock Access Gateway / LiteLLM — Base URL + gateway key."
+                      : "Native IAM (HIPAA-friendly). Uses ~/.aws credentials, env keys, or instance role. pip install 'clawagents[bedrock]'."}
                 </p>
                 <label>
                   AWS region
                   <input
                     value={String(settings.aws_region || "")}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, aws_region: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      const region = e.target.value;
+                      setSettings((s) => {
+                        const mode = String(s.bedrock_mode || "iam");
+                        const next: Record<string, unknown> = {
+                          ...s,
+                          aws_region: region,
+                        };
+                        if (mode === "mantle" && region.trim()) {
+                          next.base_url = `https://bedrock-mantle.${region.trim()}.api.aws/v1`;
+                        }
+                        return next;
+                      });
+                    }}
                     placeholder="us-east-1"
                   />
                 </label>
-                <label>
-                  AWS profile (optional)
-                  <input
-                    value={String(settings.aws_profile || "")}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, aws_profile: e.target.value }))
-                    }
-                    placeholder="default · or named profile from ~/.aws/credentials"
-                  />
-                </label>
+                {String(settings.bedrock_mode || "iam") === "iam" && (
+                  <label>
+                    AWS profile (optional)
+                    <input
+                      value={String(settings.aws_profile || "")}
+                      onChange={(e) =>
+                        setSettings((s) => ({ ...s, aws_profile: e.target.value }))
+                      }
+                      placeholder="default · or named profile from ~/.aws/credentials"
+                    />
+                  </label>
+                )}
                 <div className="provider-presets">
-                  <button
-                    type="button"
-                    className="ghost tiny"
-                    onClick={() => {
-                      const next = {
-                        ...settings,
-                        provider: "bedrock",
-                        base_url: "",
-                        aws_region: String(settings.aws_region || "") || "us-east-1",
-                        model:
-                          String(settings.model || "") ||
-                          "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                      };
-                      setSettings(next);
-                      setModel(String(next.model));
-                      setProviderSetupMsg(
-                        "Native IAM mode — Save settings, then chat (no gateway key).",
-                      );
-                    }}
-                  >
-                    Use native IAM
-                  </button>
+                  {String(settings.bedrock_mode || "iam") === "mantle" && (
+                    <>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() => {
+                          const region = "us-east-1";
+                          const next = {
+                            ...settings,
+                            provider: "bedrock",
+                            bedrock_mode: "mantle",
+                            aws_region: region,
+                            base_url: `https://bedrock-mantle.${region}.api.aws/v1`,
+                            wire_api: "chat_completions",
+                            model: "openai.gpt-5.6-sol",
+                          };
+                          setSettings(next);
+                          setModel(next.model);
+                          setProviderSetupMsg(
+                            "Mantle us-east-1 (full catalog) — save Mantle API key.",
+                          );
+                        }}
+                      >
+                        Mantle us-east-1
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() => {
+                          const raw = String(settings.base_url || "").trim();
+                          const region =
+                            String(settings.aws_region || "").trim() || "us-east-1";
+                          const normalized = normalizeMantleUrlClient(raw || region);
+                          setSettings((s) => ({
+                            ...s,
+                            provider: "bedrock",
+                            bedrock_mode: "mantle",
+                            base_url: normalized,
+                          }));
+                          setProviderSetupMsg(`Mantle URL → ${normalized}`);
+                        }}
+                      >
+                        Fix URL → Mantle /v1
+                      </button>
+                    </>
+                  )}
+                  {String(settings.bedrock_mode || "iam") === "bag" && (
+                    <>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() => {
+                          const next = {
+                            ...settings,
+                            provider: "bedrock",
+                            bedrock_mode: "bag",
+                            base_url: "http://localhost:8000/api/v1",
+                            model:
+                              String(settings.model || "") ||
+                              "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                          };
+                          setSettings(next);
+                          setModel(String(next.model));
+                          setProviderSetupMsg("Local BAG URL applied — save key, then Test.");
+                        }}
+                      >
+                        Local BAG (localhost:8000)
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() => {
+                          const raw = String(settings.base_url || "").trim();
+                          if (!raw) {
+                            setProviderSetupMsg(
+                              "Paste CloudFormation APIBaseUrl into Base URL first.",
+                            );
+                            return;
+                          }
+                          const normalized = normalizeBagUrlClient(raw);
+                          setSettings((s) => ({
+                            ...s,
+                            provider: "bedrock",
+                            bedrock_mode: "bag",
+                            base_url: normalized,
+                          }));
+                          setProviderSetupMsg(`Normalized to ${normalized}`);
+                        }}
+                      >
+                        Fix URL → /api/v1
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     className="ghost tiny"
                     onClick={() => {
                       post({ type: "verify_key", provider: "bedrock" });
-                      setProviderSetupMsg("Checking AWS / gateway credentials…");
+                      setProviderSetupMsg("Checking credentials…");
                     }}
                   >
                     Check credentials
                   </button>
                 </div>
                 <p className="settings-hint">
-                  AWS: {hasAwsCreds ? "detected" : "not detected"}
+                  AWS IAM: {hasAwsCreds ? "detected" : "not detected"}
                   {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
                 </p>
-                <h4 className="provider-setup-title">Optional: Access Gateway</h4>
-                <p className="settings-hint">
-                  Only if you run{" "}
-                  <a
-                    href="https://github.com/aws-samples/bedrock-access-gateway"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Bedrock Access Gateway
-                  </a>{" "}
-                  / LiteLLM — set Base URL above and a gateway API key.
-                </p>
-                <div className="provider-presets">
-                  <button
-                    type="button"
-                    className="ghost tiny"
-                    onClick={() => {
-                      const next = {
-                        ...settings,
-                        provider: "bedrock",
-                        base_url: "http://localhost:8000/api/v1",
-                        model:
-                          String(settings.model || "") ||
-                          "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                      };
-                      setSettings(next);
-                      setModel(String(next.model));
-                      setProviderSetupMsg("Local BAG URL applied — save key, then Test.");
-                    }}
-                  >
-                    Local BAG (localhost:8000)
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost tiny"
-                    onClick={() => {
-                      const raw = String(settings.base_url || "").trim();
-                      if (!raw) {
-                        setProviderSetupMsg("Paste CloudFormation APIBaseUrl into Base URL first.");
-                        return;
-                      }
-                      const normalized = normalizeBagUrlClient(raw);
-                      setSettings((s) => ({ ...s, provider: "bedrock", base_url: normalized }));
-                      setProviderSetupMsg(`Normalized to ${normalized}`);
-                    }}
-                  >
-                    Fix URL → /api/v1
-                  </button>
-                </div>
-                <label>
-                  Gateway API key
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={providerKeyDraft}
-                    onChange={(e) => setProviderKeyDraft(e.target.value)}
-                    placeholder={
-                      hasBedrockKey
-                        ? "••••••••  (saved — paste to replace)"
-                        : "only needed for BAG / LiteLLM"
-                    }
-                  />
-                </label>
-                <div className="provider-actions">
-                  <button
-                    type="button"
-                    className="primary tiny"
-                    disabled={!providerKeyDraft.trim()}
-                    onClick={() => {
-                      setProviderSetupMsg("Saving gateway key…");
-                      post({
-                        type: "set_provider_key",
-                        provider: "bedrock",
-                        apiKey: providerKeyDraft.trim(),
-                      });
-                      setProviderKeyDraft("");
-                    }}
-                  >
-                    Save gateway key
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost tiny"
-                    onClick={() => {
-                      setProviderSetupMsg("Testing gateway…");
-                      const base = String(settings.base_url || "").trim();
-                      if (!base) {
-                        setProviderSetupMsg("Set Base URL first (or click Local BAG).");
-                        return;
-                      }
-                      post({
-                        type: "test_compatible_endpoint",
-                        baseUrl: base,
-                        apiKey: providerKeyDraft.trim() || undefined,
-                        style: "bag",
-                        provider: "bedrock",
-                      });
-                    }}
-                  >
-                    Test gateway
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost tiny"
-                    disabled={!hasBedrockKey}
-                    onClick={() => {
-                      setProviderSetupMsg("Clearing gateway key…");
-                      post({ type: "clear_provider_key", provider: "bedrock" });
-                    }}
-                  >
-                    Clear key
-                  </button>
-                </div>
-                <p className="settings-hint">
-                  Gateway key: {hasBedrockKey ? "saved" : "not set"}
-                </p>
+                {String(settings.bedrock_mode || "iam") !== "iam" && (
+                  <>
+                    <label>
+                      {String(settings.bedrock_mode) === "mantle"
+                        ? "Mantle API key"
+                        : "Gateway API key"}
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={providerKeyDraft}
+                        onChange={(e) => setProviderKeyDraft(e.target.value)}
+                        placeholder={
+                          hasBedrockKey
+                            ? "••••••••  (saved — paste to replace)"
+                            : String(settings.bedrock_mode) === "mantle"
+                              ? "MANTLE_API_KEY / OneHUB key"
+                              : "BAG / LiteLLM gateway key"
+                        }
+                      />
+                    </label>
+                    <div className="provider-actions">
+                      <button
+                        type="button"
+                        className="primary tiny"
+                        disabled={!providerKeyDraft.trim()}
+                        onClick={() => {
+                          setProviderSetupMsg(
+                            String(settings.bedrock_mode) === "mantle"
+                              ? "Saving Mantle key…"
+                              : "Saving gateway key…",
+                          );
+                          post({
+                            type: "set_provider_key",
+                            provider: "bedrock",
+                            apiKey: providerKeyDraft.trim(),
+                          });
+                          setProviderKeyDraft("");
+                        }}
+                      >
+                        {String(settings.bedrock_mode) === "mantle"
+                          ? "Save Mantle key"
+                          : "Save gateway key"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        onClick={() => {
+                          const base = String(settings.base_url || "").trim();
+                          if (!base) {
+                            setProviderSetupMsg("Set Base URL / Mantle mode first.");
+                            return;
+                          }
+                          setProviderSetupMsg("Testing endpoint…");
+                          post({
+                            type: "test_compatible_endpoint",
+                            baseUrl: base,
+                            apiKey: providerKeyDraft.trim() || undefined,
+                            style:
+                              String(settings.bedrock_mode) === "mantle"
+                                ? "openai"
+                                : "bag",
+                            provider: "bedrock",
+                          });
+                        }}
+                      >
+                        Test endpoint
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost tiny"
+                        disabled={!hasBedrockKey}
+                        onClick={() => {
+                          setProviderSetupMsg("Clearing key…");
+                          post({ type: "clear_provider_key", provider: "bedrock" });
+                        }}
+                      >
+                        Clear key
+                      </button>
+                    </div>
+                    <p className="settings-hint">
+                      {String(settings.bedrock_mode) === "mantle" ? "Mantle" : "Gateway"}{" "}
+                      key: {hasBedrockKey ? "saved" : "not set"}
+                    </p>
+                  </>
+                )}
               </div>
             )}
             {selectedProvider === "openai" && (
@@ -3959,6 +4108,36 @@ function copyText(text: string) {
 
 function looksLikeDiff(text: string): boolean {
   return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
+}
+
+/** Client-side Mantle URL → https://bedrock-mantle.<region>.api.aws/v1 */
+function normalizeMantleUrlClient(raw: string): string {
+  const text = (raw || "").trim();
+  const fallbackRegion = "us-east-1";
+  if (!text || /^[a-z0-9-]+$/i.test(text)) {
+    const region = text || fallbackRegion;
+    return `https://bedrock-mantle.${region}.api.aws/v1`;
+  }
+  try {
+    const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(text)
+      ? text
+      : `https://${text}`;
+    const u = new URL(withScheme);
+    const host = (u.hostname || "").toLowerCase();
+    if (
+      host === "bedrock-mantle.api.aws" ||
+      /^bedrock-mantle\.[a-z0-9-]+\.api\.aws$/.test(host)
+    ) {
+      u.protocol = "https:";
+      u.pathname = "/v1";
+      u.search = "";
+      u.hash = "";
+      return u.toString().replace(/\/+$/, "");
+    }
+  } catch {
+    /* fall through */
+  }
+  return `https://bedrock-mantle.${fallbackRegion}.api.aws/v1`;
 }
 
 /** Client-side mirror of extension `normalizeBagBaseUrl` for the Fix URL button. */

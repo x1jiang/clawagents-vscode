@@ -47,6 +47,8 @@ DEFAULTS: dict[str, Any] = {
     # Native Amazon Bedrock (IAM). Empty base_url → AsyncAnthropicBedrock / Converse.
     "aws_region": "",
     "aws_profile": "",
+    # Bedrock access path: iam (native) | mantle (OneHUB OpenAI-compat) | bag (local gateway).
+    "bedrock_mode": "iam",
     # OpenAI reasoning effort (none|low|medium|high|xhigh). Empty = provider default.
     "reasoning_effort": "medium",
     # OpenAI transport for compatible endpoints: auto | responses | chat_completions.
