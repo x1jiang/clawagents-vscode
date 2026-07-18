@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.101
+
+- Require `clawagents>=6.20.18` — chat_mode↔sandbox contract, failed-tool no-crush, EPERM auto-retry under Full access.
+- Sidecar passes `chat_mode` / `allow_full_access` into `create_claw_agent` (no ad-hoc sandbox_profile=off).
+
 ## 1.0.100
 
 - Composer Auto-approve panel: **Full access** checkbox (same as Settings) — enables Edit/Execute, sets ``mode=full_access``, disables OS sandbox for gcloud/deploy.
@@ -529,6 +534,11 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.101
+
+- Require `clawagents>=6.20.18` — chat_mode↔sandbox contract, failed-tool no-crush, EPERM auto-retry under Full access.
+- Sidecar passes `chat_mode` / `allow_full_access` into `create_claw_agent` (no ad-hoc sandbox_profile=off).
 
 ## 1.0.100
 
