@@ -130,10 +130,11 @@ export function isMantleAnthropicModel(id: string): boolean {
 }
 
 export function isMantleOpenAIResponsesModel(id: string): boolean {
-  const m = String(id || "")
+  let m = String(id || "")
     .trim()
     .toLowerCase();
-  if (!m.startsWith("openai.") || m.includes("gpt-oss")) return false;
+  if (m.startsWith("openai.")) m = m.slice("openai.".length);
+  if (!m || m.includes("gpt-oss")) return false;
   return /gpt-5\.[3456]/.test(m);
 }
 
