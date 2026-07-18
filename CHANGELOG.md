@@ -1,3 +1,7 @@
+## 1.0.54
+
+- Require `clawagents>=6.18.0` (hashline edit, RTK wrap, shell-session cwd, auto-bg on execute timeout, aggressive tool crush)
+
 ## 1.0.53
 
 - **PATH pin:** sidecar prepends `dirname(clawagents.pythonPath)` so shell `python3`/`pip` match the sidecar (fixes Homebrew/conda drift)
