@@ -34,7 +34,7 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.19.0",
+      version: "6.20.0",
       supportsSkillsExclude: true,
     }),
     false,
@@ -42,7 +42,7 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.equal(
     deps.needsPipInstall({
       ok: true,
-      version: "6.18.0",
+      version: "6.19.0",
       supportsSkillsExclude: true,
     }),
     true,
@@ -60,10 +60,10 @@ test("dependency versions stay inside the supported major ranges", () => {
       .every((spec) => spec.includes("<")),
   );
   assert.ok(
-    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.19.0")),
+    deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("clawagents") && spec.includes("6.20.0")),
   );
   assert.ok(!deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("atlas")));
-  assert.match(deps.CLAWAGENTS_GITHUB_WHEEL, /clawagents-6\.19\.0-py3-none-any\.whl$/);
+  assert.match(deps.CLAWAGENTS_GITHUB_WHEEL, /clawagents-6\.20\.0-py3-none-any\.whl$/);
   assert.ok(
     deps.SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.includes(deps.CLAWAGENTS_GITHUB_WHEEL),
   );
@@ -73,7 +73,7 @@ test("concurrent dependency checks share one in-flight promise", async () => {
   const fakePython = path.join(tempDir, "fake-python");
   fs.writeFileSync(
     fakePython,
-    "#!/bin/sh\nprintf '/fake/python\\n6.19.0\\nTrue\\n'\n",
+    "#!/bin/sh\nprintf '/fake/python\\n6.20.0\\nTrue\\n'\n",
     { mode: 0o755 },
   );
   const output = { appendLine() {} };

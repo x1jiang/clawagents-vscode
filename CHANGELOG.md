@@ -1,3 +1,7 @@
+## 1.0.65
+
+- Require `clawagents>=6.20.0` (Grok harness: edit depth, execute stream/env, hashline_grep, PTY routing)
+
 ## 1.0.64
 
 - Caveman mode on by default (one-time migrate for existing workspaces; toggle still sticky after that)
