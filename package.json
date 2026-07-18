@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.69",
+  "version": "1.0.70",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -259,6 +259,11 @@
           "type": "boolean",
           "default": true,
           "description": "On sidecar start, probe and auto-upgrade companion CLIs (npm context-mode@latest, Homebrew rtk) when missing or below the floors required by this extension."
+        },
+        "clawagents.syncPathPythons": {
+          "type": "boolean",
+          "default": true,
+          "description": "When installing/reinstalling Python deps (or starting the sidecar), also upgrade clawagents on other PATH interpreters (Homebrew/conda) that are below this extension's floor. Disable if you intentionally keep older installs elsewhere."
         },
         "clawagents.alpacaDeployPath": {
           "type": "string",

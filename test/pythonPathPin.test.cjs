@@ -18,7 +18,9 @@ describe("pythonPathPin source", () => {
   it("exports pinPythonPathEnv and probePathInterpreterDrift", () => {
     assert.match(pinSrc, /export function pinPythonPathEnv/);
     assert.match(pinSrc, /export function probePathInterpreterDrift/);
+    assert.match(pinSrc, /export async function ensurePathPythonFloor/);
     assert.match(pinSrc, /CLAWAGENTS_PYTHON/);
+    assert.match(pinSrc, /\["-a", name\]/);
   });
 
   it("pinPythonPathEnv puts interpreter dir first", () => {

@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 1.0.70
+
+- **Auto-upgrade PATH Pythons on install/reinstall:** `ensureSidecarDeps` / Install Python Deps / Doctor / sidecar start also upgrade other PATH interpreters below the clawagents floor (Homebrew/conda). Setting `clawagents.syncPathPythons` (default on).
+- pip retry with `--break-system-packages` for Homebrew/Debian PEP 668 (`externally-managed-environment`)
+- PATH probe uses `which -a` so every matching interpreter is checked
+
 ## 1.0.69
 
 - **Fix sidecar hang / socket exhaustion (root cause):** settings autosave was calling `GET /providers` with live Mantle/OpenAI `/models` probes on every keystroke. Concurrent probes stampeded the sidecar thread pool → hung event loop → `ETIMEDOUT` / `EADDRNOTAVAIL`.

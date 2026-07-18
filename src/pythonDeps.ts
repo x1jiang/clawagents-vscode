@@ -150,9 +150,17 @@ async function runPipInstall(
   python: string,
   packages: readonly string[],
   output: { appendLine(s: string): void },
-  options?: { forceUser?: boolean; title?: string },
+  options?: {
+    forceUser?: boolean;
+    breakSystemPackages?: boolean;
+    title?: string;
+  },
 ): Promise<{ ok: boolean; detail: string }> {
   const args = ["-m", "pip", "install", "-U", ...packages];
+  // Insert flags after `install` (index 2 is "install", 3 is "-U").
+  if (options?.breakSystemPackages) {
+    args.splice(3, 0, "--break-system-packages");
+  }
   if (options?.forceUser) {
     args.splice(3, 0, "--user");
   }
@@ -205,7 +213,7 @@ async function runPipInstall(
 export async function installSidecarDeps(
   python: string,
   output: { appendLine(s: string): void },
-  options?: { forceUser?: boolean },
+  options?: { forceUser?: boolean; breakSystemPackages?: boolean },
 ): Promise<{ ok: boolean; detail: string }> {
   return runPipInstall(python, SIDECAR_PIP_PACKAGES, output, options);
 }
@@ -215,6 +223,43 @@ function looksLikeMissingOnPyPI(detail: string): boolean {
     .test(detail);
 }
 
+function looksLikeExternallyManaged(detail: string): boolean {
+  return /externally-managed-environment|PEP 668/i.test(detail);
+}
+
+/** Retry pip with --user / --break-system-packages when the environment blocks writes. */
+async function installWithWritableFallbacks(
+  python: string,
+  packages: readonly string[],
+  output: { appendLine(s: string): void },
+  title?: string,
+): Promise<{ ok: boolean; detail: string }> {
+  let result = await runPipInstall(python, packages, output, { title });
+  if (!result.ok && /Permission denied|not writable|access denied/i.test(result.detail)) {
+    output.appendLine("Retrying pip with --user …");
+    result = await runPipInstall(python, packages, output, {
+      forceUser: true,
+      title,
+    });
+  }
+  // Homebrew / Debian PEP 668 — --user alone is not enough on recent Homebrew.
+  if (!result.ok && looksLikeExternallyManaged(result.detail)) {
+    output.appendLine(
+      "Retrying pip with --break-system-packages (externally-managed / PEP 668)…",
+    );
+    result = await runPipInstall(python, packages, output, {
+      breakSystemPackages: true,
+      title,
+    });
+  }
+  return result;
+}
+
+export type EnsureDepsOptions = {
+  /** Also upgrade other PATH Pythons below the floor (default true). */
+  syncPathFloor?: boolean;
+};
+
 /** Ensure deps exist (and support skills_exclude). Auto-installs if needed. */
 const ensureInFlight = new Map<string, Promise<DepProbe>>();
 
@@ -222,13 +267,14 @@ export function ensureSidecarDeps(
   python: string,
   output: { appendLine(s: string): void },
   env?: NodeJS.ProcessEnv,
+  opts?: EnsureDepsOptions,
 ): Promise<DepProbe> {
   const key = python.trim() || python;
   const existing = ensureInFlight.get(key);
   if (existing) {
     return existing;
   }
-  const run = ensureSidecarDepsOnce(python, output, env).finally(() => {
+  const run = ensureSidecarDepsOnce(python, output, env, opts).finally(() => {
     if (ensureInFlight.get(key) === run) {
       ensureInFlight.delete(key);
     }
@@ -241,74 +287,76 @@ async function ensureSidecarDepsOnce(
   python: string,
   output: { appendLine(s: string): void },
   env?: NodeJS.ProcessEnv,
+  opts?: EnsureDepsOptions,
 ): Promise<DepProbe> {
   let probe = probeSidecarDepsSync(python, env);
   output.appendLine(
     `Deps probe: ok=${probe.ok} version=${probe.version || "?"} skills_exclude=${probe.supportsSkillsExclude}`,
   );
-  if (!needsPipInstall(probe)) {
-    return probe;
-  }
-
-  output.appendLine(
-    probe.ok
-      ? "clawagents version is incompatible with this extension — installing a supported version…"
-      : "Missing Python packages — installing automatically…",
-  );
-
-  let result = await installSidecarDeps(python, output);
-  if (!result.ok && /Permission denied|not writable|access denied/i.test(result.detail)) {
-    output.appendLine("Retrying pip with --user …");
-    result = await installSidecarDeps(python, output, { forceUser: true });
-  }
-
-  // PyPI may lag the GitHub release (common right after a VSIX bump).
-  if (!result.ok && looksLikeMissingOnPyPI(result.detail)) {
+  if (needsPipInstall(probe)) {
     output.appendLine(
-      `PyPI does not have clawagents>=${MIN_CLAWAGENTS_VERSION_STR} yet — installing from GitHub release wheel…`,
+      probe.ok
+        ? "clawagents version is incompatible with this extension — installing a supported version…"
+        : "Missing Python packages — installing automatically…",
     );
-    result = await runPipInstall(
-      python,
-      SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK,
-      output,
-      { title: "ClawAgents: installing from GitHub release…" },
-    );
-    if (!result.ok && /Permission denied|not writable|access denied/i.test(result.detail)) {
-      output.appendLine("Retrying GitHub wheel with --user …");
-      result = await runPipInstall(
+
+    let result = await installWithWritableFallbacks(python, SIDECAR_PIP_PACKAGES, output);
+
+    // PyPI may lag the GitHub release (common right after a VSIX bump).
+    if (!result.ok && looksLikeMissingOnPyPI(result.detail)) {
+      output.appendLine(
+        `PyPI does not have clawagents>=${MIN_CLAWAGENTS_VERSION_STR} yet — installing from GitHub release wheel…`,
+      );
+      result = await installWithWritableFallbacks(
         python,
         SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK,
         output,
-        { forceUser: true, title: "ClawAgents: installing from GitHub release…" },
+        "ClawAgents: installing from GitHub release…",
+      );
+    }
+
+    if (!result.ok) {
+      const manualGithub = SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.map((p) => `'${p}'`).join(" ");
+      return {
+        ok: false,
+        detail:
+          `Auto-install failed.\n${result.detail}\n\n`
+          + `Manual fix (PyPI):\n"${python}" -m pip install -U ${SIDECAR_PIP_PACKAGES.map((p) => `'${p}'`).join(" ")}\n\n`
+          + `Or from GitHub release (when PyPI lags):\n"${python}" -m pip install -U ${manualGithub}`,
+      };
+    }
+
+    probe = probeSidecarDepsSync(python, env);
+    if (!probe.ok) {
+      return {
+        ok: false,
+        detail: `Packages installed but import still fails:\n${probe.detail}`,
+      };
+    }
+    if (probe.supportsSkillsExclude === false) {
+      output.appendLine(
+        "Warning: installed clawagents still lacks skills_exclude — extension will degrade gracefully.",
+      );
+    }
+    void vscode.window.showInformationMessage(
+      `ClawAgents Python ready (${probe.version || "ok"}) on ${python}`,
+    );
+  }
+
+  // Keep other PATH interpreters on the same floor so shell `python3` matches.
+  const syncPath =
+    opts?.syncPathFloor !== false &&
+    vscode.workspace.getConfiguration("clawagents").get<boolean>("syncPathPythons", true);
+  if (syncPath && probe.ok) {
+    try {
+      const { ensurePathPythonFloor } = await import("./pythonPathPin");
+      await ensurePathPythonFloor(python, output);
+    } catch (err) {
+      output.appendLine(
+        `PATH Python floor sync skipped: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
-  if (!result.ok) {
-    const manualGithub = SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.map((p) => `'${p}'`).join(" ");
-    return {
-      ok: false,
-      detail:
-        `Auto-install failed.\n${result.detail}\n\n`
-        + `Manual fix (PyPI):\n"${python}" -m pip install -U ${SIDECAR_PIP_PACKAGES.map((p) => `'${p}'`).join(" ")}\n\n`
-        + `Or from GitHub release (when PyPI lags):\n"${python}" -m pip install -U ${manualGithub}`,
-    };
-  }
-
-  probe = probeSidecarDepsSync(python, env);
-  if (!probe.ok) {
-    return {
-      ok: false,
-      detail: `Packages installed but import still fails:\n${probe.detail}`,
-    };
-  }
-  if (probe.supportsSkillsExclude === false) {
-    output.appendLine(
-      "Warning: installed clawagents still lacks skills_exclude — extension will degrade gracefully.",
-    );
-  }
-  void vscode.window.showInformationMessage(
-    `ClawAgents Python ready (${probe.version || "ok"}) on ${python}`,
-  );
   return probe;
 }
