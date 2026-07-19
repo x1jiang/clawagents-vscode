@@ -1794,6 +1794,8 @@ export function App() {
         bedrock_mode: "bag",
         aws_region: region,
         base_url: "http://localhost:8000/api/v1",
+        // Mantle often leaves wire_api=responses; BAG is chat-completions only.
+        wire_api: "auto",
         model:
           String(settings.model || "") ||
           "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1806,6 +1808,8 @@ export function App() {
         bedrock_mode: "iam",
         aws_region: region,
         base_url: "",
+        // Drop Mantle Responses/chat pin — native IAM does not use wire_api.
+        wire_api: "auto",
         model:
           String(settings.model || "").startsWith("openai.") ||
           String(settings.model || "").startsWith("anthropic.")

@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.0.109
+
+- Require `clawagents>=6.20.24` — Bedrock geo id tighten + skill drain preflight.
+- `applyBedrockMode` resets `wire_api` to `auto` for bag/iam (not only mantle).
+
 ## 1.0.108
 
 - Require `clawagents>=6.20.23` — skill tool filtering + aliases, apply_patch matching, MCP reconnect/timeout, compaction tool_calls_meta fix; clear `pendingSettingsPatch` on save error; Bedrock AWS env clear + wire_api reset on leave.
@@ -562,6 +567,11 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.109
+
+- Require `clawagents>=6.20.24` — Bedrock geo id tighten + skill drain preflight.
+- `applyBedrockMode` resets `wire_api` to `auto` for bag/iam (not only mantle).
 
 ## 1.0.108
 
