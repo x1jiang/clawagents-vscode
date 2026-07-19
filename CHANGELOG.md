@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.111
+
+- Require `clawagents>=6.20.25` — YAML skill frontmatter + nested shlex guard.
+
 ## 1.0.110
 
 - Hotfix: restore Bedrock kwargs under `elif use_bedrock` (1.0.108 nested them under `else`, leaving a dangling `elif` → sidecar SyntaxError).
@@ -571,6 +575,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.111
+
+- Require `clawagents>=6.20.25` — YAML skill frontmatter + nested shlex guard.
 
 ## 1.0.110
 
