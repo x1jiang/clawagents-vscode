@@ -356,6 +356,16 @@ summary {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
+.permission.plan-approval {
+  border-color: color-mix(in srgb, #38bdf8 45%, var(--border));
+  background: color-mix(in srgb, #38bdf8 10%, transparent);
+}
+
+.permission.plan-approval .plan-text {
+  max-height: 220px;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+}
+
 .ask-input {
   width: 100%;
   margin: 8px 0;

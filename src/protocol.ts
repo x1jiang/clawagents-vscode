@@ -76,6 +76,12 @@ export type HostToWebview =
     }
   | { type: "ask_user_required"; requestId: string; question: string }
   | {
+      type: "plan_approval_required";
+      requestId: string;
+      planText: string;
+    }
+  | { type: "plan_approved"; mode?: AgentMode }
+  | {
       type: "file_changed";
       path: string;
       snapshotId?: string;
@@ -262,6 +268,12 @@ export type WebviewToHost =
       decision: "allow_once" | "allow_always" | "deny";
     }
   | { type: "ask_user_reply"; requestId: string; answer?: string; skip?: boolean }
+  | {
+      type: "plan_approval";
+      requestId: string;
+      decision: "approve" | "request_changes" | "reject";
+      comment?: string;
+    }
   | { type: "clear" }
   | { type: "new_chat" }
   | { type: "select_chat"; chatId: string }
@@ -425,6 +437,11 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
     case "ask_user_reply":
       return opaqueId(value.requestId) && optionalText(value.answer)
         && (value.skip === undefined || typeof value.skip === "boolean")
+        ? value as WebviewToHost : undefined;
+    case "plan_approval":
+      return opaqueId(value.requestId)
+        && ["approve", "request_changes", "reject"].includes(String(value.decision))
+        && (value.comment === undefined || optionalText(value.comment))
         ? value as WebviewToHost : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;

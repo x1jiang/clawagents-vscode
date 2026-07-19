@@ -78,6 +78,12 @@ type ChatItem =
       question: string;
       draft?: string;
       resolved?: boolean;
+    }
+  | {
+      kind: "plan_approval";
+      requestId: string;
+      planText: string;
+      resolved?: "approve" | "request_changes" | "reject";
     };
 
 import {
@@ -309,6 +315,27 @@ function resolveAsk(
   );
 }
 
+function resolvePlan(
+  requestId: string,
+  decision: "approve" | "request_changes" | "reject",
+  setItems: Dispatch<SetStateAction<ChatItem[]>>,
+  comment?: string,
+) {
+  post({ type: "plan_approval", requestId, decision, comment });
+  // Approve unlocks writes for the rest of the run and switches UI to Act
+  // (Grok Build: exit plan → implement).
+  if (decision === "approve") {
+    post({ type: "set_mode", mode: "auto" });
+  }
+  setItems((prev) =>
+    prev.map((it) =>
+      it.kind === "plan_approval" && it.requestId === requestId
+        ? { ...it, resolved: decision }
+        : it,
+    ),
+  );
+}
+
 function safeJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -443,6 +470,54 @@ const TranscriptItem = memo(function TranscriptItem({
                 onClick={() => resolvePerm(item.requestId, "deny", setItems)}
               >
                 Deny
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {item.kind === "plan_approval" && (
+        <div className="permission plan-approval">
+          <div className="label">Plan approval required</div>
+          <div className="perm-body">
+            <pre className="tool-body plan-text">
+              {(item.planText || "").trim() || "(empty plan)"}
+            </pre>
+          </div>
+          {item.resolved ? (
+            <div className="muted">
+              Plan exit:{" "}
+              {item.resolved === "approve"
+                ? "Approved"
+                : item.resolved === "request_changes"
+                  ? "Changes requested"
+                  : "Rejected"}
+            </div>
+          ) : (
+            <div className="perm-actions">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => resolvePlan(item.requestId, "approve", setItems)}
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  const comment =
+                    window.prompt("What should change in the plan?") || "";
+                  resolvePlan(item.requestId, "request_changes", setItems, comment);
+                }}
+              >
+                Request changes
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={() => resolvePlan(item.requestId, "reject", setItems)}
+              >
+                Reject
               </button>
             </div>
           )}
@@ -1112,6 +1187,20 @@ export function App() {
               draft: "",
             },
           ]);
+          break;
+        case "plan_approval_required":
+          setItems((prev) => [
+            ...prev,
+            {
+              kind: "plan_approval",
+              requestId: msg.requestId,
+              planText: msg.planText || "",
+            },
+          ]);
+          break;
+        case "plan_approved":
+          setMode(msg.mode || "auto");
+          setGoalMode(false);
           break;
         case "file_changed":
           if (msg.path) {
@@ -3915,7 +4004,7 @@ export function App() {
                 Auto-approve:{" "}
                 <strong>
                   {planAct === "plan"
-                    ? "— (Plan: reads + read-only shell)"
+                    ? "— (Plan: explore + write_plan → approve)"
                     : [
                         settings.allow_full_access && "Full access",
                         autoApprove.edit && "Edit",
@@ -4006,8 +4095,9 @@ export function App() {
                   <div className="muted tiny">
                     In <strong>Goal</strong>, the agent runs planner→verify→strategist
                     (prefer <code>start_goal</code> / <code>update_goal</code>).
-                    In <strong>Plan</strong>, only read-only shell (ls/echo/pwd) runs — and
-                    interaction is always Interactive.
+                    In <strong>Plan</strong>, the agent explores, drafts{" "}
+                    <code>.clawagents/plan.md</code>, then asks you to Approve / Request
+                    changes / Reject on exit — interaction is always Interactive.
                     In <strong>Act + Interactive</strong>, unchecked Edit/Execute/Web/Browser ask
                     first.
                     In <strong>Act + Auto</strong>, ask_user is skipped; Auto-approve toggles still

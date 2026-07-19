@@ -604,6 +604,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "plan_approval":
+        try {
+          await this.gateway.resolvePlanApproval(
+            msg.requestId,
+            msg.decision,
+            msg.comment,
+          );
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
       case "clear":
       case "new_chat":
         await this.newChat();

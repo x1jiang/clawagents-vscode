@@ -861,6 +861,7 @@ async def run_chat_turn(
     before_tool_factory: Callable[..., Any],
     cancel_check: Callable[[], bool],
     ask_user_factory: Callable[[], Any] | None = None,
+    on_exit_plan_mode: Callable[..., Any] | None = None,
     caveman: bool = True,
     goal: bool = False,
     images: list[dict[str, Any]] | None = None,
@@ -1077,6 +1078,7 @@ async def run_chat_turn(
 
     # Couple UI chat mode → OS sandbox via create_claw_agent (library contract).
     # full_access + allow_full_access → profile off; read_only → read-only.
+    # read_only / plan also maps to PermissionMode.PLAN in newer wheels.
     if "chat_mode" in _agent_params:
         kwargs["chat_mode"] = mode
     if "allow_full_access" in _agent_params:
@@ -1088,6 +1090,8 @@ async def run_chat_turn(
     ):
         # Older wheels without chat_mode — keep explicit off.
         kwargs["sandbox_profile"] = "off"
+    if on_exit_plan_mode is not None and "on_exit_plan_mode" in _agent_params:
+        kwargs["on_exit_plan_mode"] = on_exit_plan_mode
 
     # Browser tools (Playwright). Opt-in via Settings → Enable browser tools.
     if settings.get("browser_tools"):

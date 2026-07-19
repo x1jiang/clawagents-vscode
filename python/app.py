@@ -60,6 +60,9 @@ _permission_meta: dict[str, dict[str, Any]] = {}
 # state.
 _run_lock = threading.Lock()
 _active_runs: dict[str, dict[str, Any]] = {}
+# After exit_plan_mode is Approved, Plan (read_only) unlocks write gates for
+# the rest of that run so the agent can implement (Grok Build parity).
+_plan_unlocked_runs: set[str] = set()
 
 
 def _register_run(cancel_ev: threading.Event, *, chat_id: str | None = None) -> str:
@@ -97,6 +100,7 @@ def _unregister_run(run_id: str) -> list[str]:
     """Remove run; return any stranded interject texts for host queue promotion."""
     with _run_lock:
         run = _active_runs.pop(run_id, None)
+        _plan_unlocked_runs.discard(run_id)
     if run is None:
         return []
     ctx = run.get("run_context")
@@ -292,6 +296,94 @@ class AskUserWaiter:
 
 _ask_waiter = AskUserWaiter()
 
+# exit_plan_mode HITL — Approve / Request changes / Reject (desktop parity).
+PlanDecision = Literal["approve", "request_changes", "reject"]
+_plan_lock = threading.Lock()
+_plan_pending: dict[str, Any] = {}  # None | asyncio.Future | str (pre-resolved)
+_plan_loops: dict[str, asyncio.AbstractEventLoop] = {}
+_plan_comments: dict[str, str] = {}
+
+
+def _safe_plan_set_result(fut: "asyncio.Future[PlanDecision]", value: PlanDecision) -> None:
+    if not fut.done():
+        fut.set_result(value)
+
+
+class PlanApprovalWaiter:
+    def create(self) -> str:
+        request_id = uuid.uuid4().hex
+        with _plan_lock:
+            _plan_pending[request_id] = None
+        return request_id
+
+    async def wait(
+        self, request_id: str, *, timeout: float = 600.0
+    ) -> tuple[PlanDecision, str]:
+        loop = asyncio.get_running_loop()
+        with _plan_lock:
+            entry = _plan_pending.get(request_id)
+            if isinstance(entry, str):
+                _plan_pending.pop(request_id, None)
+                comment = _plan_comments.pop(request_id, "")
+                return entry, comment  # type: ignore[return-value]
+            if entry is None:
+                fut: asyncio.Future[PlanDecision] = loop.create_future()
+                _plan_pending[request_id] = fut
+                _plan_loops[request_id] = loop
+            else:
+                fut = entry
+        try:
+            decision = await asyncio.wait_for(fut, timeout=timeout)
+            with _plan_lock:
+                comment = _plan_comments.pop(request_id, "")
+            return decision, comment
+        finally:
+            with _plan_lock:
+                _plan_pending.pop(request_id, None)
+                _plan_loops.pop(request_id, None)
+                _plan_comments.pop(request_id, None)
+
+    def resolve(
+        self,
+        request_id: str,
+        decision: PlanDecision,
+        *,
+        comment: str = "",
+    ) -> None:
+        try:
+            safe_id(request_id, kind="request_id")
+        except ValueError:
+            return
+        with _plan_lock:
+            if request_id not in _plan_pending:
+                return
+            if comment:
+                _plan_comments[request_id] = comment
+            entry = _plan_pending.get(request_id)
+            if entry is None or isinstance(entry, str):
+                _plan_pending[request_id] = decision
+                return
+            fut = entry
+            loop = _plan_loops.get(request_id)
+        if fut.done():
+            return
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(_safe_plan_set_result, fut, decision)
+        else:
+            try:
+                fut.set_result(decision)
+            except asyncio.InvalidStateError:
+                pass
+
+    def reject_all(self, comment: str = "cancelled") -> None:
+        with _plan_lock:
+            ids = list(_plan_pending.keys())
+        for rid in ids:
+            self.resolve(rid, "reject", comment=comment)
+
+
+_plan_waiter = PlanApprovalWaiter()
+
 
 def _build_ask_user_tool(ask_fn):
     """Construct AskUserTool with ask_fn, compatible with clawagents <6.10.1."""
@@ -468,6 +560,17 @@ _KNOWN_READONLY_TOOLS = frozenset({
     "glob",
     "search_files",
     "grep",
+    "hashline_read",
+    "hashline_grep",
+    "repo_map",
+    "git_status",
+    "git_diff",
+    "snapshot_diff",
+    "checkpoint_list",
+    "checkpoint_diff",
+    "list_skills",
+    "use_skill",
+    "retrieve_tool_result",
     "ask_user",
     "ask_user_question",
     "clarify",
@@ -477,6 +580,14 @@ _KNOWN_READONLY_TOOLS = frozenset({
     "ctx_status",
     "ctx_list",
     "ctx_info",
+})
+
+# Plan (read_only) UI: exploration + plan artifact + exit gate (Grok Build).
+# Mutating tools stay blocked except writes targeting .clawagents/plan.md.
+_PLAN_MODE_ALLOWED_TOOLS = _KNOWN_READONLY_TOOLS | frozenset({
+    "write_plan",
+    "enter_plan_mode",
+    "exit_plan_mode",
 })
 
 
@@ -508,6 +619,11 @@ class PermissionBody(BaseModel):
 class AskUserBody(BaseModel):
     answer: str | None = None
     skip: bool = False
+
+
+class PlanApprovalBody(BaseModel):
+    decision: PlanDecision
+    comment: str = ""
 
 
 class CreateChatBody(BaseModel):
@@ -573,6 +689,7 @@ def _make_before_tool(
     sse_fn,
     auto_approve: AutoApprove | None = None,
     cancel_check: Callable[[], bool] = lambda: False,
+    run_id: str | None = None,
 ):
     from clawagents import HookResult
     from clawagents.permissions.mode import WRITE_CLASS_TOOLS
@@ -587,6 +704,12 @@ def _make_before_tool(
         | _WEB_TOOLS
         | _BROWSER_TOOLS
     )
+
+    def _plan_unlocked() -> bool:
+        if not run_id:
+            return False
+        with _run_lock:
+            return run_id in _plan_unlocked_runs
 
     def _pre_approved(category: str, file_path: str | None) -> bool:
         """Granular auto-approve (Cline-style). Authoritative when provided.
@@ -636,7 +759,7 @@ def _make_before_tool(
         # Known read/search tools never need a prompt. Unknown names (MCP,
         # future builtins) are gated as execute — do not auto-allow.
         if name not in gated_tools:
-            if name in _KNOWN_READONLY_TOOLS:
+            if name in _KNOWN_READONLY_TOOLS or name in _PLAN_MODE_ALLOWED_TOOLS:
                 return True
             category = "execute"
         else:
@@ -650,18 +773,27 @@ def _make_before_tool(
         if command is None and isinstance(args.get("url"), str):
             command = args["url"]  # web_fetch / browser_navigate: show the URL
 
-        # Plan / read-only: mutating tools are hard-blocked so the agent reasons
-        # and proposes instead of acting. Read-only shell is still allowed so
-        # questions like "what's my home folder?" work in Plan.
-        if mode == "read_only":
+        # Plan / read-only: explore + write_plan + exit_plan_mode only
+        # (Grok Build parity). Other mutations stay hard-blocked until the
+        # host Approves exit_plan_mode (unlocks this run) or the user
+        # switches to Act. Read-only shell still works for inspection.
+        if mode == "read_only" and not _plan_unlocked():
             if name == "execute" and _is_readonly_shell(command):
+                return True
+            if name in _PLAN_MODE_ALLOWED_TOOLS:
+                return True
+            try:
+                from clawagents.permissions.mode import is_plan_file_path
+            except Exception:  # noqa: BLE001
+                is_plan_file_path = lambda _p: False  # type: ignore[assignment]
+            if name in WRITE_CLASS_TOOLS and is_plan_file_path(file_path):
                 return True
             return HookResult(
                 allowed=False,
                 reason=(
                     f"Blocked: '{name}' would modify state or leave the machine, "
-                    "but the chat is in Plan (read-only) mode. Describe what you "
-                    "would do; switch to Act to execute."
+                    "but the chat is in Plan mode. Explore, write_plan, then "
+                    "exit_plan_mode for approval — or switch to Act to execute."
                 ),
             )
         if mode == "full_access":
@@ -1062,6 +1194,34 @@ def create_app() -> FastAPI:
         _ask_waiter.resolve(request_id, answer)
         return {"ok": True, "request_id": request_id}
 
+    @app.post("/plan_approvals/{request_id}")
+    async def resolve_plan_approval(
+        request_id: str, body: PlanApprovalBody, request: Request
+    ):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            safe_id(request_id, kind="request_id")
+        except ValueError:
+            return _bad_request("invalid request_id")
+        with _plan_lock:
+            if request_id not in _plan_pending:
+                return Response(
+                    status_code=404,
+                    content=json.dumps({"error": f"unknown request {request_id}"}),
+                    media_type="application/json",
+                )
+        _plan_waiter.resolve(
+            request_id, body.decision, comment=body.comment or ""
+        )
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "decision": body.decision,
+            "comment": body.comment,
+        }
+
     @app.post("/cancel")
     async def cancel(request: Request):
         denied = _auth_or_401(request)
@@ -1077,6 +1237,8 @@ def create_app() -> FastAPI:
             ask_ids = list(_ask_events.keys())
         for rid in ask_ids:
             _ask_waiter.resolve(rid, None)
+        # Unblock exit_plan_mode approval waiters.
+        _plan_waiter.reject_all(comment="cancelled")
         return {"ok": True, "stranded_prompts": stranded}
 
     @app.post("/interject")
@@ -1284,7 +1446,43 @@ def create_app() -> FastAPI:
                 sse,
                 auto_approve=body.auto_approve,
                 cancel_check=cancel_ev.is_set,
+                run_id=run_id,
             )
+
+        async def on_exit_plan_mode(plan_text: str, _run_context: Any) -> Any:
+            """Host gate for exit_plan_mode (Grok / desktop parity)."""
+            from clawagents.permissions.plan_approval import (
+                PlanApprovalAction,
+                PlanApprovalDecision,
+            )
+
+            request_id = _plan_waiter.create()
+            sse(
+                "plan_approval_required",
+                {
+                    "request_id": request_id,
+                    "plan_text": plan_text or "",
+                },
+            )
+            try:
+                decision, comment = await _plan_waiter.wait(
+                    request_id, timeout=600.0
+                )
+            except asyncio.TimeoutError:
+                return PlanApprovalDecision(
+                    PlanApprovalAction.REJECT, comment="timeout"
+                )
+            if decision == "approve":
+                with _run_lock:
+                    _plan_unlocked_runs.add(run_id)
+                # Flip UI to Act so the next turn isn't stuck in Plan.
+                sse("plan_approved", {"mode": "auto", "chat_id": chat_id})
+            action = {
+                "approve": PlanApprovalAction.APPROVE,
+                "request_changes": PlanApprovalAction.REQUEST_CHANGES,
+                "reject": PlanApprovalAction.REJECT,
+            }.get(decision, PlanApprovalAction.REJECT)
+            return PlanApprovalDecision(action, comment=comment or "")
 
         def run_agent() -> dict[str, Any]:
             """Run the agent turn on a private event loop in this worker thread.
@@ -1312,6 +1510,7 @@ def create_app() -> FastAPI:
                         before_tool_factory=before_tool_factory,
                         cancel_check=cancel_ev.is_set,
                         ask_user_factory=ask_factory,
+                        on_exit_plan_mode=on_exit_plan_mode,
                         caveman=bool(body.caveman),
                         goal=bool(body.goal),
                         images=body.images,

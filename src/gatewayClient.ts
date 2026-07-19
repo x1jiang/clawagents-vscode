@@ -176,6 +176,12 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
         requestId: String(data.request_id ?? data.requestId ?? ""),
         question: String(data.question ?? data.prompt ?? ""),
       };
+    case "plan_approval_required":
+      return {
+        type: "plan_approval_required",
+        requestId: String(data.request_id ?? data.requestId ?? ""),
+        planText: String(data.plan_text ?? data.planText ?? ""),
+      };
     case "usage":
       return {
         type: "usage",
@@ -530,6 +536,17 @@ export class GatewayClient {
                   requestId: String(data.request_id ?? ""),
                   question: String(data.question ?? ""),
                 });
+              } else if (ev.event === "plan_approval_required") {
+                emit({
+                  type: "plan_approval_required",
+                  requestId: String(data.request_id ?? ""),
+                  planText: String(data.plan_text ?? ""),
+                });
+              } else if (ev.event === "plan_approved") {
+                emit({
+                  type: "plan_approved",
+                  mode: (data.mode as "ask" | "read_only" | "auto" | "full_access") || "auto",
+                });
               } else if (ev.event === "file_changed") {
                 emit({
                   type: "file_changed",
@@ -646,6 +663,19 @@ export class GatewayClient {
       answer: opts.answer,
       skip: Boolean(opts.skip),
     });
+  }
+
+  async resolvePlanApproval(
+    requestId: string,
+    decision: "approve" | "request_changes" | "reject",
+    comment?: string,
+  ): Promise<void> {
+    await requestJson(
+      this.requireHandle(),
+      "POST",
+      `/plan_approvals/${encodeURIComponent(requestId)}`,
+      { decision, comment: comment || "" },
+    );
   }
 
   async cancel(): Promise<{ ok: boolean; stranded_prompts?: string[] }> {

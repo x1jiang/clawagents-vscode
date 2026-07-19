@@ -1,8 +1,14 @@
 ## Unreleased
 
+## 1.0.113
+
+- **Plan mode (Grok Build parity):** explore + `write_plan` → `exit_plan_mode` shows Approve / Request changes / Reject; Approve unlocks the run and switches to Act.
+- Require `clawagents>=6.20.26` — UI Plan maps to engine `PermissionMode.PLAN` with plan-file exemptions.
+
 ## 1.0.112
 
 - Default Auto-approve: **Edit** + **Execute** on (Web/Browser still off).
+
 
 ## 1.0.111
 
@@ -580,9 +586,15 @@
 
 ## Unreleased
 
+## 1.0.113
+
+- **Plan mode (Grok Build parity):** explore + `write_plan` → `exit_plan_mode` shows Approve / Request changes / Reject; Approve unlocks the run and switches to Act.
+- Require `clawagents>=6.20.26` — UI Plan maps to engine `PermissionMode.PLAN` with plan-file exemptions.
+
 ## 1.0.112
 
 - Default Auto-approve: **Edit** + **Execute** on (Web/Browser still off).
+
 
 ## 1.0.111
 
