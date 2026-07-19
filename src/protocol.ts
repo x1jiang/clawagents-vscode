@@ -92,6 +92,8 @@ export type HostToWebview =
       promptTokens?: number;
       completionTokens?: number;
       totalTokens?: number;
+      cachedInputTokens?: number;
+      cacheCreationTokens?: number;
       runCostUsd?: number;
       sessionCostUsd?: number;
       lastInputTokens?: number;

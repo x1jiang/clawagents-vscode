@@ -190,6 +190,12 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
           data.completion_tokens ?? data.completionTokens ?? data.output_tokens,
         ),
         totalTokens: num(data.total_tokens ?? data.totalTokens ?? data.tokens_used),
+        cachedInputTokens: num(
+          data.cached_input_tokens ?? data.cachedInputTokens ?? data.cache_read_tokens,
+        ),
+        cacheCreationTokens: num(
+          data.cache_creation_tokens ?? data.cacheCreationTokens,
+        ),
         runCostUsd: num(data.run_cost_usd ?? data.runCostUsd),
         sessionCostUsd: num(data.session_cost_usd ?? data.sessionCostUsd),
         lastInputTokens: num(
@@ -561,6 +567,10 @@ export class GatewayClient {
                   promptTokens: num(data.prompt_tokens),
                   completionTokens: num(data.completion_tokens),
                   totalTokens: num(data.total_tokens),
+                  cachedInputTokens: num(
+                    data.cached_input_tokens ?? data.cache_read_tokens,
+                  ),
+                  cacheCreationTokens: num(data.cache_creation_tokens),
                   lastInputTokens: num(
                     data.last_input_tokens ?? data.prompt_tokens ?? data.input_tokens,
                   ),

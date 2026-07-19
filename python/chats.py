@@ -154,9 +154,21 @@ def _ensure_session_cost(meta: dict[str, Any]) -> dict[str, Any]:
         usage = ev.get("usage") if isinstance(ev.get("usage"), dict) else {}
         p = int(usage.get("prompt_tokens") or 0)
         c = int(usage.get("completion_tokens") or 0)
+        cached = int(
+            usage.get("cached_input_tokens")
+            or usage.get("cache_read_tokens")
+            or 0
+        )
+        created = int(usage.get("cache_creation_tokens") or 0)
         prompt_n += p
         completion_n += c
-        run = estimate_usd(model_id, prompt_tokens=p, completion_tokens=c)
+        run = estimate_usd(
+            model_id,
+            prompt_tokens=p,
+            completion_tokens=c,
+            cached_input_tokens=cached,
+            cache_creation_tokens=created,
+        )
         if run:
             cost += float(run)
     meta = dict(meta)
@@ -1121,7 +1133,32 @@ async def run_chat_turn(
     # operational kinds (warn / error / checkpoint / compact_progress /
     # context / approval_required) that the webview needs.
     saw_assistant = False
-    usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    usage_totals = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_creation_tokens": 0,
+    }
+
+    def _ev_usage_int(ev: Any, *names: str) -> int:
+        """Read a usage int from typed StreamEvent fields or ``ev.data``."""
+        for name in names:
+            raw = getattr(ev, name, None)
+            if raw is not None:
+                try:
+                    return int(raw or 0)
+                except (TypeError, ValueError):
+                    pass
+        data = getattr(ev, "data", None)
+        if isinstance(data, dict):
+            for name in names:
+                if name in data:
+                    try:
+                        return int(data.get(name) or 0)
+                    except (TypeError, ValueError):
+                        pass
+        return 0
 
     def _session_message_count() -> int:
         mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
@@ -1210,16 +1247,27 @@ async def run_chat_turn(
             )
         elif kind == "usage":
             # Cumulative across LLM calls this run (for cost / totals).
-            usage_totals["prompt_tokens"] += int(getattr(ev, "input_tokens", 0) or 0)
-            usage_totals["completion_tokens"] += int(getattr(ev, "output_tokens", 0) or 0)
-            usage_totals["total_tokens"] += int(getattr(ev, "total_tokens", 0) or 0)
+            # Cache fields come from UsageEvent (clawagents≥6.20.27) or
+            # ev.data (older wheels that only stuffed them into data=).
+            inp = _ev_usage_int(ev, "input_tokens")
+            out = _ev_usage_int(ev, "output_tokens")
+            tot = _ev_usage_int(ev, "total_tokens")
+            cached = _ev_usage_int(
+                ev, "cached_input_tokens", "cache_read_tokens"
+            )
+            created = _ev_usage_int(ev, "cache_creation_tokens")
+            usage_totals["prompt_tokens"] += inp
+            usage_totals["completion_tokens"] += out
+            usage_totals["total_tokens"] += tot
+            usage_totals["cached_input_tokens"] += cached
+            usage_totals["cache_creation_tokens"] += created
             # Context meter needs the *latest* prompt size, not the sum —
             # summing every tool-loop round falsely pegs the bar at 100%.
             on_event(
                 "usage",
                 {
                     **usage_totals,
-                    "last_input_tokens": int(getattr(ev, "input_tokens", 0) or 0),
+                    "last_input_tokens": inp,
                 },
             )
 
@@ -1319,6 +1367,9 @@ async def run_chat_turn(
             or getattr(usage, "output_tokens", None),
             "total_tokens": getattr(usage, "total_tokens", None)
             or getattr(usage, "tokens_used", None),
+            "cached_input_tokens": getattr(usage, "cached_input_tokens", None)
+            or getattr(usage, "cache_read_tokens", None),
+            "cache_creation_tokens": getattr(usage, "cache_creation_tokens", None),
         }
         on_event("usage", usage_payload)
 
@@ -1333,10 +1384,22 @@ async def run_chat_turn(
         or usage_payload.get("total_tokens")
         or (prompt_n + completion_n)
     )
+    cached_n = int(
+        usage_totals.get("cached_input_tokens")
+        or usage_payload.get("cached_input_tokens")
+        or 0
+    )
+    created_n = int(
+        usage_totals.get("cache_creation_tokens")
+        or usage_payload.get("cache_creation_tokens")
+        or 0
+    )
     usage_payload = {
         "prompt_tokens": prompt_n,
         "completion_tokens": completion_n,
         "total_tokens": total_n,
+        "cached_input_tokens": cached_n,
+        "cache_creation_tokens": created_n,
     }
     model_id = str(kwargs.get("model") or settings.get("model") or MODEL or "")
     provider = str(
@@ -1346,6 +1409,8 @@ async def run_chat_turn(
         model_id,
         prompt_tokens=prompt_n,
         completion_tokens=completion_n,
+        cached_input_tokens=cached_n,
+        cache_creation_tokens=created_n,
         provider=provider,
     )
     # Unknown model → omit cost (do not coerce to $0.00).

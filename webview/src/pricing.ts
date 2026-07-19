@@ -3,60 +3,78 @@
  * Bedrock / Mantle = commercial us-east-1 Global Standard (Claude parity with
  * Anthropic). GovCloud Opus $6/$30 is NOT used — that is a different table.
  * OpenAI-on-Bedrock is ~+10% vs OpenAI API.
+ *
+ * Cache tiers: cached input read (~10% of input) and cache write (1.25× input).
+ * When the host reports cached_input_tokens / cache_creation_tokens, estimates
+ * apply those discounts; otherwise all input is billed at the full rate.
  */
 
-type Rates = { input: number; output: number };
+type Rates = {
+  input: number;
+  output: number;
+  cachedInput: number;
+  cacheWrite: number;
+};
+
+function withCache(input: number, output: number, cached?: number, write?: number): Rates {
+  return {
+    input,
+    output,
+    cachedInput: cached ?? input * 0.1,
+    cacheWrite: write ?? input * 1.25,
+  };
+}
 
 const PRICES: Record<string, Rates> = {
-  "gpt-5.6": { input: 5, output: 30 },
-  "gpt-5.6-sol": { input: 5, output: 30 },
-  "gpt-5.6-terra": { input: 2.5, output: 15 },
-  "gpt-5.6-luna": { input: 1, output: 6 },
-  "gpt-5.5": { input: 5, output: 30 },
-  "gpt-5.5-pro": { input: 30, output: 180 },
-  "gpt-5.4": { input: 2.5, output: 15 },
-  "gpt-5.4-mini": { input: 0.75, output: 4.5 },
-  "gpt-5.4-nano": { input: 0.2, output: 1.25 },
-  "gpt-5.4-pro": { input: 30, output: 180 },
-  "gpt-4o": { input: 2.5, output: 10 },
-  "gpt-4o-mini": { input: 0.15, output: 0.6 },
-  "claude-opus-4": { input: 5, output: 25 },
-  "claude-opus-4-5": { input: 5, output: 25 },
-  "claude-opus-4-6": { input: 5, output: 25 },
-  "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-opus-4-8": { input: 5, output: 25 },
-  "claude-sonnet-4": { input: 3, output: 15 },
-  "claude-sonnet-4-5": { input: 3, output: 15 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-sonnet-5": { input: 2, output: 10 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
-  "claude-haiku-4-5-20251001": { input: 1, output: 5 },
-  "gemini-3.5-flash": { input: 1.5, output: 9 },
-  "gemini-3.1-pro-preview": { input: 2, output: 12 },
-  "gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
-  "gemini-3-flash-preview": { input: 0.5, output: 3 },
-  "gemini-2.5-pro": { input: 1.25, output: 10 },
-  "gemini-2.5-flash": { input: 0.3, output: 2.5 },
+  "gpt-5.6": withCache(5, 30, 0.5, 6.25),
+  "gpt-5.6-sol": withCache(5, 30, 0.5, 6.25),
+  "gpt-5.6-terra": withCache(2.5, 15, 0.25, 3.125),
+  "gpt-5.6-luna": withCache(1, 6, 0.1, 1.25),
+  "gpt-5.5": withCache(5, 30, 0.5, 6.25),
+  "gpt-5.5-pro": withCache(30, 180, 3, 37.5),
+  "gpt-5.4": withCache(2.5, 15, 0.25, 3.125),
+  "gpt-5.4-mini": withCache(0.75, 4.5, 0.075, 0.9375),
+  "gpt-5.4-nano": withCache(0.2, 1.25, 0.02, 0.25),
+  "gpt-5.4-pro": withCache(30, 180, 3, 37.5),
+  "gpt-4o": withCache(2.5, 10, 1.25, 3.125),
+  "gpt-4o-mini": withCache(0.15, 0.6, 0.075, 0.1875),
+  "claude-opus-4": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-5": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-6": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-7": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-8": withCache(5, 25, 0.5, 6.25),
+  "claude-sonnet-4": withCache(3, 15, 0.3, 3.75),
+  "claude-sonnet-4-5": withCache(3, 15, 0.3, 3.75),
+  "claude-sonnet-4-6": withCache(3, 15, 0.3, 3.75),
+  "claude-sonnet-5": withCache(2, 10, 0.2, 2.5),
+  "claude-haiku-4-5": withCache(1, 5, 0.1, 1.25),
+  "claude-haiku-4-5-20251001": withCache(1, 5, 0.1, 1.25),
+  "gemini-3.5-flash": withCache(1.5, 9),
+  "gemini-3.1-pro-preview": withCache(2, 12),
+  "gemini-3.1-flash-lite": withCache(0.25, 1.5),
+  "gemini-3-flash-preview": withCache(0.5, 3),
+  "gemini-2.5-pro": withCache(1.25, 10),
+  "gemini-2.5-flash": withCache(0.3, 2.5),
 };
 
 /** Bedrock / Mantle commercial Global Standard (OneHUB us-east-1). */
 const BEDROCK_PRICES: Record<string, Rates> = {
-  "claude-opus-4": { input: 5, output: 25 },
-  "claude-opus-4-5": { input: 5, output: 25 },
-  "claude-opus-4-6": { input: 5, output: 25 },
-  "claude-opus-4-7": { input: 5, output: 25 },
-  "claude-opus-4-8": { input: 5, output: 25 },
-  "claude-sonnet-4": { input: 3, output: 15 },
-  "claude-sonnet-4-5": { input: 3, output: 15 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-sonnet-5": { input: 2, output: 10 },
-  "claude-haiku-4-5": { input: 1, output: 5 },
-  "gpt-5.6": { input: 5.5, output: 33 },
-  "gpt-5.6-sol": { input: 5.5, output: 33 },
-  "gpt-5.6-terra": { input: 2.75, output: 16.5 },
-  "gpt-5.6-luna": { input: 1.1, output: 6.6 },
-  "gpt-5.5": { input: 5.5, output: 33 },
-  "gpt-5.4": { input: 2.75, output: 16.5 },
+  "claude-opus-4": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-5": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-6": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-7": withCache(5, 25, 0.5, 6.25),
+  "claude-opus-4-8": withCache(5, 25, 0.5, 6.25),
+  "claude-sonnet-4": withCache(3, 15, 0.3, 3.75),
+  "claude-sonnet-4-5": withCache(3, 15, 0.3, 3.75),
+  "claude-sonnet-4-6": withCache(3, 15, 0.3, 3.75),
+  "claude-sonnet-5": withCache(2, 10, 0.2, 2.5),
+  "claude-haiku-4-5": withCache(1, 5, 0.1, 1.25),
+  "gpt-5.6": withCache(5.5, 33, 0.55, 6.875),
+  "gpt-5.6-sol": withCache(5.5, 33, 0.55, 6.875),
+  "gpt-5.6-terra": withCache(2.75, 16.5, 0.275, 3.4375),
+  "gpt-5.6-luna": withCache(1.1, 6.6, 0.11, 1.375),
+  "gpt-5.5": withCache(5.5, 33, 0.55, 6.875),
+  "gpt-5.4": withCache(2.75, 16.5, 0.275, 3.4375),
 };
 
 const GEO_PREFIXES = ["global.", "us.", "eu.", "apac.", "ap.", "af.", "me.", "ca.", "sa."] as const;
@@ -70,7 +88,12 @@ const PROVIDER_DOT_PREFIXES = [
   "ai21.",
 ] as const;
 
-export type ModelPrice = { input_per_mtok?: number; output_per_mtok?: number };
+export type ModelPrice = {
+  input_per_mtok?: number;
+  output_per_mtok?: number;
+  cached_input_per_mtok?: number;
+  cache_write_per_mtok?: number;
+};
 
 function looksBedrock(modelId: string): boolean {
   const m = modelId.trim().toLowerCase();
@@ -126,7 +149,19 @@ function lookup(
     typeof fromModel.input_per_mtok === "number" &&
     typeof fromModel.output_per_mtok === "number"
   ) {
-    return { input: fromModel.input_per_mtok, output: fromModel.output_per_mtok };
+    const inp = fromModel.input_per_mtok;
+    return {
+      input: inp,
+      output: fromModel.output_per_mtok,
+      cachedInput:
+        typeof fromModel.cached_input_per_mtok === "number"
+          ? fromModel.cached_input_per_mtok
+          : inp * 0.1,
+      cacheWrite:
+        typeof fromModel.cache_write_per_mtok === "number"
+          ? fromModel.cache_write_per_mtok
+          : inp * 1.25,
+    };
   }
   const raw = modelId.trim();
   const key = normalizeModelId(raw);
@@ -146,12 +181,25 @@ export function estimateCostUsd(
   completionTokens: number,
   fromModel?: ModelPrice,
   provider?: string,
+  cachedInputTokens: number = 0,
+  cacheCreationTokens: number = 0,
 ): number | null {
   const rates = lookup(modelId, fromModel, provider);
   if (!rates) {
     return null;
   }
-  return (promptTokens / 1_000_000) * rates.input + (completionTokens / 1_000_000) * rates.output;
+  const prompt = Math.max(0, promptTokens || 0);
+  const completion = Math.max(0, completionTokens || 0);
+  const cached = Math.min(Math.max(0, cachedInputTokens || 0), prompt);
+  const uncached = prompt - cached;
+  const creation = Math.max(0, cacheCreationTokens || 0);
+  const writePremium = Math.max(0, rates.cacheWrite - rates.input);
+  return (
+    (uncached / 1_000_000) * rates.input +
+    (cached / 1_000_000) * rates.cachedInput +
+    (creation / 1_000_000) * writePremium +
+    (completion / 1_000_000) * rates.output
+  );
 }
 
 /** Format like $0.12 / $1.20 / <$0.01 */

@@ -176,6 +176,41 @@ class GrantPathTests(unittest.TestCase):
         )
         self.assertEqual(cost, 5.0)
 
+    def test_pricing_cache_discount_luna(self) -> None:
+        for mod in ("pricing",):
+            sys.modules.pop(mod, None)
+        import pricing as pricing_mod  # noqa: WPS433
+
+        # All uncached: 1M @ $1 = $1.00
+        full = pricing_mod.estimate_usd(
+            "gpt-5.6-luna", prompt_tokens=1_000_000, completion_tokens=0
+        )
+        self.assertEqual(full, 1.0)
+        # Fully cached read: 1M @ $0.10 = $0.10
+        cached = pricing_mod.estimate_usd(
+            "gpt-5.6-luna",
+            prompt_tokens=1_000_000,
+            completion_tokens=0,
+            cached_input_tokens=1_000_000,
+        )
+        self.assertAlmostEqual(cached or 0, 0.10, places=4)
+        # Half cached: 500k@$1 + 500k@$0.10 = $0.55
+        half = pricing_mod.estimate_usd(
+            "gpt-5.6-luna",
+            prompt_tokens=1_000_000,
+            completion_tokens=0,
+            cached_input_tokens=500_000,
+        )
+        self.assertAlmostEqual(half or 0, 0.55, places=4)
+        # Cache write premium: 1M uncached + 1M creation × ($1.25−$1) = $1.25
+        write = pricing_mod.estimate_usd(
+            "gpt-5.6-luna",
+            prompt_tokens=1_000_000,
+            completion_tokens=0,
+            cache_creation_tokens=1_000_000,
+        )
+        self.assertAlmostEqual(write or 0, 1.25, places=4)
+
 
 if __name__ == "__main__":
     unittest.main()

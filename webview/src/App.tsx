@@ -652,6 +652,8 @@ export function App() {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    cachedInputTokens?: number;
+    cacheCreationTokens?: number;
     lastInputTokens?: number;
   }>({});
   const [compactPhase, setCompactPhase] = useState<string | undefined>();
@@ -673,6 +675,8 @@ export function App() {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    cachedInputTokens?: number;
+    cacheCreationTokens?: number;
   }>({});
   const modelRef = useRef("");
   const modelMetaRef = useRef<ModelPrice | undefined>(undefined);
@@ -728,6 +732,8 @@ export function App() {
   const commitRunCost = (u: {
     promptTokens?: number;
     completionTokens?: number;
+    cachedInputTokens?: number;
+    cacheCreationTokens?: number;
   }, serverSession?: number) => {
     if (runCommittedRef.current) {
       return;
@@ -743,6 +749,8 @@ export function App() {
       u.completionTokens || 0,
       modelMetaRef.current,
       String(settingsRef.current.provider || ""),
+      u.cachedInputTokens || 0,
+      u.cacheCreationTokens || 0,
     );
     if (cost != null && cost > 0) {
       setSessionCostUsd((s) => s + cost);
@@ -1220,6 +1228,8 @@ export function App() {
             promptTokens: msg.promptTokens,
             completionTokens: msg.completionTokens,
             totalTokens: msg.totalTokens,
+            cachedInputTokens: msg.cachedInputTokens,
+            cacheCreationTokens: msg.cacheCreationTokens,
             lastInputTokens: msg.lastInputTokens ?? msg.promptTokens,
           };
           runUsageRef.current = next;
@@ -1281,6 +1291,8 @@ export function App() {
               promptTokens: u.prompt_tokens,
               completionTokens: u.completion_tokens,
               totalTokens: u.total_tokens,
+              cachedInputTokens: u.cached_input_tokens ?? u.cache_read_tokens,
+              cacheCreationTokens: u.cache_creation_tokens,
             };
             runUsageRef.current = finalUsage;
             setUsage(finalUsage);
@@ -1300,6 +1312,8 @@ export function App() {
               finalUsage.completionTokens || 0,
               modelMetaRef.current,
               String(settingsRef.current.provider || ""),
+              finalUsage.cachedInputTokens || 0,
+              finalUsage.cacheCreationTokens || 0,
             );
           setItems((prev) => [
             ...prev.filter((it) => it.kind !== "status"),
@@ -1805,8 +1819,14 @@ export function App() {
   }, [settings, post]);
   const promptTok = usage.promptTokens || 0;
   const completionTok = usage.completionTokens || 0;
+  const cachedTok = usage.cachedInputTokens || 0;
+  const cacheCreateTok = usage.cacheCreationTokens || 0;
   const totalTok =
     usage.totalTokens ?? (promptTok || completionTok ? promptTok + completionTok : 0);
+  const cacheHitPct =
+    promptTok > 0 && cachedTok > 0
+      ? Math.round(Math.min(100, (cachedTok / promptTok) * 100))
+      : null;
   const ctx = contextUsage(
     activeModelId || model,
     usage.lastInputTokens || promptTok || 0,
@@ -1831,6 +1851,8 @@ export function App() {
     completionTok,
     activeModelMeta,
     selectedProvider,
+    cachedTok,
+    cacheCreateTok,
   );
   // While a run is in flight, include its live estimate in the session total.
   const sessionCostShown =
@@ -2191,15 +2213,37 @@ export function App() {
           {totalTok > 0 && (
             <span
               className="meta-stat"
-              title={`${promptTok} in / ${completionTok} out (this run)`}
+              title={`${promptTok.toLocaleString()} in / ${completionTok.toLocaleString()} out${
+                cachedTok
+                  ? ` · ${cachedTok.toLocaleString()} cache read${
+                      cacheCreateTok ? ` · ${cacheCreateTok.toLocaleString()} cache write` : ""
+                    }`
+                  : ""
+              } (this run)`}
             >
               {totalTok.toLocaleString()} tok
+            </span>
+          )}
+          {cacheHitPct != null && (
+            <span
+              className="meta-stat cache-hit"
+              title={`${cachedTok.toLocaleString()} of ${promptTok.toLocaleString()} prompt tokens hit the provider cache${
+                cacheCreateTok
+                  ? ` · ${cacheCreateTok.toLocaleString()} written to cache`
+                  : ""
+              }`}
+            >
+              cache {cacheHitPct}%
             </span>
           )}
           {runCost != null && totalTok > 0 && (
             <span
               className="cost"
-              title="Estimated API cost for this run (last/current turn). List price, uncached — not a bill."
+              title={
+                cachedTok
+                  ? "Estimated API cost for this run with prompt-cache discount applied. List price — not a bill."
+                  : "Estimated API cost for this run (last/current turn). List price — not a bill. Cache hits appear here when the provider reports them."
+              }
             >
               run ~{formatUsd(runCost)}
             </span>
@@ -2207,7 +2251,7 @@ export function App() {
           {sessionCostShown > 0 && (
             <span
               className="cost session"
-              title="Estimated total for this chat (all runs). Persisted with the chat — survives reload."
+              title="Estimated total for this chat (all runs, cache-aware when reported). Persisted with the chat — survives reload."
             >
               session ~{formatUsd(sessionCostShown)}
             </span>

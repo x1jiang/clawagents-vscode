@@ -1,9 +1,15 @@
 ## Unreleased
 
+## 1.0.114
+
+- **Cache-aware usage/cost:** thread `cached_input_tokens` / `cache_creation_tokens` into usage payload + UI; `estimate_usd` applies cache-read discount (and write premium). Header shows **cache N%** when hits are reported.
+- Require `clawagents>=6.20.27` — `UsageEvent` exposes cache fields.
+
 ## 1.0.113
 
 - **Plan mode (Grok Build parity):** explore + `write_plan` → `exit_plan_mode` shows Approve / Request changes / Reject; Approve unlocks the run and switches to Act.
 - Require `clawagents>=6.20.26` — UI Plan maps to engine `PermissionMode.PLAN` with plan-file exemptions.
+
 
 ## 1.0.112
 
@@ -586,10 +592,16 @@
 
 ## Unreleased
 
+## 1.0.114
+
+- **Cache-aware usage/cost:** thread `cached_input_tokens` / `cache_creation_tokens` into usage payload + UI; `estimate_usd` applies cache-read discount (and write premium). Header shows **cache N%** when hits are reported.
+- Require `clawagents>=6.20.27` — `UsageEvent` exposes cache fields.
+
 ## 1.0.113
 
 - **Plan mode (Grok Build parity):** explore + `write_plan` → `exit_plan_mode` shows Approve / Request changes / Reject; Approve unlocks the run and switches to Act.
 - Require `clawagents>=6.20.26` — UI Plan maps to engine `PermissionMode.PLAN` with plan-file exemptions.
+
 
 ## 1.0.112
 
