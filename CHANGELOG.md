@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.105
+
+- Require `clawagents>=6.20.20` — `use_skill(continue=true)`, code-before-html crush, `retrieve_tool_result` under skill gate.
+
 ## 1.0.104
 
 - Hard heal: never show vendor-mismatched models in the header (e.g. ``llama3.1`` under OpenAI); sidecar ``load_settings`` rewrites leftovers on disk.
