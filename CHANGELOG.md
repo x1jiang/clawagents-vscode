@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.112
+
+- Default Auto-approve: **Edit** + **Execute** on (Web/Browser still off).
+
 ## 1.0.111
 
 - Require `clawagents>=6.20.25` — YAML skill frontmatter + nested shlex guard.
@@ -575,6 +579,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.112
+
+- Default Auto-approve: **Edit** + **Execute** on (Web/Browser still off).
 
 ## 1.0.111
 

@@ -540,8 +540,8 @@ export function App() {
   const [mode, setMode] = useState<AgentMode>("auto");
   const [interaction, setInteraction] = useState<InteractionStyle>("interactive");
   const [autoApprove, setAutoApprove] = useState<AutoApprove>({
-    edit: false,
-    execute: false,
+    edit: true,
+    execute: true,
     web: false,
     browser: false,
   });

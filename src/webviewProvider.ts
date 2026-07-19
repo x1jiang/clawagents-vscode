@@ -43,8 +43,8 @@ export const SIDEBAR_ACTIVITY_ID = "clawagents.sidebarActivity";
 const STATE_KEY = "clawagents.chatState.v2";
 
 const DEFAULT_AUTO_APPROVE: AutoApprove = {
-  edit: false,
-  execute: false,
+  edit: true,
+  execute: true,
   web: false,
   browser: false,
 };
