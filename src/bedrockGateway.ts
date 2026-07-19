@@ -322,4 +322,19 @@ export function reconcileProviderGatewaySettings(
     incoming.base_url = mantleBaseUrlForRegion(region);
     incoming.provider = "bedrock";
   }
+
+  // Within Bedrock: mode flips (mantle/bag ↔ iam) must not keep a sticky
+  // wire_api that the new gateway cannot serve — Responses-forced settings
+  // disable the provider's chat-completions self-heal.
+  const prevMode = String(previous.bedrock_mode || "iam").toLowerCase();
+  if (
+    provider === "bedrock" &&
+    mode !== prevMode &&
+    Object.prototype.hasOwnProperty.call(incoming, "wire_api")
+  ) {
+    const wire = String(incoming.wire_api || "").toLowerCase();
+    if (wire === "responses" || wire === "chat_completions") {
+      incoming.wire_api = "auto";
+    }
+  }
 }

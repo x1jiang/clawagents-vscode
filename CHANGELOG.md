@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.108
+
+- Require `clawagents>=6.20.23` — skill tool filtering + aliases, apply_patch matching, MCP reconnect/timeout, compaction tool_calls_meta fix; clear `pendingSettingsPatch` on save error; Bedrock AWS env clear + wire_api reset on leave.
+
 ## 1.0.107
 
 - Require `clawagents>=6.20.22` — Responses retry de-nest, `$ref`/`anyOf` schemas, model-prefix classifiers; post-install floor re-probe.
@@ -558,6 +562,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.108
+
+- Require `clawagents>=6.20.23` — skill tool filtering + aliases, apply_patch matching, MCP reconnect/timeout, compaction tool_calls_meta fix; clear `pendingSettingsPatch` on save error; Bedrock AWS env clear + wire_api reset on leave.
 
 ## 1.0.107
 

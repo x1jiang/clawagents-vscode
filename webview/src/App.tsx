@@ -1227,6 +1227,13 @@ export function App() {
           setBusy(false);
           streamingRef.current = false;
           commitRunCost(runUsageRef.current);
+          // A failed settings save posts type:"error" without saveOutcome —
+          // clear the sticky pending patch so later Settings edits can save.
+          if (pendingSettingsPatch.current) {
+            pendingSettingsPatch.current = null;
+            inflightSettingsKey.current = "";
+            settingsAutosaveReady.current = true;
+          }
           if (msg.message === "cancelled") {
             setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
           } else {

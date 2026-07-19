@@ -64,8 +64,24 @@ def _bedrock_api_key(*, mantle: bool = False) -> str:
         return "bedrock"
 
 
-def _apply_aws_settings(settings: dict[str, Any]) -> None:
-    """Push region/profile from Settings into env for native Bedrock."""
+def _apply_aws_settings(settings: dict[str, Any], *, active: bool = True) -> None:
+    """Push or clear region/profile in env for native Bedrock.
+
+    When ``active`` is False (provider left Bedrock), clear keys this helper
+    previously set so later subprocesses do not inherit stale AWS credentials.
+    """
+    if not active:
+        for key in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+            # Only drop values that match current settings — do not clobber a
+            # user-exported shell profile unrelated to ClawAgents Settings.
+            wanted = ""
+            if key in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+                wanted = str(settings.get("aws_region") or "").strip()
+            elif key == "AWS_PROFILE":
+                wanted = str(settings.get("aws_profile") or "").strip()
+            if wanted and os.environ.get(key) == wanted:
+                os.environ.pop(key, None)
+        return
     region = str(settings.get("aws_region") or "").strip()
     if region:
         os.environ["AWS_REGION"] = region
@@ -73,6 +89,9 @@ def _apply_aws_settings(settings: dict[str, Any]) -> None:
     profile = str(settings.get("aws_profile") or "").strip()
     if profile:
         os.environ["AWS_PROFILE"] = profile
+    elif "AWS_PROFILE" in os.environ and not profile:
+        # Settings cleared the profile — drop the process override.
+        os.environ.pop("AWS_PROFILE", None)
 
 
 # Host appends editor snippets under this marker (see webviewProvider.runTask).
@@ -684,7 +703,10 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     if provider.startswith("profile:"):
         kwargs["profile"] = provider.split(":", 1)[1]
     elif use_bedrock:
-        _apply_aws_settings(settings)
+        _apply_aws_settings(settings, active=True)
+    else:
+        # Leaving Bedrock — clear process env this helper previously set.
+        _apply_aws_settings(settings, active=False)
         if mode == "mantle" and not kwargs.get("base_url"):
             region = str(settings.get("aws_region") or "").strip() or "us-east-1"
             kwargs["base_url"] = f"https://bedrock-mantle.{region}.api.aws/v1"
