@@ -702,11 +702,10 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     )
     if provider.startswith("profile:"):
         kwargs["profile"] = provider.split(":", 1)[1]
+        # Not Bedrock — drop AWS env this helper may have set earlier.
+        _apply_aws_settings(settings, active=False)
     elif use_bedrock:
         _apply_aws_settings(settings, active=True)
-    else:
-        # Leaving Bedrock — clear process env this helper previously set.
-        _apply_aws_settings(settings, active=False)
         if mode == "mantle" and not kwargs.get("base_url"):
             region = str(settings.get("aws_region") or "").strip() or "us-east-1"
             kwargs["base_url"] = f"https://bedrock-mantle.{region}.api.aws/v1"
@@ -743,6 +742,10 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         # No explicit model: route default model/key selection through the
         # builtin profile so the provider choice actually takes effect.
         kwargs["profile"] = provider
+        _apply_aws_settings(settings, active=False)
+    else:
+        # Leaving Bedrock — clear process env this helper previously set.
+        _apply_aws_settings(settings, active=False)
 
     # Always pass the host-injected key explicitly so workspace .env cannot
     # replace it mid-process via load_dotenv(override=True).

@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.110
+
+- Hotfix: restore Bedrock kwargs under `elif use_bedrock` (1.0.108 nested them under `else`, leaving a dangling `elif` → sidecar SyntaxError).
+
 ## 1.0.109
 
 - Require `clawagents>=6.20.24` — Bedrock geo id tighten + skill drain preflight.
@@ -567,6 +571,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.110
+
+- Hotfix: restore Bedrock kwargs under `elif use_bedrock` (1.0.108 nested them under `else`, leaving a dangling `elif` → sidecar SyntaxError).
 
 ## 1.0.109
 
