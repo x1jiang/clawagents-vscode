@@ -1091,9 +1091,11 @@ async def run_chat_turn(
     # Cut tool-loop churn: named paths → read once → answer (Luna cost driver).
     instructions.append(
         "Tool efficiency: when the user names exact file paths, read those files "
-        "directly (`read_file`) — do not grep/search to rediscover them. Once you "
-        "have the requested facts, stop and answer; do not run extra exploratory "
-        "tools or load skills unless clearly required."
+        "directly (`read_file`) — do not grep/search to rediscover them. When they "
+        "also name symbols, prefer scoped grep then one bounded read — do not page "
+        "a large file sequentially. Once you have the requested facts, stop and "
+        "answer; do not re-read the same range or load skills unless required. "
+        "Use activate_tool_group for optional web/git/pty tools."
     )
     if caveman:
         instructions.append(CAVEMAN_INSTRUCTION)
@@ -1263,7 +1265,17 @@ async def run_chat_turn(
         "cached_input_tokens": 0,
         "cache_creation_tokens": 0,
         "last_input_tokens": 0,
+        "request_count": 0,
+        "max_input_tokens": 0,
+        "long_context_request_count": 0,
+        "run_cost_usd": 0.0,
     }
+    model_id_for_cost = str(
+        kwargs.get("model") or settings.get("model") or MODEL or ""
+    )
+    provider_for_cost = str(
+        kwargs.get("provider") or settings.get("provider") or ""
+    )
 
     def _ev_usage_int(ev: Any, *names: str) -> int:
         """Read a usage int from typed StreamEvent fields or ``ev.data``."""
@@ -1370,9 +1382,9 @@ async def run_chat_turn(
                 },
             )
         elif kind == "usage":
-            # Cumulative across LLM calls this run (for cost / totals).
-            # Cache fields come from UsageEvent (clawagents≥6.20.27) or
-            # ev.data (older wheels that only stuffed them into data=).
+            # Cumulative across LLM calls this run (for totals / cache %).
+            # Cost is summed per-request so the >272K long-context multiplier
+            # applies only to requests that actually exceed the cliff.
             inp = _ev_usage_int(ev, "input_tokens")
             out = _ev_usage_int(ev, "output_tokens")
             tot = _ev_usage_int(ev, "total_tokens")
@@ -1385,6 +1397,26 @@ async def run_chat_turn(
             usage_totals["total_tokens"] += tot
             usage_totals["cached_input_tokens"] += cached
             usage_totals["cache_creation_tokens"] += created
+            usage_totals["request_count"] = int(usage_totals["request_count"]) + 1
+            usage_totals["max_input_tokens"] = max(
+                int(usage_totals["max_input_tokens"]), inp
+            )
+            if inp > 272_000:
+                usage_totals["long_context_request_count"] = (
+                    int(usage_totals["long_context_request_count"]) + 1
+                )
+            req_cost = estimate_usd(
+                model_id_for_cost,
+                prompt_tokens=inp,
+                completion_tokens=out,
+                cached_input_tokens=cached,
+                cache_creation_tokens=created,
+                provider=provider_for_cost,
+            )
+            if req_cost is not None:
+                usage_totals["run_cost_usd"] = float(
+                    usage_totals["run_cost_usd"]
+                ) + float(req_cost)
             # Context meter needs the *latest* prompt size, not the sum —
             # summing every tool-loop round falsely pegs the bar at 100%.
             usage_totals["last_input_tokens"] = inp
@@ -1524,6 +1556,28 @@ async def run_chat_turn(
     # last_input_tokens = size of the final LLM request (context meter).
     # prompt_tokens = sum across all rounds (run cumulative) — do not conflate.
     last_input_n = int(usage_totals.get("last_input_tokens") or 0)
+    request_count = int(usage_totals.get("request_count") or 0)
+    max_input_n = int(usage_totals.get("max_input_tokens") or 0)
+    long_ctx_n = int(usage_totals.get("long_context_request_count") or 0)
+    # Prefer summed per-request costs (correct for the 272K cliff). Fall back
+    # to a single estimate on the cumulative blob only when no per-request
+    # samples arrived (older engines / empty usage stream).
+    run_cost_accum = usage_totals.get("run_cost_usd")
+    if request_count > 0 and isinstance(run_cost_accum, (int, float)):
+        run_cost_f = float(run_cost_accum)
+    else:
+        run_cost = estimate_usd(
+            model_id_for_cost,
+            prompt_tokens=prompt_n,
+            completion_tokens=completion_n,
+            cached_input_tokens=cached_n,
+            cache_creation_tokens=created_n,
+            provider=provider_for_cost,
+        )
+        run_cost_f = float(run_cost) if run_cost is not None else None
+    # Rough next-prompt estimate: last request size (history+tools+system after
+    # this turn). Not chars÷4 — that understates schema/system overhead.
+    next_prompt_est = last_input_n or max_input_n or 0
     usage_payload = {
         "prompt_tokens": prompt_n,
         "completion_tokens": completion_n,
@@ -1531,21 +1585,11 @@ async def run_chat_turn(
         "cached_input_tokens": cached_n,
         "cache_creation_tokens": created_n,
         "last_input_tokens": last_input_n,
+        "request_count": request_count,
+        "max_input_tokens": max_input_n,
+        "long_context_request_count": long_ctx_n,
+        "next_prompt_est_tokens": next_prompt_est,
     }
-    model_id = str(kwargs.get("model") or settings.get("model") or MODEL or "")
-    provider = str(
-        kwargs.get("provider") or settings.get("provider") or ""
-    )
-    run_cost = estimate_usd(
-        model_id,
-        prompt_tokens=prompt_n,
-        completion_tokens=completion_n,
-        cached_input_tokens=cached_n,
-        cache_creation_tokens=created_n,
-        provider=provider,
-    )
-    # Unknown model → omit cost (do not coerce to $0.00).
-    run_cost_f = float(run_cost) if run_cost is not None else None
 
     latest = get_chat(chat_id) or meta
     prev_session = float(latest.get("session_cost_usd") or 0.0)

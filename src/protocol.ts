@@ -97,6 +97,10 @@ export type HostToWebview =
       runCostUsd?: number;
       sessionCostUsd?: number;
       lastInputTokens?: number;
+      requestCount?: number;
+      maxInputTokens?: number;
+      longContextRequestCount?: number;
+      nextPromptEstTokens?: number;
     }
   | {
       type: "compact_progress";

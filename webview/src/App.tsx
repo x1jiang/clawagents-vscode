@@ -655,6 +655,11 @@ export function App() {
     cachedInputTokens?: number;
     cacheCreationTokens?: number;
     lastInputTokens?: number;
+    requestCount?: number;
+    maxInputTokens?: number;
+    longContextRequestCount?: number;
+    nextPromptEstTokens?: number;
+    runCostUsd?: number;
   }>({});
   const [compactPhase, setCompactPhase] = useState<string | undefined>();
   const [checkpoints, setCheckpoints] = useState<
@@ -678,6 +683,11 @@ export function App() {
     cachedInputTokens?: number;
     cacheCreationTokens?: number;
     lastInputTokens?: number;
+    requestCount?: number;
+    maxInputTokens?: number;
+    longContextRequestCount?: number;
+    nextPromptEstTokens?: number;
+    runCostUsd?: number;
   }>({});
   const modelRef = useRef("");
   const modelMetaRef = useRef<ModelPrice | undefined>(undefined);
@@ -1235,6 +1245,15 @@ export function App() {
             cacheCreationTokens: msg.cacheCreationTokens,
             lastInputTokens:
               msg.lastInputTokens ?? runUsageRef.current?.lastInputTokens,
+            requestCount: msg.requestCount ?? runUsageRef.current?.requestCount,
+            maxInputTokens:
+              msg.maxInputTokens ?? runUsageRef.current?.maxInputTokens,
+            longContextRequestCount:
+              msg.longContextRequestCount ??
+              runUsageRef.current?.longContextRequestCount,
+            nextPromptEstTokens:
+              msg.nextPromptEstTokens ?? runUsageRef.current?.nextPromptEstTokens,
+            runCostUsd: msg.runCostUsd ?? runUsageRef.current?.runCostUsd,
           };
           runUsageRef.current = next;
           setUsage(next);
@@ -1304,6 +1323,12 @@ export function App() {
               cachedInputTokens: u.cached_input_tokens ?? u.cache_read_tokens,
               cacheCreationTokens: u.cache_creation_tokens,
               lastInputTokens: lastIn,
+              requestCount: u.request_count,
+              maxInputTokens: u.max_input_tokens,
+              longContextRequestCount: u.long_context_request_count,
+              nextPromptEstTokens: u.next_prompt_est_tokens,
+              runCostUsd:
+                typeof u.run_cost_usd === "number" ? u.run_cost_usd : undefined,
             };
             runUsageRef.current = finalUsage;
             setUsage(finalUsage);
@@ -1856,15 +1881,20 @@ export function App() {
     return () => window.clearInterval(id);
   }, [lastCheckpointTs]);
   const lastCheckpointLabel = formatCheckpointWhen(lastCheckpointTs, nowTick);
-  const runCost = estimateCostUsd(
-    activeModelId || model,
-    promptTok,
-    completionTok,
-    activeModelMeta,
-    selectedProvider,
-    cachedTok,
-    cacheCreateTok,
-  );
+  // Prefer server-summed per-request cost (correct for >272K cliff). Fall back
+  // to a local estimate on cumulative tokens only when the sidecar omitted it.
+  const runCost =
+    typeof usage.runCostUsd === "number"
+      ? usage.runCostUsd
+      : estimateCostUsd(
+          activeModelId || model,
+          promptTok,
+          completionTok,
+          activeModelMeta,
+          selectedProvider,
+          cachedTok,
+          cacheCreateTok,
+        );
   // While a run is in flight, include its live estimate in the session total.
   const sessionCostShown =
     sessionCostUsd + (busy && runCost != null ? runCost : 0);
@@ -2221,24 +2251,40 @@ export function App() {
               compact · {compactPhase}
             </span>
           )}
-          {totalTok > 0 && (
+          {(contextTok > 0 || totalTok > 0) && (
             <span
               className="meta-stat"
               title={
-                `Run cumulative: ${promptTok.toLocaleString()} in / ${completionTok.toLocaleString()} out` +
-                (cachedTok
-                  ? ` · ${cachedTok.toLocaleString()} cache read${
-                      cacheCreateTok
-                        ? ` · ${cacheCreateTok.toLocaleString()} cache write`
-                        : ""
-                    }`
+                `Current request ${contextTok.toLocaleString()} in` +
+                ` · Run ${promptTok.toLocaleString()} in / ${completionTok.toLocaleString()} out` +
+                (usage.requestCount
+                  ? ` across ${usage.requestCount} request(s)`
                   : "") +
-                (usage.lastInputTokens
-                  ? ` · last request ${usage.lastInputTokens.toLocaleString()} in (context meter)`
+                (usage.maxInputTokens
+                  ? ` · max ${usage.maxInputTokens.toLocaleString()}`
+                  : "") +
+                (usage.longContextRequestCount
+                  ? ` · ${usage.longContextRequestCount} long-context (>272K)`
+                  : "") +
+                (usage.nextPromptEstTokens
+                  ? ` · next prompt est. ${usage.nextPromptEstTokens.toLocaleString()}`
+                  : "") +
+                (cachedTok
+                  ? ` · ${cachedTok.toLocaleString()} cache read`
                   : "")
               }
             >
-              {totalTok.toLocaleString()} tok
+              {contextTok > 0
+                ? `${(contextTok / 1000).toFixed(contextTok >= 10_000 ? 0 : 1)}K`
+                : "—"}
+              {" · "}
+              {(promptTok / 1000).toFixed(promptTok >= 10_000 ? 0 : 1)}K
+              {cacheHitPct != null ? ` · ${cacheHitPct}% cached` : ""}
+              {usage.nextPromptEstTokens
+                ? ` · next ~${(usage.nextPromptEstTokens / 1000).toFixed(
+                    usage.nextPromptEstTokens >= 10_000 ? 0 : 1,
+                  )}K`
+                : ""}
             </span>
           )}
           {cacheHitPct != null && (

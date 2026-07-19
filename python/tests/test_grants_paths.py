@@ -248,6 +248,28 @@ class GrantPathTests(unittest.TestCase):
         )
         self.assertAlmostEqual(claude or 0, 0.90, places=4)  # 300k @ $3/M
 
+    def test_pricing_per_request_not_cumulative(self) -> None:
+        """Two 150K requests must NOT trigger the 272K cliff via summing."""
+        for mod in ("pricing",):
+            sys.modules.pop(mod, None)
+        import pricing as pricing_mod  # noqa: WPS433
+
+        a = pricing_mod.estimate_usd(
+            "gpt-5.6-luna", prompt_tokens=150_000, completion_tokens=0
+        )
+        b = pricing_mod.estimate_usd(
+            "gpt-5.6-luna", prompt_tokens=150_000, completion_tokens=0
+        )
+        summed = (a or 0) + (b or 0)
+        # Each 150k @ $1/M = $0.15 → $0.30 total
+        self.assertAlmostEqual(summed, 0.30, places=4)
+        # Wrong approach: estimate on the sum would 2× → $0.60
+        wrong = pricing_mod.estimate_usd(
+            "gpt-5.6-luna", prompt_tokens=300_000, completion_tokens=0
+        )
+        self.assertAlmostEqual(wrong or 0, 0.60, places=4)
+        self.assertLess(summed, (wrong or 0) - 0.01)
+
 
 if __name__ == "__main__":
     unittest.main()

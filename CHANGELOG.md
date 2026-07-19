@@ -1,3 +1,8 @@
+## 1.0.116
+
+- Per-request cost summing (no false >272K cliff on run totals); request/max/long-context stats
+- Three-number token header: current · run · next est; require clawagents≥6.20.29
+
 ## 1.0.115
 
 - **Luna efficiency:** reject compact that grows context; charge compact usage/cost; context meter uses last-request tokens (not run-cumulative); GPT-5.6 >272K long-context pricing (2× input / 1.5× output); tool-efficiency turn guidance.

@@ -200,6 +200,14 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
         sessionCostUsd: num(data.session_cost_usd ?? data.sessionCostUsd),
         // Only the dedicated field — prompt_tokens is run-cumulative.
         lastInputTokens: num(data.last_input_tokens),
+        requestCount: num(data.request_count ?? data.requestCount),
+        maxInputTokens: num(data.max_input_tokens ?? data.maxInputTokens),
+        longContextRequestCount: num(
+          data.long_context_request_count ?? data.longContextRequestCount,
+        ),
+        nextPromptEstTokens: num(
+          data.next_prompt_est_tokens ?? data.nextPromptEstTokens,
+        ),
       };
     case "compact_progress":
       return {
@@ -573,6 +581,10 @@ export class GatewayClient {
                   lastInputTokens: num(data.last_input_tokens),
                   runCostUsd: num(usageObj.run_cost_usd),
                   sessionCostUsd: num(usageObj.session_cost_usd),
+                  requestCount: num(data.request_count),
+                  maxInputTokens: num(data.max_input_tokens),
+                  longContextRequestCount: num(data.long_context_request_count),
+                  nextPromptEstTokens: num(data.next_prompt_est_tokens),
                 });
               } else if (ev.event === "done") {
                 const usageObj =
