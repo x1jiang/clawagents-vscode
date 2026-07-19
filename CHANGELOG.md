@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.106
+
+- Require `clawagents>=6.20.21` — nested array-of-object MCP/tool schemas (Gemini 400 fix); model-identity system prompt line.
+
 ## 1.0.105
 
 - Require `clawagents>=6.20.20` — `use_skill(continue=true)`, code-before-html crush, `retrieve_tool_result` under skill gate.

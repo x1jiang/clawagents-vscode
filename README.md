@@ -50,7 +50,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 
 Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
 
-## Companions (lockstep with clawagents ≥6.20.20)
+## Companions (lockstep with clawagents ≥6.20.21)
 
 | Companion | Floor | Auto-ensure | Manual |
 | --- | --- | --- | --- |
