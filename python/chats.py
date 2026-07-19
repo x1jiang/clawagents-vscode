@@ -561,6 +561,13 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
     backup.write_text(raw, encoding="utf-8")
 
     summary_text = ""
+    compact_usage: dict[str, Any] = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_creation_tokens": 0,
+        "model": "",
+    }
     settings = load_settings()
     model = (settings.get("model") or MODEL or "").strip()
     if can_drop_turns and model and model.lower() not in ("default",):
@@ -596,6 +603,27 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
                 tools=None,
             )
             summary_text = (resp.content or "").strip()
+            compact_usage = {
+                "prompt_tokens": int(
+                    getattr(resp, "prompt_tokens", 0)
+                    or getattr(resp, "input_tokens", 0)
+                    or 0
+                ),
+                "completion_tokens": int(
+                    getattr(resp, "completion_tokens", 0)
+                    or getattr(resp, "output_tokens", 0)
+                    or 0
+                ),
+                "cached_input_tokens": int(
+                    getattr(resp, "cache_read_tokens", 0)
+                    or getattr(resp, "cached_input_tokens", 0)
+                    or 0
+                ),
+                "cache_creation_tokens": int(
+                    getattr(resp, "cache_creation_tokens", 0) or 0
+                ),
+                "model": str(getattr(resp, "model", None) or model),
+            }
         except Exception:  # noqa: BLE001
             summary_text = ""
 
@@ -630,9 +658,90 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
         )
 
     kept_lines = [json.dumps(m, ensure_ascii=False) for m in kept_msgs]
-    mem.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
     after_chars = sum(len(ln) for ln in kept_lines)
     est_tokens_after = max(1, after_chars // 4)
+
+    def _charge_compact_usage() -> float | None:
+        """Bill the summarizer call even when the rewrite is rejected."""
+        try:
+            cost = estimate_usd(
+                str(compact_usage.get("model") or model),
+                prompt_tokens=int(compact_usage.get("prompt_tokens") or 0),
+                completion_tokens=int(compact_usage.get("completion_tokens") or 0),
+                cached_input_tokens=int(compact_usage.get("cached_input_tokens") or 0),
+                cache_creation_tokens=int(
+                    compact_usage.get("cache_creation_tokens") or 0
+                ),
+                provider=str(settings.get("provider") or ""),
+            )
+        except Exception:  # noqa: BLE001
+            return None
+        if cost is None or cost <= 0:
+            return cost
+        latest = get_chat(chat_id) or {}
+        prev = float(latest.get("session_cost_usd") or 0.0)
+        patch_chat(
+            chat_id,
+            session_cost_usd=prev + float(cost),
+            session_prompt_tokens=int(latest.get("session_prompt_tokens") or 0)
+            + int(compact_usage.get("prompt_tokens") or 0),
+            session_completion_tokens=int(latest.get("session_completion_tokens") or 0)
+            + int(compact_usage.get("completion_tokens") or 0),
+            session_total_tokens=int(latest.get("session_total_tokens") or 0)
+            + int(compact_usage.get("prompt_tokens") or 0)
+            + int(compact_usage.get("completion_tokens") or 0),
+        )
+        return cost
+
+    # Never accept a "successful" compact that grows (or barely shrinks) stored
+    # context — that resets the UI meter while leaving the session larger.
+    saved = est_tokens_before - est_tokens_after
+    min_save_tokens = 100
+    min_save_ratio = 0.05
+    if saved < min_save_tokens and saved < int(est_tokens_before * min_save_ratio):
+        mem.write_text(raw, encoding="utf-8")  # restore pre-compact backup body
+        try:
+            backup.unlink(missing_ok=True)  # type: ignore[call-arg]
+        except TypeError:
+            if backup.exists():
+                backup.unlink()
+        except OSError:
+            pass
+        reject_cost = _charge_compact_usage()
+        append_ui_event(
+            chat_id,
+            {
+                "kind": "status",
+                "text": (
+                    f"Compact rejected — would not shrink "
+                    f"(~{est_tokens_before} → ~{est_tokens_after} tokens). "
+                    "Original session kept."
+                    + (
+                        f" · summarizer ~${reject_cost:.4f}"
+                        if reject_cost is not None and reject_cost > 0
+                        else ""
+                    )
+                ),
+            },
+        )
+        return {
+            "compacted": False,
+            "reason": (
+                f"compaction would not reduce tokens "
+                f"(~{est_tokens_before} → ~{est_tokens_after}); kept original"
+            ),
+            "before": len(parsed),
+            "after": len(parsed),
+            "est_tokens_before": est_tokens_before,
+            "est_tokens_after": est_tokens_before,
+            "rejected_growth": True,
+            "meter_reset": False,
+            "usage": compact_usage,
+            "compact_cost_usd": reject_cost,
+        }
+
+    mem.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
+    compact_cost = _charge_compact_usage()
 
     append_ui_event(
         chat_id,
@@ -641,6 +750,11 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
             "text": (
                 f"Compacted session ({len(parsed)} → {len(kept_msgs)} messages, "
                 f"~{est_tokens_before} → ~{est_tokens_after} tokens)"
+                + (
+                    f" · compact ~${compact_cost:.4f}"
+                    if compact_cost is not None and compact_cost > 0
+                    else ""
+                )
             ),
         },
     )
@@ -652,6 +766,8 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
         "est_tokens_after": est_tokens_after,
         "backup": backup.name,
         "meter_reset": True,
+        "usage": compact_usage,
+        "compact_cost_usd": compact_cost,
     }
 
 
@@ -972,6 +1088,13 @@ async def run_chat_turn(
             "You are in ask mode. Prefer explaining and proposing changes "
             "over writing files or running shell commands unless explicitly asked."
         )
+    # Cut tool-loop churn: named paths → read once → answer (Luna cost driver).
+    instructions.append(
+        "Tool efficiency: when the user names exact file paths, read those files "
+        "directly (`read_file`) — do not grep/search to rediscover them. Once you "
+        "have the requested facts, stop and answer; do not run extra exploratory "
+        "tools or load skills unless clearly required."
+    )
     if caveman:
         instructions.append(CAVEMAN_INSTRUCTION)
     if goal:
@@ -1139,6 +1262,7 @@ async def run_chat_turn(
         "total_tokens": 0,
         "cached_input_tokens": 0,
         "cache_creation_tokens": 0,
+        "last_input_tokens": 0,
     }
 
     def _ev_usage_int(ev: Any, *names: str) -> int:
@@ -1263,6 +1387,7 @@ async def run_chat_turn(
             usage_totals["cache_creation_tokens"] += created
             # Context meter needs the *latest* prompt size, not the sum —
             # summing every tool-loop round falsely pegs the bar at 100%.
+            usage_totals["last_input_tokens"] = inp
             on_event(
                 "usage",
                 {
@@ -1358,9 +1483,12 @@ async def run_chat_turn(
     out_text = out if isinstance(out, str) else str(out)
 
     usage = getattr(result, "usage", None)
-    usage_payload: dict[str, Any] = {}
+    result_usage: dict[str, Any] = {}
     if usage is not None:
-        usage_payload = {
+        # Do NOT emit a usage event here — result.usage is often a single-call
+        # blob without last_input_tokens, and the webview used to treat missing
+        # last_input as prompt_tokens (run-cumulative), resetting the meter.
+        result_usage = {
             "prompt_tokens": getattr(usage, "prompt_tokens", None)
             or getattr(usage, "input_tokens", None),
             "completion_tokens": getattr(usage, "completion_tokens", None)
@@ -1371,35 +1499,38 @@ async def run_chat_turn(
             or getattr(usage, "cache_read_tokens", None),
             "cache_creation_tokens": getattr(usage, "cache_creation_tokens", None),
         }
-        on_event("usage", usage_payload)
 
     # Prefer turn-accumulated totals (all LLM calls this run) over the last
     # response's usage blob when both exist.
-    prompt_n = int(usage_totals.get("prompt_tokens") or usage_payload.get("prompt_tokens") or 0)
+    prompt_n = int(usage_totals.get("prompt_tokens") or result_usage.get("prompt_tokens") or 0)
     completion_n = int(
-        usage_totals.get("completion_tokens") or usage_payload.get("completion_tokens") or 0
+        usage_totals.get("completion_tokens") or result_usage.get("completion_tokens") or 0
     )
     total_n = int(
         usage_totals.get("total_tokens")
-        or usage_payload.get("total_tokens")
+        or result_usage.get("total_tokens")
         or (prompt_n + completion_n)
     )
     cached_n = int(
         usage_totals.get("cached_input_tokens")
-        or usage_payload.get("cached_input_tokens")
+        or result_usage.get("cached_input_tokens")
         or 0
     )
     created_n = int(
         usage_totals.get("cache_creation_tokens")
-        or usage_payload.get("cache_creation_tokens")
+        or result_usage.get("cache_creation_tokens")
         or 0
     )
+    # last_input_tokens = size of the final LLM request (context meter).
+    # prompt_tokens = sum across all rounds (run cumulative) — do not conflate.
+    last_input_n = int(usage_totals.get("last_input_tokens") or 0)
     usage_payload = {
         "prompt_tokens": prompt_n,
         "completion_tokens": completion_n,
         "total_tokens": total_n,
         "cached_input_tokens": cached_n,
         "cache_creation_tokens": created_n,
+        "last_input_tokens": last_input_n,
     }
     model_id = str(kwargs.get("model") or settings.get("model") or MODEL or "")
     provider = str(

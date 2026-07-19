@@ -198,9 +198,8 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
         ),
         runCostUsd: num(data.run_cost_usd ?? data.runCostUsd),
         sessionCostUsd: num(data.session_cost_usd ?? data.sessionCostUsd),
-        lastInputTokens: num(
-          data.last_input_tokens ?? data.prompt_tokens ?? data.input_tokens,
-        ),
+        // Only the dedicated field — prompt_tokens is run-cumulative.
+        lastInputTokens: num(data.last_input_tokens),
       };
     case "compact_progress":
       return {
@@ -571,9 +570,7 @@ export class GatewayClient {
                     data.cached_input_tokens ?? data.cache_read_tokens,
                   ),
                   cacheCreationTokens: num(data.cache_creation_tokens),
-                  lastInputTokens: num(
-                    data.last_input_tokens ?? data.prompt_tokens ?? data.input_tokens,
-                  ),
+                  lastInputTokens: num(data.last_input_tokens),
                   runCostUsd: num(usageObj.run_cost_usd),
                   sessionCostUsd: num(usageObj.session_cost_usd),
                 });

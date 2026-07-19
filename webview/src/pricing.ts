@@ -175,6 +175,16 @@ function lookup(
   return lookupTable(other, key);
 }
 
+/** GPT-5.6: >272K input → 2× input-side rates, 1.5× output (full request). */
+const LONG_CONTEXT_THRESHOLD = 272_000;
+const LONG_CONTEXT_INPUT_MULT = 2;
+const LONG_CONTEXT_OUTPUT_MULT = 1.5;
+
+function isGpt56Family(modelId: string): boolean {
+  const key = normalizeModelId(modelId);
+  return key.startsWith("gpt-5.6") || key.includes("gpt-5.6");
+}
+
 export function estimateCostUsd(
   modelId: string,
   promptTokens: number,
@@ -193,12 +203,22 @@ export function estimateCostUsd(
   const cached = Math.min(Math.max(0, cachedInputTokens || 0), prompt);
   const uncached = prompt - cached;
   const creation = Math.max(0, cacheCreationTokens || 0);
-  const writePremium = Math.max(0, rates.cacheWrite - rates.input);
+  let inp = rates.input;
+  let out = rates.output;
+  let cachedRate = rates.cachedInput;
+  let writeRate = rates.cacheWrite;
+  if (prompt > LONG_CONTEXT_THRESHOLD && isGpt56Family(modelId)) {
+    inp *= LONG_CONTEXT_INPUT_MULT;
+    cachedRate *= LONG_CONTEXT_INPUT_MULT;
+    writeRate *= LONG_CONTEXT_INPUT_MULT;
+    out *= LONG_CONTEXT_OUTPUT_MULT;
+  }
+  const writePremium = Math.max(0, writeRate - inp);
   return (
-    (uncached / 1_000_000) * rates.input +
-    (cached / 1_000_000) * rates.cachedInput +
+    (uncached / 1_000_000) * inp +
+    (cached / 1_000_000) * cachedRate +
     (creation / 1_000_000) * writePremium +
-    (completion / 1_000_000) * rates.output
+    (completion / 1_000_000) * out
   );
 }
 

@@ -677,6 +677,7 @@ export function App() {
     totalTokens?: number;
     cachedInputTokens?: number;
     cacheCreationTokens?: number;
+    lastInputTokens?: number;
   }>({});
   const modelRef = useRef("");
   const modelMetaRef = useRef<ModelPrice | undefined>(undefined);
@@ -1224,13 +1225,16 @@ export function App() {
           }
           break;
         case "usage": {
+          // Never treat missing lastInputTokens as promptTokens — the latter is
+          // run-cumulative and would inflate the context meter after multi-round loops.
           const next = {
             promptTokens: msg.promptTokens,
             completionTokens: msg.completionTokens,
             totalTokens: msg.totalTokens,
             cachedInputTokens: msg.cachedInputTokens,
             cacheCreationTokens: msg.cacheCreationTokens,
-            lastInputTokens: msg.lastInputTokens ?? msg.promptTokens,
+            lastInputTokens:
+              msg.lastInputTokens ?? runUsageRef.current?.lastInputTokens,
           };
           runUsageRef.current = next;
           setUsage(next);
@@ -1287,12 +1291,19 @@ export function App() {
           let serverRun: number | undefined = msg.runCostUsd;
           if (msg.usage && typeof msg.usage === "object") {
             const u = msg.usage as Record<string, number>;
+            // prompt_tokens = run-cumulative (sum of rounds). last_input_tokens =
+            // size of the latest LLM request — that alone drives the context %.
+            const lastIn =
+              typeof u.last_input_tokens === "number" && u.last_input_tokens > 0
+                ? u.last_input_tokens
+                : runUsageRef.current?.lastInputTokens;
             finalUsage = {
               promptTokens: u.prompt_tokens,
               completionTokens: u.completion_tokens,
               totalTokens: u.total_tokens,
               cachedInputTokens: u.cached_input_tokens ?? u.cache_read_tokens,
               cacheCreationTokens: u.cache_creation_tokens,
+              lastInputTokens: lastIn,
             };
             runUsageRef.current = finalUsage;
             setUsage(finalUsage);
@@ -1827,10 +1838,10 @@ export function App() {
     promptTok > 0 && cachedTok > 0
       ? Math.round(Math.min(100, (cachedTok / promptTok) * 100))
       : null;
-  const ctx = contextUsage(
-    activeModelId || model,
-    usage.lastInputTokens || promptTok || 0,
-  );
+  // Context % = latest request size only. Fall back to promptTok only when
+  // we have never received a last-request sample (pre-fix chats / legacy).
+  const contextTok = usage.lastInputTokens || (busy ? 0 : promptTok) || 0;
+  const ctx = contextUsage(activeModelId || model, contextTok);
   const ctxPct = ctx ? Math.round(Math.min(1, ctx.ratio) * 100) : null;
   const lastCheckpointTs = useMemo(() => {
     for (const row of checkpoints) {
@@ -2213,13 +2224,19 @@ export function App() {
           {totalTok > 0 && (
             <span
               className="meta-stat"
-              title={`${promptTok.toLocaleString()} in / ${completionTok.toLocaleString()} out${
-                cachedTok
+              title={
+                `Run cumulative: ${promptTok.toLocaleString()} in / ${completionTok.toLocaleString()} out` +
+                (cachedTok
                   ? ` · ${cachedTok.toLocaleString()} cache read${
-                      cacheCreateTok ? ` · ${cacheCreateTok.toLocaleString()} cache write` : ""
+                      cacheCreateTok
+                        ? ` · ${cacheCreateTok.toLocaleString()} cache write`
+                        : ""
                     }`
-                  : ""
-              } (this run)`}
+                  : "") +
+                (usage.lastInputTokens
+                  ? ` · last request ${usage.lastInputTokens.toLocaleString()} in (context meter)`
+                  : "")
+              }
             >
               {totalTok.toLocaleString()} tok
             </span>
@@ -2227,7 +2244,7 @@ export function App() {
           {cacheHitPct != null && (
             <span
               className="meta-stat cache-hit"
-              title={`${cachedTok.toLocaleString()} of ${promptTok.toLocaleString()} prompt tokens hit the provider cache${
+              title={`${cachedTok.toLocaleString()} of ${promptTok.toLocaleString()} run-cumulative prompt tokens hit the provider cache${
                 cacheCreateTok
                   ? ` · ${cacheCreateTok.toLocaleString()} written to cache`
                   : ""
@@ -2299,9 +2316,8 @@ export function App() {
               className="tool-chip compact-action"
               title={
                 ctx && ctxPct != null
-                  ? `Context ~${ctxPct}% (${(
-                      usage.lastInputTokens || promptTok
-                    ).toLocaleString()} / ${ctx.window.toLocaleString()}) — compact session`
+                  ? `Current-request context ~${ctxPct}% (${contextTok.toLocaleString()} / ${ctx.window.toLocaleString()}). ` +
+                    `Not run-cumulative tokens. Compact session (/compact).`
                   : "Compact session (/compact)"
               }
               disabled={compactPhase === "start"}

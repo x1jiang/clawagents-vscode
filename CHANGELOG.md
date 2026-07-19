@@ -1,4 +1,7 @@
-## Unreleased
+## 1.0.115
+
+- **Luna efficiency:** reject compact that grows context; charge compact usage/cost; context meter uses last-request tokens (not run-cumulative); GPT-5.6 >272K long-context pricing (2× input / 1.5× output); tool-efficiency turn guidance.
+- Require `clawagents>=6.20.28` — economic compaction threshold + GPT-5.6 harness.
 
 ## 1.0.114
 
@@ -590,7 +593,10 @@
 - Auto-approve: separate **Web** (fetch/search) and **Browser** (Playwright) checkboxes
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
-## Unreleased
+## 1.0.115
+
+- **Luna efficiency:** reject compact that grows context; charge compact usage/cost; context meter uses last-request tokens (not run-cumulative); GPT-5.6 >272K long-context pricing (2× input / 1.5× output); tool-efficiency turn guidance.
+- Require `clawagents>=6.20.28` — economic compaction threshold + GPT-5.6 harness.
 
 ## 1.0.114
 

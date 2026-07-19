@@ -200,6 +200,18 @@ def price_for_full(
     return _lookup_table(other, key)
 
 
+# GPT-5.6 family: prompts with >272K input tokens are priced at 2× input
+# (including cached read / cache write) and 1.5× output for the full request.
+_LONG_CONTEXT_THRESHOLD = 272_000
+_LONG_CONTEXT_INPUT_MULT = 2.0
+_LONG_CONTEXT_OUTPUT_MULT = 1.5
+
+
+def _is_gpt56_family(model_id: str) -> bool:
+    key = normalize_model_id(model_id)
+    return key.startswith("gpt-5.6") or "gpt-5.6" in key
+
+
 def estimate_usd(
     model_id: str,
     *,
@@ -226,6 +238,9 @@ def estimate_usd(
 
     The ``creation×(write−input)`` term charges only the write *premium* so we
     do not double-count tokens already in ``prompt_tokens``.
+
+    For GPT-5.6 (Sol/Terra/Luna), when ``prompt_tokens`` > 272K the full request
+    uses long-context rates: 2× all input-side rates and 1.5× output.
     """
     rates = price_for_full(model_id, provider=provider)
     if rates is None:
@@ -236,6 +251,11 @@ def estimate_usd(
     cached = min(max(0, int(cached_input_tokens or 0)), prompt)
     uncached = prompt - cached
     creation = max(0, int(cache_creation_tokens or 0))
+    if prompt > _LONG_CONTEXT_THRESHOLD and _is_gpt56_family(model_id):
+        inp *= _LONG_CONTEXT_INPUT_MULT
+        cached_rate *= _LONG_CONTEXT_INPUT_MULT
+        write_rate *= _LONG_CONTEXT_INPUT_MULT
+        out *= _LONG_CONTEXT_OUTPUT_MULT
     write_premium = max(0.0, write_rate - inp)
     return (
         (uncached / 1_000_000.0) * inp
