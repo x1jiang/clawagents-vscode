@@ -1627,10 +1627,21 @@ export function App() {
   const providerModels = allModels;
   const preferredPick = pickPreferredModel(providerCatalog);
 
-  const activeModelId =
+  const rawModelId =
     (typeof settings.model === "string" && settings.model) ||
     (model !== "default" ? model : "") ||
     "";
+  // Never render a vendor-mismatched leftover (llama3.1 under OpenAI) as the
+  // selected option — even for one frame before the persist heal runs.
+  const headerProviderId = String(settings.provider || "auto").trim().toLowerCase();
+  const activeModelId =
+    rawModelId &&
+    headerProviderId &&
+    headerProviderId !== "auto" &&
+    headerProviderId !== "bedrock" &&
+    !modelFitsProvider(rawModelId, headerProviderId)
+      ? defaultModelForProvider(headerProviderId) || rawModelId
+      : rawModelId;
   const activeModelMeta = allModels.find((m) => m.id === activeModelId);
   const headerProviderLabel = effectiveProviderLabel(
     settings,

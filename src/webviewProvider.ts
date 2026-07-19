@@ -466,7 +466,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({
       type: "ready",
       workspace: workspaceRoot(),
-      model: health?.model || this.config.model || String(settings.model || "default"),
+      // Prefer workspace settings.model — health/config leftovers (e.g. llama3.1)
+      // must not win over a healed OpenAI default.
+      model:
+        String(settings.model || "").trim() ||
+        health?.model ||
+        this.config.model ||
+        "default",
       mode: this.mode,
       interaction: this.interaction,
       caveman: this.caveman,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import json
+import re
 import threading
 from typing import Any
 
@@ -165,6 +166,84 @@ def _env_defaults() -> dict[str, Any]:
     return out
 
 
+def _looks_like_ollama_local_id(model: str) -> bool:
+    m = (model or "").strip().lower()
+    if not m:
+        return False
+    if m.startswith(
+        ("openai.", "anthropic.", "amazon.", "meta.", "deepseek.", "xai.", "zai.")
+    ) or m.startswith(("us.", "eu.", "apac.", "global.")):
+        return False
+    return bool(
+        re.match(
+            r"^(llama|llava|qwen|mistral|mixtral|phi|deepseek|codellama|gemma|nomic|tinyllama)",
+            m,
+        )
+    )
+
+
+def _default_model_for_provider(provider: str) -> str:
+    p = (provider or "").strip().lower()
+    if p == "openai":
+        return "gpt-5.6-luna"
+    if p == "gemini":
+        return "gemini-3.5-flash"
+    if p == "anthropic":
+        return "claude-sonnet-4-5"
+    if p == "ollama":
+        return "llama3.1"
+    if p == "bedrock":
+        return "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    return "gpt-5.6-luna"
+
+
+def _model_fits_provider(model: str, provider: str) -> bool:
+    m = (model or "").strip()
+    if not m:
+        return False
+    p = (provider or "").strip().lower()
+    ml = m.lower()
+    if p == "openai":
+        if _looks_like_ollama_local_id(m):
+            return False
+        if ml.startswith("claude") or "gemini" in ml:
+            return False
+        if ml.startswith(("us.", "eu.", "apac.", "global.", "amazon.", "meta.")):
+            return False
+        return True
+    if p == "anthropic":
+        return "claude" in ml or ml.startswith("anthropic.")
+    if p == "gemini":
+        return "gemini" in ml
+    if p == "ollama":
+        return _looks_like_ollama_local_id(m)
+    if p == "bedrock":
+        return True
+    return True
+
+
+def heal_incompatible_model(settings: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Replace vendor-mismatched model ids (e.g. llama3.1 under OpenAI)."""
+    prov = str(settings.get("provider") or "auto").strip().lower()
+    model = str(settings.get("model") or "").strip()
+    if not model or not prov or prov in {"auto", "bedrock"}:
+        return settings, False
+    if _model_fits_provider(model, prov):
+        return settings, False
+    nxt = _default_model_for_provider(prov)
+    if not nxt or nxt == model:
+        return settings, False
+    out = dict(settings)
+    out["model"] = nxt
+    logger.info(
+        "healed incompatible settings.model %r for provider %r → %r",
+        model,
+        prov,
+        nxt,
+    )
+    return out, True
+
+
 def load_settings() -> dict[str, Any]:
     data = read_json(SETTINGS_FILE, {})
     if not isinstance(data, dict):
@@ -181,6 +260,10 @@ def load_settings() -> dict[str, Any]:
     )
     for key in RUNTIME_ONLY_KEYS - {"trust_custom_base_url"}:
         merged[key] = bool(trust.get(key, False))
+    merged, healed = heal_incompatible_model(merged)
+    if healed:
+        to_write = {k: merged[k] for k in DEFAULTS if k in PERSISTED_KEYS}
+        atomic_write_json(SETTINGS_FILE, to_write)
     return merged
 
 
@@ -194,6 +277,7 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
     set_runtime_trust(clean, base_url=effective_base_url)
     current = load_settings()
     current.update({k: v for k, v in clean.items() if k in PERSISTED_KEYS})
+    current, _healed = heal_incompatible_model(current)
     trust = runtime_trust_snapshot()
     current["trust_custom_base_url"] = bool(
         _normalize_base_url(current.get("base_url"))

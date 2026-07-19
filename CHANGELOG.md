@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.104
+
+- Hard heal: never show vendor-mismatched models in the header (e.g. ``llama3.1`` under OpenAI); sidecar ``load_settings`` rewrites leftovers on disk.
+
 ## 1.0.103
 
 - Require `clawagents>=6.20.19` — never crush skill/control-plane tool outputs; post-edit syntax gate on write tools.
