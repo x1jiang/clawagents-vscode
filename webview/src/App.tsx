@@ -634,6 +634,8 @@ export function App() {
   const settingsRef = useRef<Record<string, unknown>>({});
   /** One-shot preferred-model fill (empty model only) — never loop on catalog mismatch. */
   const preferredModelFilled = useRef(false);
+  /** Dedupe one-shot heal of vendor-incompatible leftovers (e.g. llama3.1 on OpenAI). */
+  const incompatibleModelHealKey = useRef("");
   const historySearchTimer = useRef<number | undefined>();
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
@@ -1663,6 +1665,37 @@ export function App() {
     pendingSettingsPatch.current = patch;
     post({ type: "save_settings", settings: patch });
   }, [preferredPick.model, preferredPick.effort, post, settings]);
+
+  // Heal leftovers that cannot belong to the selected vendor (Ollama llama3.1
+  // after switching to OpenAI). Unlike "missing from catalog", this is a hard
+  // mismatch — keeping it produces 404s and a permanent "(unavailable)" header.
+  useEffect(() => {
+    const prov = String(settings.provider || "auto").trim().toLowerCase();
+    const saved =
+      typeof settings.model === "string" ? settings.model.trim() : "";
+    if (!saved || !prov || prov === "auto" || prov === "bedrock") return;
+    if (modelFitsProvider(saved, prov)) return;
+    const nextModel = defaultModelForProvider(prov);
+    if (!nextModel || nextModel === saved) return;
+    const key = `${prov}|${saved}->${nextModel}`;
+    if (incompatibleModelHealKey.current === key) return;
+    incompatibleModelHealKey.current = key;
+    const nextSettings: Record<string, unknown> = {
+      ...settings,
+      model: nextModel,
+    };
+    skipSettingsAutosave.current = true;
+    settingsRef.current = nextSettings;
+    setModel(nextModel);
+    setSettings(nextSettings);
+    const patch = normalizeSettingsForSave(nextSettings);
+    inflightSettingsKey.current = settingsSaveKey(nextSettings);
+    pendingSettingsPatch.current = patch;
+    post({ type: "save_settings", settings: patch });
+    setProviderSetupMsg(
+      `Model "${saved}" does not belong to Provider ${prov} — switched to ${nextModel}.`,
+    );
+  }, [settings, post]);
   const promptTok = usage.promptTokens || 0;
   const completionTok = usage.completionTokens || 0;
   const totalTok =
@@ -1943,6 +1976,18 @@ export function App() {
       setMode(sendMode);
       post({ type: "set_mode", mode: sendMode });
     }
+    // Never send a leftover Ollama/etc. id to OpenAI even if heal hasn't run yet.
+    const prov = String(settings.provider || "auto").trim().toLowerCase();
+    let sendModel = activeModelId || undefined;
+    if (
+      sendModel &&
+      prov &&
+      prov !== "auto" &&
+      prov !== "bedrock" &&
+      !modelFitsProvider(sendModel, prov)
+    ) {
+      sendModel = defaultModelForProvider(prov);
+    }
     post({
       type: "send",
       text: value,
@@ -1950,7 +1995,7 @@ export function App() {
       includeContext,
       chatId,
       autoApprove,
-      model: activeModelId || undefined,
+      model: sendModel,
       interaction: effectiveInteraction,
       caveman,
       goal: goalMode,

@@ -1,5 +1,4 @@
-Publisher **`clawagents`** · version **1.0.101**
+Publisher **`clawagents`** · version **1.0.102**
 
-- [x] Publish `clawagents` **6.20.18** to GitHub
-- [x] Publish `clawagents` **6.20.18** to PyPI
-- [x] GitHub release `v1.0.101` + VSIX
+- [x] clawagents **6.20.18** on GitHub + PyPI
+- [ ] GitHub release `v1.0.102` + VSIX
