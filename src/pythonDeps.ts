@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 21];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 22];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 export const MIN_CLAWAGENTS_VERSION_STR = MIN_CLAWAGENTS_VERSION.join(".");
 
@@ -344,6 +344,20 @@ async function ensureSidecarDepsOnce(
       return {
         ok: false,
         detail: `Packages installed but import still fails:\n${probe.detail}`,
+      };
+    }
+    // pip can exit 0 with a stale cached wheel below the floor — re-check.
+    if (
+      !versionAtLeast(probe.version, MIN_CLAWAGENTS_VERSION) ||
+      versionAtLeast(probe.version, MAX_CLAWAGENTS_VERSION)
+    ) {
+      return {
+        ok: false,
+        detail:
+          `Packages installed but clawagents ${probe.version || "?"} is still outside `
+          + `the required range (>=${MIN_CLAWAGENTS_VERSION_STR}, <${MAX_CLAWAGENTS_VERSION.join(".")}). `
+          + `Clear pip cache and retry:\n`
+          + `"${python}" -m pip install -U --force-reinstall ${SIDECAR_PIP_PACKAGES.map((p) => `'${p}'`).join(" ")}`,
       };
     }
     if (probe.supportsSkillsExclude === false) {

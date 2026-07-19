@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.107
+
+- Require `clawagents>=6.20.22` — Responses retry de-nest, `$ref`/`anyOf` schemas, model-prefix classifiers; post-install floor re-probe.
+
 ## 1.0.106
 
 - Require `clawagents>=6.20.21` — nested array-of-object MCP/tool schemas (Gemini 400 fix); model-identity system prompt line.
@@ -554,6 +558,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.107
+
+- Require `clawagents>=6.20.22` — Responses retry de-nest, `$ref`/`anyOf` schemas, model-prefix classifiers; post-install floor re-probe.
 
 ## 1.0.103
 
