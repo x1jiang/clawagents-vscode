@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.0.103
+
+- Require `clawagents>=6.20.19` — never crush skill/control-plane tool outputs; post-edit syntax gate on write tools.
+
 ## 1.0.102
 
 - Auto-heal saved model leftovers that cannot belong to the selected provider (e.g. ``llama3.1`` under OpenAI → preferred GPT) on load — not only on Provider switch.
@@ -538,6 +542,10 @@
 - Browser tools remain opt-in under Settings; clearer install hint when load fails
 
 ## Unreleased
+
+## 1.0.103
+
+- Require `clawagents>=6.20.19` — never crush skill/control-plane tool outputs; post-edit syntax gate on write tools.
 
 ## 1.0.102
 
