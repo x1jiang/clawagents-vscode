@@ -143,7 +143,10 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
     case "tool_skipped": {
       // Prefer non-empty text: failed tools often have output="" and the
       // real message only in `error` (bash validator / empty command).
-      const rawOut = data.output ?? data.preview ?? data.content;
+      // Engine streams a longer UI body in `output` / `ui_output` while
+      // `preview` stays short for console/model logs — never prefer preview.
+      const rawOut =
+        data.output ?? data.ui_output ?? data.content ?? data.preview;
       const err = data.error ?? data.reason;
       const outText =
         (typeof rawOut === "string" && rawOut.trim() ? rawOut : "") ||

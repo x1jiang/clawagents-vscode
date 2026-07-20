@@ -1,3 +1,8 @@
+## 1.0.123
+
+- Prefer engine `output` / `ui_output` over short `preview` for tool cards (shows stderr on long execute failures).
+- Require `clawagents>=6.20.34` — 8KB UI tool results, execute failure reorder, single-file Codex `apply_patch`.
+
 ## 1.0.122
 
 - **CRLF-safe API keys / `.env`:** `sanitizeApiKey` and workspace dotenv strip `\r`/`\n` so Windows CRLF secrets cannot corrupt headers or SMB passwords.
