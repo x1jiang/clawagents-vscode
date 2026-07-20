@@ -1,3 +1,9 @@
+## 1.0.126
+
+- Require `clawagents>=6.20.37` so approved Plan invariants remain enforceable
+  in Act mode: publish/deploy commands now require fresh successful verification
+  gates after the latest edit, with pending/corrupt contracts failing closed.
+
 ## 1.0.125
 
 - Require `clawagents>=6.20.36` — permit one literal `/tmp/<name>` cleanup while retaining destructive-delete guards for broad, dynamic, and system paths.
