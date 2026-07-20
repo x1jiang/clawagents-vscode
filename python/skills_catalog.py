@@ -256,6 +256,12 @@ def _scan_skills(
     return result
 
 
+# Never surface these in the VS Code Skills UI. Runtime also hard-excludes them
+# in chats.py (cloud / unused companions). OpenViking requires `ov` and is not
+# part of the Graphify companion path.
+_HIDDEN_EXTENSION_SKILLS: frozenset[str] = frozenset({"openviking", "byterover"})
+
+
 def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     """Full Settings preview: folders, detected skills, excludes/ignores."""
     settings = settings if settings is not None else load_settings()
@@ -275,10 +281,28 @@ def preview_skills(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         pass
 
     skills, ineligible, warnings, quarantined = _scan_skills(dir_paths)
+    # Drop extension-banned skills entirely (not "excluded" — not shown).
+    skills = [s for s in skills if s.get("name") not in _HIDDEN_EXTENSION_SKILLS]
+    ineligible = {
+        k: v for k, v in ineligible.items() if k not in _HIDDEN_EXTENSION_SKILLS
+    }
+    quarantined = {
+        k: v for k, v in quarantined.items() if k not in _HIDDEN_EXTENSION_SKILLS
+    }
+    warnings = [
+        w
+        for w in warnings
+        if not any(hidden in str(w).lower() for hidden in _HIDDEN_EXTENSION_SKILLS)
+    ]
+
     exclude = [
         n for n in (settings.get("skill_exclude") or []) if isinstance(n, str) and n.strip()
     ]
-    exclude_set = set(exclude)
+    # Keep hard excludes in the settings list so Refresh/UI stays consistent.
+    for name in sorted(_HIDDEN_EXTENSION_SKILLS):
+        if name not in exclude:
+            exclude.append(name)
+    exclude_set = set(exclude) | set(_HIDDEN_EXTENSION_SKILLS)
     for s in skills:
         s["excluded"] = s["name"] in exclude_set
 

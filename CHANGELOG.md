@@ -1,3 +1,7 @@
+## 1.0.121
+
+- Hide OpenViking (and ByteRover) from Skills Settings preview — not used; already excluded at runtime.
+
 ## 1.0.120
 
 - **Graphify UX hardened:** Build graph defaults to `extract --code-only` (offline); verify `graph.json` after run; Augment = `update`; Use existing `graphify-out`; Settings panel with status + explicit actions.
