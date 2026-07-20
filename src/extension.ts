@@ -2,9 +2,12 @@ import * as vscode from "vscode";
 import {
   buildProblemsContext,
   ExtensionConfig,
+  setPreferredWorkspaceRoot,
   trackEditorFocus,
   wrapCurrentFileRef,
   wrapSelectionBlock,
+  workspaceRoot,
+  workspaceRoots,
 } from "./config";
 import { ensureCompanions, probeCompanions } from "./companionDeps";
 import {
@@ -45,7 +48,22 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   const config = new ExtensionConfig(context.secrets);
-  sidecar = new SidecarManager(context.extensionPath, config);
+  const savedRoot = context.workspaceState.get<string>("clawagents.preferredWorkspaceRoot");
+  if (!setPreferredWorkspaceRoot(savedRoot)) {
+    setPreferredWorkspaceRoot(undefined);
+  }
+  // Freeze the initial active/first folder so editor focus cannot silently
+  // move an already-running sidecar to a different trust/workspace scope.
+  const initialRoot = workspaceRoot();
+  if (initialRoot) {
+    setPreferredWorkspaceRoot(initialRoot);
+    void context.workspaceState.update("clawagents.preferredWorkspaceRoot", initialRoot);
+  }
+  sidecar = new SidecarManager(
+    context.extensionPath,
+    config,
+    context.globalStorageUri.fsPath,
+  );
   provider = new ClawAgentsWebviewProvider(context, sidecar, config);
 
   trackEditorFocus(context.subscriptions);
@@ -103,16 +121,52 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("clawagents.restartSidecar", async () => {
       await provider?.restartSidecar();
     }),
-    vscode.commands.registerCommand("clawagents.installPythonDeps", async () => {
-      const out = sidecar?.output;
-      if (!out) {
+    vscode.commands.registerCommand("clawagents.selectWorkspaceRoot", async () => {
+      const roots = workspaceRoots();
+      if (roots.length <= 1) {
+        void vscode.window.showInformationMessage(
+          roots.length === 1
+            ? `ClawAgents workspace: ${roots[0].name}`
+            : "Open a workspace folder before selecting a ClawAgents root.",
+        );
         return;
       }
+      if (provider?.busy) {
+        void vscode.window.showWarningMessage(
+          "Finish or cancel the current ClawAgents task before switching workspace roots.",
+        );
+        return;
+      }
+      const current = workspaceRoot();
+      const pick = await vscode.window.showQuickPick(
+        roots.map((root) => ({
+          label: root.name,
+          description: root.path,
+          root: root.path,
+          picked: root.path === current,
+        })),
+        { title: "Select ClawAgents workspace root", placeHolder: current },
+      );
+      if (!pick || !setPreferredWorkspaceRoot(pick.root)) {
+        return;
+      }
+      await context.workspaceState.update("clawagents.preferredWorkspaceRoot", pick.root);
+      await provider?.restartSidecar();
+      await provider?.newChat();
+      void vscode.window.showInformationMessage(`ClawAgents root: ${pick.label}`);
+    }),
+    vscode.commands.registerCommand("clawagents.installPythonDeps", async () => {
+      const manager = sidecar;
+      if (!manager) {
+        return;
+      }
+      const out = manager.output;
       out.show(true);
-      const python = config.pythonPath;
+      const python = await manager.resolvePythonRuntime();
       out.appendLine(`Installing into ${python}: ${SIDECAR_PIP_PACKAGES.join(" ")}`);
-      // ensureSidecarDeps also upgrades other PATH Pythons (syncPathPythons).
-      const probe = await ensureSidecarDeps(python, out);
+      const probe = await ensureSidecarDeps(python, out, undefined, {
+        syncPathFloor: config.pythonRuntime === "custom",
+      });
       if (probe.ok) {
         void vscode.window.showInformationMessage(
           `ClawAgents deps OK (${probe.version || "ok"}). Restarting sidecar…`,
@@ -123,15 +177,17 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand("clawagents.doctorPython", async () => {
-      const out = sidecar?.output;
-      if (!out) {
+      const manager = sidecar;
+      if (!manager) {
         return;
       }
+      const out = manager.output;
       out.show(true);
-      const python = config.pythonPath;
+      const python = await manager.resolvePythonRuntime();
       out.appendLine("=== ClawAgents Doctor (Python versions) ===");
-      // Install + auto-upgrade PATH floor (same path as Install Python Deps).
-      const probe = await ensureSidecarDeps(python, out);
+      const probe = await ensureSidecarDeps(python, out, undefined, {
+        syncPathFloor: config.pythonRuntime === "custom",
+      });
       out.appendLine(
         `Sidecar interpreter: ${python}\n` +
           `  version=${probe.version || "?"} ok=${probe.ok}\n` +
@@ -140,6 +196,13 @@ export function activate(context: vscode.ExtensionContext): void {
       out.appendLine("=== Companions ===");
       for (const c of probeCompanions()) {
         out.appendLine(`  ${c.name}: ${c.detail}`);
+      }
+      if (config.pythonRuntime === "managed") {
+        out.appendLine("PATH drift: not applicable (managed environment is isolated).");
+        void vscode.window.showInformationMessage(
+          `ClawAgents doctor OK — managed sidecar ${probe.version || "?"} @ ${python}`,
+        );
+        return;
       }
       const remaining = probePathInterpreterDrift(python);
       if (remaining.length === 0) {
@@ -195,6 +258,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const sidecarSettings = [
     "clawagents.pythonPath",
+    "clawagents.pythonRuntime",
     "clawagents.model",
     "clawagents.provider",
     "clawagents.contextMode",

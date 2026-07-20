@@ -530,6 +530,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     settings: Record<string, unknown>,
     providers?: unknown[],
     saveOutcome?: "ok" | "cancelled",
+    revision?: number,
   ): Promise<void> {
     const keyFlags = await this.config.collectKeyFlags();
     this.post({
@@ -537,6 +538,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       settings,
       ...(providers ? { providers } : {}),
       ...(saveOutcome ? { saveOutcome } : {}),
+      ...(revision ? { revision } : {}),
       ...keyFlags,
     });
   }
@@ -1108,7 +1110,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             );
             if (choice !== "Trust and save") {
               this.post({ type: "status", message: "Settings save cancelled" });
-              await this.postSettingsWithKeyFlags(previous, undefined, "cancelled");
+              await this.postSettingsWithKeyFlags(
+                previous,
+                undefined,
+                "cancelled",
+                msg.revision,
+              );
               return;
             }
             incoming.trust_custom_base_url = true;
@@ -1181,7 +1188,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               /* catalog refresh is best-effort */
             }
           }
-          await this.postSettingsWithKeyFlags(settings, providers, "ok");
+          await this.postSettingsWithKeyFlags(settings, providers, "ok", msg.revision);
           this.post({ type: "status", message: "Settings saved" });
           if (skillsChanged) {
             try {

@@ -21,6 +21,13 @@ import {
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
+import {
+  asStringList,
+  decideSettingsReply,
+  normalizeSettingsForSave,
+  settingsPatchMismatches,
+  settingsSaveKey,
+} from "./settingsSync";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -134,157 +141,6 @@ type SkillsPreview = {
   /** Loader diagnostics (spec violations, oversized/skipped files). */
   warnings?: string[];
 };
-
-function asStringList(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((v): v is string => typeof v === "string")
-    : [];
-}
-
-function normalizeSettingsForSave(settings: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...settings,
-    skill_dirs: asStringList(settings.skill_dirs)
-      .map((d) => d.trim())
-      .filter(Boolean),
-    skill_ignore_dirs: asStringList(settings.skill_ignore_dirs)
-      .map((d) => d.trim())
-      .filter(Boolean),
-    skill_exclude: asStringList(settings.skill_exclude)
-      .map((d) => d.trim())
-      .filter(Boolean),
-  };
-}
-
-/** Keys that participate in autosave equality (ignore ephemeral UI-only fields). */
-const SETTINGS_SAVE_KEYS = [
-  "model",
-  "provider",
-  "base_url",
-  "default_mode",
-  "telemetry",
-  "trajectory",
-  "learn",
-  "browser_tools",
-  "mcp_enabled",
-  "mcp_trust_workspace",
-  "context_mode",
-  "workspace_system_prompt",
-  "skill_dirs",
-  "skill_auto_discover",
-  "skill_ignore_dirs",
-  "skill_exclude",
-  "allow_full_access",
-  "allow_external_skill_dirs",
-  "skill_user_homes",
-  "aws_region",
-  "aws_profile",
-  "bedrock_mode",
-  "reasoning_effort",
-  "wire_api",
-  "ssl_verify",
-  "agent_mode",
-  "action_mode",
-] as const;
-
-/** Stable fingerprint for autosave — host echoes must not re-trigger PUT. */
-function settingsSaveKey(settings: Record<string, unknown>): string {
-  try {
-    const norm = normalizeSettingsForSave(settings);
-    const slim: Record<string, unknown> = {};
-    for (const k of SETTINGS_SAVE_KEYS) {
-      if (k in norm) {
-        slim[k] = norm[k];
-      }
-    }
-    return JSON.stringify(slim);
-  } catch {
-    return "";
-  }
-}
-
-/** Host may set bedrock_mode=mantle when base_url is a Mantle host. */
-function mantleEquivalent(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-): boolean {
-  return isMantleSettings(a) && isMantleSettings(b);
-}
-
-function normalizeBaseUrlKey(raw: unknown): string {
-  return String(raw || "")
-    .trim()
-    .replace(/\/+$/, "")
-    .toLowerCase();
-}
-
-function settingsPatchMismatches(
-  patch: Record<string, unknown>,
-  saved: Record<string, unknown>,
-): string[] {
-  // Server may intentionally rewrite skill_dirs on full saves.
-  // Always verify small patches; on large autosaves only check critical keys.
-  // bedrock_mode / base_url must be critical — stale IAM echoes were snapping
-  // Mantle Access mode back to Native IAM.
-  const critical = new Set([
-    "wire_api",
-    "reasoning_effort",
-    "ssl_verify",
-    "model",
-    "provider",
-    "agent_mode",
-    "action_mode",
-    "bedrock_mode",
-    "base_url",
-    "aws_region",
-  ]);
-  const keys = Object.keys(patch).filter((k) => !k.startsWith("_"));
-  const checkKeys = keys.length <= 5 ? keys : keys.filter((k) => critical.has(k));
-  const failed: string[] = [];
-  const bothMantle = mantleEquivalent(patch, saved);
-  for (const key of checkKeys) {
-    const expected = patch[key];
-    const actual = saved[key];
-    let same =
-      Array.isArray(expected) && Array.isArray(actual)
-        ? JSON.stringify(expected) === JSON.stringify(actual)
-        : expected === actual;
-    // Host normalizes URLs (strip trailing /, Mantle canonical form).
-    if (!same && key === "base_url") {
-      const a = normalizeBaseUrlKey(expected);
-      const b = normalizeBaseUrlKey(actual);
-      same = a === b || (bothMantle && /bedrock-mantle\./i.test(a) && /bedrock-mantle\./i.test(b));
-    }
-    if (!same && key === "bedrock_mode") {
-      const exp = String(expected || "iam").toLowerCase();
-      const act = String(actual || "iam").toLowerCase();
-      same = exp === act;
-      // Host upgrades IAM → mantle when the URL is Mantle — accept that echo.
-      if (!same && act === "mantle" && isMantleSettings(saved) && isMantleSettings(patch)) {
-        same = true;
-      }
-      if (
-        !same &&
-        act === "mantle" &&
-        /bedrock-mantle\./i.test(String(patch.base_url || ""))
-      ) {
-        same = true;
-      }
-    }
-    if (!same) {
-      failed.push(key);
-    }
-  }
-  // Pure Mantle URL/mode host normalization should never block confirmation.
-  if (
-    failed.length > 0 &&
-    bothMantle &&
-    failed.every((k) => k === "bedrock_mode" || k === "base_url" || k === "aws_region")
-  ) {
-    return [];
-  }
-  return failed;
-}
 
 type Panel = "chat" | "history" | "settings" | "diagnostics";
 
@@ -719,6 +575,11 @@ export function App() {
   const settingsAutosaveReady = useRef(false);
   /** Last settings patch we asked the host to persist — verified on `settings` reply. */
   const pendingSettingsPatch = useRef<Record<string, unknown> | null>(null);
+  /** Revisioned saves make host replies deterministic even when several are queued. */
+  const settingsRevision = useRef(0);
+  const pendingSettingsSaves = useRef(
+    new Map<number, { key: string; patch: Record<string, unknown> }>(),
+  );
   /**
    * Fingerprint of last *confirmed* settings (host ok / cancelled revert).
    * Autosave only runs when local settings differ — prevents forever PUT loops.
@@ -728,6 +589,22 @@ export function App() {
   const inflightSettingsKey = useRef<string>("");
   /** Latest settings for message-handler stale-echo checks (avoid clobber). */
   const settingsRef = useRef<Record<string, unknown>>({});
+  const postSettingsSave = useCallback((
+    patch: Record<string, unknown>,
+    localSettings: Record<string, unknown>,
+  ) => {
+    const revision = ++settingsRevision.current;
+    const key = settingsSaveKey(localSettings);
+    settingsRef.current = localSettings;
+    pendingSettingsPatch.current = patch;
+    inflightSettingsKey.current = key;
+    pendingSettingsSaves.current.set(revision, { key, patch });
+    for (const oldRevision of pendingSettingsSaves.current.keys()) {
+      if (oldRevision < revision - 32) pendingSettingsSaves.current.delete(oldRevision);
+    }
+    post({ type: "save_settings", revision, settings: patch });
+    return revision;
+  }, []);
   /** One-shot preferred-model fill (empty model only) — never loop on catalog mismatch. */
   const preferredModelFilled = useRef(false);
   /** Dedupe one-shot heal of vendor-incompatible leftovers (e.g. llama3.1 on OpenAI). */
@@ -909,8 +786,7 @@ export function App() {
             setHasAnthropicKey(msg.hasAnthropicKey);
           }
           if (typeof msg.hasGeminiKey === "boolean") setHasGeminiKey(msg.hasGeminiKey);
-          // Trust-modal cancel (or explicit host revert) — always apply snapshot.
-          if (msg.saveOutcome === "cancelled") {
+          const applySettingsSnapshot = (status: string) => {
             pendingSettingsPatch.current = null;
             inflightSettingsKey.current = "";
             skipSettingsAutosave.current = true;
@@ -921,7 +797,38 @@ export function App() {
             if (typeof incoming.model === "string" && incoming.model) {
               setModel(incoming.model);
             }
-            setVerifyMsg("Settings save cancelled");
+            setVerifyMsg(status);
+          };
+          if (msg.saveOutcome && typeof msg.revision === "number") {
+            const pendingSave = pendingSettingsSaves.current.get(msg.revision);
+            const decision = decideSettingsReply({
+              replyRevision: msg.revision,
+              latestRevision: settingsRevision.current,
+              pendingRevision: pendingSave ? msg.revision : undefined,
+              localMatchesPending: Boolean(
+                pendingSave
+                && settingsSaveKey(settingsRef.current) === pendingSave.key
+              ),
+            });
+            pendingSettingsSaves.current.delete(msg.revision);
+            if (decision.kind === "ignore_stale") {
+              break;
+            }
+            if (decision.kind === "keep_local") {
+              pendingSettingsPatch.current = null;
+              inflightSettingsKey.current = "";
+              committedSettingsKey.current = settingsSaveKey(incoming);
+              setVerifyMsg("Saved; preserving newer local edits…");
+              break;
+            }
+            applySettingsSnapshot(
+              msg.saveOutcome === "cancelled" ? "Settings save cancelled" : "Saved ✓",
+            );
+            break;
+          }
+          // Trust-modal cancel (or explicit host revert) — always apply snapshot.
+          if (msg.saveOutcome === "cancelled") {
+            applySettingsSnapshot("Settings save cancelled");
             break;
           }
           const pending = pendingSettingsPatch.current;
@@ -936,17 +843,7 @@ export function App() {
               );
               break;
             }
-            pendingSettingsPatch.current = null;
-            inflightSettingsKey.current = "";
-            skipSettingsAutosave.current = true;
-            settingsAutosaveReady.current = true;
-            committedSettingsKey.current = settingsSaveKey(incoming);
-            settingsRef.current = incoming;
-            setSettings(incoming);
-            if (typeof incoming.model === "string" && incoming.model) {
-              setModel(incoming.model);
-            }
-            setVerifyMsg("Saved ✓");
+            applySettingsSnapshot("Saved ✓");
             break;
           }
           // Unsolicited push (load/ready) — never clobber in-progress edits.
@@ -1573,10 +1470,7 @@ export function App() {
       inflightSettingsKey.current = keyNow;
       pendingSettingsPatch.current = patch;
       setVerifyMsg("Saving…");
-      post({
-        type: "save_settings",
-        settings: patch,
-      });
+      postSettingsSave(patch, settings);
       // If the host never confirms, clear inflight so a later effect can retry.
       window.setTimeout(() => {
         if (inflightSettingsKey.current === keyNow && pendingSettingsPatch.current) {
@@ -1585,7 +1479,7 @@ export function App() {
       }, 15_000);
     }, 500);
     return () => window.clearTimeout(settingsSaveTimer.current);
-  }, [settings]);
+  }, [settings, postSettingsSave]);
 
   useEffect(() => {
     if (panel !== "history") {
@@ -1650,7 +1544,7 @@ export function App() {
     const patch = normalizeSettingsForSave(nextSettings);
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, nextSettings);
     if (on) {
       // Full access = auto-approve edits/commands + OS sandbox off (sidecar).
       setAutoApprove((a) => ({ ...a, edit: true, execute: true }));
@@ -1837,7 +1731,7 @@ export function App() {
     const patch = normalizeSettingsForSave(nextSettings);
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, nextSettings);
   }, [preferredPick.model, preferredPick.effort, post, settings]);
 
   // Heal leftovers that cannot belong to the selected vendor (Ollama llama3.1
@@ -1865,7 +1759,7 @@ export function App() {
     const patch = normalizeSettingsForSave(nextSettings);
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, nextSettings);
     setProviderSetupMsg(
       `Model "${saved}" does not belong to Provider ${prov} — switched to ${nextModel}.`,
     );
@@ -1929,7 +1823,7 @@ export function App() {
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, nextSettings);
   };
 
   const applyBedrockMode = (mode: string) => {
@@ -1998,7 +1892,7 @@ export function App() {
     const patch = normalizeSettingsForSave(next);
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, next);
   };
 
   const selectEffort = (next: string) => {
@@ -2010,7 +1904,7 @@ export function App() {
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
     // Effort-only patch: avoid trust prompts from an unsaved base_url draft.
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, nextSettings);
   };
 
   const selectWireApi = (next: string) => {
@@ -2021,7 +1915,7 @@ export function App() {
     const patch = { wire_api: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, nextSettings);
   };
 
   const selectSslVerify = (next: boolean) => {
@@ -2032,7 +1926,7 @@ export function App() {
     const patch = { ssl_verify: next };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
-    post({ type: "save_settings", settings: patch });
+    postSettingsSave(patch, nextSettings);
   };
 
   /** OS dictation; mic picker once per session (⌥/Alt+Mic to change). */
@@ -2092,7 +1986,7 @@ export function App() {
     ) {
       inflightSettingsKey.current = keyNow;
       pendingSettingsPatch.current = patch;
-      post({ type: "save_settings", settings: patch });
+      postSettingsSave(patch, settings);
     }
   };
 
@@ -2810,7 +2704,7 @@ export function App() {
                   const patch = normalizeSettingsForSave(next);
                   pendingSettingsPatch.current = patch;
                   setVerifyMsg("Saving…");
-                  post({ type: "save_settings", settings: patch });
+                  postSettingsSave(patch, next);
                   if (choice === "openai") {
                     setProviderSetupMsg(
                       "OpenAI — uses OPENAI_API_KEY (api.openai.com). Base URL left empty.",
@@ -4040,10 +3934,7 @@ export function App() {
                 const patch = normalizeSettingsForSave(settings);
                 pendingSettingsPatch.current = patch;
                 setVerifyMsg("Saving…");
-                post({
-                  type: "save_settings",
-                  settings: patch,
-                });
+                postSettingsSave(patch, settings);
               }}
             >
               Save settings

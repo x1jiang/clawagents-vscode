@@ -1,3 +1,10 @@
+## 1.0.118
+
+- Extension-managed Python virtualenv by default; custom interpreter remains available.
+- Multi-root workspace selector with root-scoped sidecar, `.env`, chats, and trust state.
+- Revisioned settings acknowledgements prevent stale saves from replacing newer edits; sync logic extracted and tested.
+- VSIX excludes test suites and local Ruff caches.
+
 ## 1.0.117
 
 - **Overlap-safe read reuse** (clawagents≥6.20.30): stub only when the new range is fully contained; partial overlaps fetch fresh content.

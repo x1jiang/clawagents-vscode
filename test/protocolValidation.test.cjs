@@ -24,6 +24,16 @@ test("accepts a legitimate send request", () => {
   assert.deepEqual(parseWebviewToHost(message), message);
 });
 
+test("settings saves require a positive integer revision", () => {
+  const message = { type: "save_settings", revision: 7, settings: { provider: "openai" } };
+  assert.deepEqual(parseWebviewToHost(message), message);
+  assert.equal(parseWebviewToHost({ type: "save_settings", settings: {} }), undefined);
+  assert.equal(
+    parseWebviewToHost({ type: "save_settings", revision: 0, settings: {} }),
+    undefined,
+  );
+});
+
 test("rejects unknown, malformed, and traversal-bearing authority requests", () => {
   assert.equal(parseWebviewToHost({ type: "unknown" }), undefined);
   assert.equal(parseWebviewToHost({ type: "permission", requestId: "x", decision: "yes" }), undefined);

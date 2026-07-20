@@ -10,6 +10,7 @@ import { ensureCompanions } from "./companionDeps";
 import { ensureSidecarDeps } from "./pythonDeps";
 import { pinPythonPathEnv } from "./pythonPathPin";
 import { StartGeneration } from "./startGeneration";
+import { ensureManagedPython } from "./managedPython";
 
 export interface SidecarHandle {
   port: number;
@@ -100,8 +101,17 @@ export class SidecarManager {
   constructor(
     private readonly extensionPath: string,
     private readonly config: ExtensionConfig,
+    private readonly globalStoragePath: string,
   ) {
     this.output = vscode.window.createOutputChannel("ClawAgents Sidecar");
+  }
+
+  async resolvePythonRuntime(): Promise<string> {
+    const basePython = this.config.pythonPath;
+    if (this.config.pythonRuntime === "custom") {
+      return basePython;
+    }
+    return ensureManagedPython(basePython, this.globalStoragePath, this.output);
   }
 
   get current(): SidecarHandle | undefined {
@@ -188,7 +198,7 @@ export class SidecarManager {
   private async doStart(generation: number): Promise<SidecarHandle> {
     this.stopChild();
 
-    const python = this.config.pythonPath;
+    const python = await this.resolvePythonRuntime();
     const bridge = path.join(this.extensionPath, "python", "bridge.py");
     // Do not PATH-sync / pip-upgrade other interpreters on every restart —
     // that used --break-system-packages, hung offline, and slowed startup.

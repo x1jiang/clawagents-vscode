@@ -158,6 +158,8 @@ export type HostToWebview =
       providers?: unknown[];
       /** Present on save replies; absent on unsolicited load/ready pushes. */
       saveOutcome?: "ok" | "cancelled";
+      /** Echoes the originating save request; orders replies deterministically. */
+      revision?: number;
       /** Host key presence (SecretStorage + workspace .env + shell). */
       hasApiKey?: boolean;
       hasTavilyKey?: boolean;
@@ -327,7 +329,7 @@ export type WebviewToHost =
   | { type: "interject"; text: string }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
-  | { type: "save_settings"; settings: Record<string, unknown> }
+  | { type: "save_settings"; revision: number; settings: Record<string, unknown> }
   | { type: "load_skills" }
   | { type: "pick_skill_dir" }
   | { type: "verify_key"; provider: string }
@@ -516,7 +518,12 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return text(value.text) && optionalText(value.chatId, 128)
         ? value as WebviewToHost : undefined;
     case "save_settings":
-      return record(value.settings) ? value as WebviewToHost : undefined;
+      return record(value.settings)
+        && typeof value.revision === "number"
+        && Number.isSafeInteger(value.revision)
+        && value.revision > 0
+        ? value as WebviewToHost
+        : undefined;
     case "verify_key":
       return text(value.provider, 64) ? value as WebviewToHost : undefined;
     case "set_bedrock_key":

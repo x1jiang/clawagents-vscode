@@ -1,8 +1,8 @@
 {
   "name": "clawagents",
   "displayName": "ClawAgents",
-  "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.117",
+  "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
+  "version": "1.0.118",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -124,12 +124,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "clawagents.selectWorkspaceRoot",
+        "title": "ClawAgents: Select Workspace Root"
+      },
+      {
         "command": "clawagents.setApiKey",
         "title": "ClawAgents: Set API Key (OpenAI / Anthropic / Gemini / Bedrock / Tavily)"
       },
       {
         "command": "clawagents.clearApiKey",
-        "title": "ClawAgents: Clear API Key\u2026"
+        "title": "ClawAgents: Clear API Key…"
       },
       {
         "command": "clawagents.installPythonDeps",
@@ -215,7 +219,17 @@
           "type": "string",
           "default": "python3",
           "scope": "machine-overridable",
-          "description": "Python interpreter for the ClawAgents sidecar. Prefer User or Remote (Machine) settings. Workspace absolute paths are ignored for security; bare names python/python3/py are allowed."
+          "description": "Base Python used to create the managed sidecar environment, or the exact sidecar interpreter when Python Runtime is Custom. Workspace absolute paths are ignored for security."
+        },
+        "clawagents.pythonRuntime": {
+          "type": "string",
+          "enum": [
+            "managed",
+            "custom"
+          ],
+          "default": "managed",
+          "scope": "machine-overridable",
+          "description": "Managed isolates sidecar packages in VS Code global storage. Custom uses clawagents.pythonPath directly."
         },
         "clawagents.model": {
           "type": "string",
@@ -253,7 +267,7 @@
         "clawagents.contextMode": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools \u2014 sandboxed code execution and indexed search. Requires context-mode >=1.0.169; auto-installed when clawagents.ensureCompanions is true. The sidebar Settings checkbox overrides this per workspace."
+          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools — sandboxed code execution and indexed search. Requires context-mode >=1.0.169; auto-installed when clawagents.ensureCompanions is true. The sidebar Settings checkbox overrides this per workspace."
         },
         "clawagents.ensureCompanions": {
           "type": "boolean",
@@ -263,7 +277,7 @@
         "clawagents.syncPathPythons": {
           "type": "boolean",
           "default": false,
-          "description": "When true, activation may offer (with confirmation) to upgrade clawagents on other PATH interpreters below this extension's floor. Default off \u2014 only clawagents.pythonPath is managed unless you opt in or run Install/Doctor."
+          "description": "When true, activation may offer (with confirmation) to upgrade clawagents on other PATH interpreters below this extension's floor. Default off — only clawagents.pythonPath is managed unless you opt in or run Install/Doctor."
         },
         "clawagents.alpacaDeployPath": {
           "type": "string",

@@ -68,6 +68,14 @@ jobs:
             console.log('ok', vsix, 'clawagents>=' + floor);
           "
 
+      - name: Assert VSIX excludes tests and caches
+        run: |
+          vsix="clawagents-$(node -p "require('./package.json').version").vsix"
+          if unzip -Z1 "$vsix" | grep -E '(^|/)(test|tests|\.ruff_cache)/'; then
+            echo "VSIX contains development-only files" >&2
+            exit 1
+          fi
+
       - name: Upload VSIX
         uses: actions/upload-artifact@v4
         with:

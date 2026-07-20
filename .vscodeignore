@@ -13,6 +13,9 @@ esbuild.mjs
 tsconfig.json
 python/**/__pycache__/**
 python/**/.pytest_cache/**
+python/tests/**
+test/**
+**/.ruff_cache/**
 **/.pytest_cache/**
 **/.DS_Store
 .clawagents/**

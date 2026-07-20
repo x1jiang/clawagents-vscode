@@ -39,7 +39,8 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `clawagents.pythonPath` | `python3` | Interpreter for the sidecar |
+| `clawagents.pythonRuntime` | `managed` | Isolated extension-owned virtualenv; choose `custom` to use `pythonPath` directly |
+| `clawagents.pythonPath` | `python3` | Base interpreter for the managed environment, or the exact custom interpreter |
 | `clawagents.model` | *(empty)* | Model override |
 | `clawagents.provider` | `auto` | Preferred provider for credential selection |
 | `clawagents.defaultMode` | `auto` | Default permission mode |
@@ -49,6 +50,8 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.syncPathPythons` | `false` | Offer (with confirmation) to upgrade other PATH Pythons below the floor; default manages only `pythonPath` |
 
 Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
+
+For multi-root workspaces, run **ClawAgents: Select Workspace Root**. Switching roots restarts the sidecar and opens a fresh chat so paths, `.env`, history, and trust approvals stay scoped to one folder.
 
 ## Companions (lockstep with clawagents ≥6.20.30)
 

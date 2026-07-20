@@ -8,6 +8,7 @@ import {
   RuntimeTrust,
   runtimeTrustStorageKey,
 } from "./runtimeTrust";
+import { chooseWorkspaceRoot } from "./workspaceSelection";
 
 const SECRET_KEYS = {
   openai: "clawagents.openaiApiKey",
@@ -248,6 +249,12 @@ export class ExtensionConfig {
 
   get pythonPath(): string {
     return resolvePythonExecutable(trustedPythonPathSetting());
+  }
+
+  get pythonRuntime(): "managed" | "custom" {
+    return vscode.workspace
+      .getConfiguration("clawagents")
+      .get<"managed" | "custom">("pythonRuntime", "managed");
   }
 
   get model(): string {
@@ -649,8 +656,38 @@ export class ExtensionConfig {
   }
 }
 
+let _preferredWorkspaceRoot: string | undefined;
+
+export function workspaceRoots(): Array<{ name: string; path: string }> {
+  return (vscode.workspace.workspaceFolders || []).map((folder) => ({
+    name: folder.name,
+    path: folder.uri.fsPath,
+  }));
+}
+
+export function setPreferredWorkspaceRoot(root?: string): boolean {
+  if (!root) {
+    _preferredWorkspaceRoot = undefined;
+    return true;
+  }
+  const selected = chooseWorkspaceRoot(
+    workspaceRoots().map((item) => item.path),
+    root,
+  );
+  if (!selected || path.resolve(selected) !== path.resolve(root)) {
+    return false;
+  }
+  _preferredWorkspaceRoot = selected;
+  return true;
+}
+
 export function workspaceRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const roots = workspaceRoots().map((item) => item.path);
+  const activeUri = vscode.window.activeTextEditor?.document.uri;
+  const active = activeUri
+    ? vscode.workspace.getWorkspaceFolder(activeUri)?.uri.fsPath
+    : undefined;
+  return chooseWorkspaceRoot(roots, _preferredWorkspaceRoot, active);
 }
 
 /** Last focused editor/terminal — webview clicks clear `activeTextEditor`. */
