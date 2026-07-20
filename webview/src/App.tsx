@@ -4511,6 +4511,28 @@ export function App() {
               }}
             >
               <div className="compose-shell">
+                <div
+                  className="compose-resize-handle"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    const ta = textareaRef.current;
+                    if (!ta) return;
+                    const startY = e.clientY;
+                    const startH = ta.offsetHeight;
+                    const onMove = (ev: PointerEvent) => {
+                      // dragging up (negative delta) → taller
+                      const delta = startY - ev.clientY;
+                      const next = Math.min(Math.max(startH + delta, 52), 320);
+                      ta.style.height = `${next}px`;
+                    };
+                    const onUp = () => {
+                      document.removeEventListener("pointermove", onMove);
+                      document.removeEventListener("pointerup", onUp);
+                    };
+                    document.addEventListener("pointermove", onMove);
+                    document.addEventListener("pointerup", onUp);
+                  }}
+                />
                 <textarea
                   ref={textareaRef}
                   value={draft}
