@@ -1,4 +1,4 @@
-Publisher **`clawagents`** · version **1.0.124**
+Publisher **`clawagents`** · version **1.0.125**
 
-- [x] clawagents **6.20.35** on GitHub + PyPI
-- [x] GitHub release `v1.0.124` + VSIX
+- [ ] clawagents **6.20.36** on GitHub + PyPI
+- [ ] GitHub release `v1.0.125` + VSIX

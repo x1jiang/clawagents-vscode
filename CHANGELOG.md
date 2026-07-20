@@ -1,3 +1,14 @@
+## 1.0.125
+
+- Require `clawagents>=6.20.36` — permit one literal `/tmp/<name>` cleanup while retaining destructive-delete guards for broad, dynamic, and system paths.
+- Avoid false encoded-Python blocks, normalize empty `grep`/`rg` searches, and add quarantine/missing-file recovery guidance.
+- Distinguish a missing runtime executable (for example `kinit`) from secondary cleanup failures such as a missing `kdestroy`.
+- Report the exact failed SEARCH/REPLACE hunk and reject invalid JSON before `apply_patch` writes it.
+- Show the first differing character for near matches and distinguish Markdown list items from table rows instead of reporting a rounded 100% similarity.
+- Explain empty `&&`-chain failures whose useful output was redirected to a log, without treating advisory safety warnings as the cause.
+- Separate missing-input root causes from empty-JSON cascade errors in shell loops and preserve successful iterations in the diagnosis.
+- Treat `ModuleNotFoundError` as an interpreter/environment mismatch and recommend same-interpreter virtualenv checks before installation.
+
 ## 1.0.124
 
 - Add failure discipline for authentication, missing packages, patch rereads, and secret-safe `.env` handling.
