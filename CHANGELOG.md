@@ -1,3 +1,8 @@
+## 1.0.122
+
+- **CRLF-safe API keys / `.env`:** `sanitizeApiKey` and workspace dotenv strip `\r`/`\n` so Windows CRLF secrets cannot corrupt headers or SMB passwords.
+- Require `clawagents>=6.20.33` — `/tmp` `write_file` sandbox parity + secret CR scrub + `python3` verify preference.
+
 ## 1.0.121
 
 - Hide OpenViking (and ByteRover) from Skills Settings preview — not used; already excluded at runtime.

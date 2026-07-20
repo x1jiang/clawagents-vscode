@@ -537,7 +537,7 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
 
 def _sanitize_api_key(raw: str | None) -> str:
     """Normalize pasted keys so HTTP header encoding cannot fail."""
-    text = (raw or "").replace("\ufeff", "").strip()
+    text = (raw or "").replace("\ufeff", "").replace("\r", "").replace("\n", "").strip()
     for ch in ("\u200b", "\u200c", "\u200d", "\u2060"):
         text = text.replace(ch, "")
     if (text.startswith('"') and text.endswith('"')) or (
@@ -548,8 +548,11 @@ def _sanitize_api_key(raw: str | None) -> str:
         left, right = text.split("=", 1)
         if left.strip().upper().endswith("KEY"):
             text = right.strip().strip('"').strip("'")
-    # HTTP headers are latin-1; provider keys are ASCII.
-    text = "".join(ch for ch in text if ord(ch) < 128).strip()
+    # HTTP headers are latin-1; provider keys are ASCII. Drop CR/LF even though
+    # their ordinals are < 128 — CRLF .env lines otherwise corrupt passwords.
+    text = "".join(
+        ch for ch in text if ord(ch) < 128 and ch not in ("\r", "\n")
+    ).strip()
     return text
 
 

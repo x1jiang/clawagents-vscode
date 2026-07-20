@@ -65,3 +65,10 @@ test("resolveProviderApiKey falls back to dotenv", async () => {
   cfg.loadWorkspaceDotenv = () => ({ OPENAI_API_KEY: "sk-dotenv" });
   assert.equal(await cfg.resolveProviderApiKey("openai"), "sk-dotenv");
 });
+
+test("sanitizeApiKey strips CRLF and lone CR", () => {
+  const { sanitizeApiKey } = require(outputFile);
+  assert.equal(sanitizeApiKey("sk-test\r\n"), "sk-test");
+  assert.equal(sanitizeApiKey("sk-test\r"), "sk-test");
+  assert.equal(sanitizeApiKey('  "sk-quoted"  '), "sk-quoted");
+});

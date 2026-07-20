@@ -25,6 +25,8 @@ export function sanitizeApiKey(raw: string): string {
   let text = (raw || "")
     .replace(/^\uFEFF/, "")
     .replace(/[\u200B-\u200D\u2060]/g, "")
+    // CRLF / lone CR survive ASCII filters (charCode 13) and corrupt secrets.
+    .replace(/[\r\n]+/g, "")
     .trim();
   if (
     (text.startsWith('"') && text.endsWith('"')) ||
@@ -37,7 +39,13 @@ export function sanitizeApiKey(raw: string): string {
     text = text.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
   }
   // API keys are ASCII; drop anything that would break urllib header encoding.
-  text = [...text].filter((ch) => ch.charCodeAt(0) < 128).join("").trim();
+  text = [...text]
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return c < 128 && c !== 10 && c !== 13;
+    })
+    .join("")
+    .trim();
   return text;
 }
 
@@ -481,9 +489,10 @@ export class ExtensionConfig {
       return {};
     }
     const out: Record<string, string> = {};
-    const text = fs.readFileSync(envPath, "utf8");
+    // Strip UTF-8 BOM; split on CRLF or LF so values never keep a trailing \r.
+    const text = fs.readFileSync(envPath, "utf8").replace(/^\uFEFF/, "");
     for (const raw of text.split(/\r?\n/)) {
-      let line = raw.trim();
+      let line = raw.replace(/\r/g, "").trim();
       if (!line || line.startsWith("#")) {
         continue;
       }
@@ -494,7 +503,7 @@ export class ExtensionConfig {
       if (eq <= 0) {
         continue;
       }
-      const key = line.slice(0, eq).trim();
+      const key = line.slice(0, eq).replace(/^\uFEFF/, "").trim();
       if (!DOTENV_ALLOWLIST.has(key)) {
         continue;
       }
@@ -505,7 +514,8 @@ export class ExtensionConfig {
       ) {
         val = val.slice(1, -1);
       }
-      out[key] = val;
+      // Allowlisted keys are credentials — strip CR/LF paste junk.
+      out[key] = sanitizeApiKey(val) || val.replace(/[\r\n]+/g, "").trim();
     }
     return out;
   }
