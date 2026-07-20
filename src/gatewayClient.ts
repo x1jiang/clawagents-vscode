@@ -280,11 +280,22 @@ export class GatewayClient {
     });
   }
 
-  getChat(chatId: string) {
+  getChat(
+    chatId: string,
+    opts?: { tail?: number; before?: number; all?: boolean },
+  ) {
+    const qs = new URLSearchParams();
+    if (opts?.all) {
+      qs.set("all", "1");
+    } else {
+      if (opts?.tail != null) qs.set("tail", String(opts.tail));
+      if (opts?.before != null) qs.set("before", String(opts.before));
+    }
+    const q = qs.toString();
     return requestJson<Record<string, unknown>>(
       this.requireHandle(),
       "GET",
-      `/chats/${encodeURIComponent(chatId)}`,
+      `/chats/${encodeURIComponent(chatId)}${q ? `?${q}` : ""}`,
     );
   }
 

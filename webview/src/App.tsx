@@ -605,8 +605,14 @@ const TranscriptItem = memo(function TranscriptItem({
   );
 });
 
+/** Cap DOM nodes for long transcripts; "Show more" expands the window. */
+const TRANSCRIPT_RENDER_CHUNK = 120;
+
 export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
+  /** How many trailing items to mount (virtualization window). */
+  const [renderWindow, setRenderWindow] = useState(TRANSCRIPT_RENDER_CHUNK);
+  const [eventsHasMore, setEventsHasMore] = useState(false);
   const [draft, setDraft] = useState("");
   const [pendingImages, setPendingImages] = useState<Array<{ id: string; name: string }>>([]);
   const [pendingFiles, setPendingFiles] = useState<Array<{ id: string; name: string }>>([]);
@@ -1039,6 +1045,8 @@ export function App() {
           break;
         case "restore":
           setItems((msg.items as ChatItem[]) || []);
+          setRenderWindow(TRANSCRIPT_RENDER_CHUNK);
+          setEventsHasMore(Boolean(msg.eventsHasMore));
           setDraft(msg.draft || "");
           setMode(msg.mode);
           if (msg.interaction === "interactive" || msg.interaction === "auto") {
@@ -1066,6 +1074,15 @@ export function App() {
           streamingRef.current = false;
           setPanel("chat");
           break;
+        case "prepend_items": {
+          const older = (msg.items as ChatItem[]) || [];
+          if (older.length) {
+            setItems((prev) => [...older, ...prev]);
+            setRenderWindow((w) => w + older.length);
+          }
+          setEventsHasMore(Boolean(msg.eventsHasMore));
+          break;
+        }
         case "prepend":
           setDraft((d) => msg.text + d);
           textareaRef.current?.focus();
@@ -4086,15 +4103,38 @@ export function App() {
                 </div>
               </div>
             )}
-            {items.map((item, i) => (
-              <TranscriptItem
-                key={i}
-                item={item}
-                setItems={setItems}
-                onAskDraftChange={handleAskDraftChange}
-                showStreamingCursor={busy && streamingRef.current && i === items.length - 1}
-              />
-            ))}
+            {(eventsHasMore || items.length > renderWindow) && (
+              <div className="transcript-older">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    if (eventsHasMore) {
+                      post({ type: "load_older_chat" });
+                    }
+                    setRenderWindow((w) => w + TRANSCRIPT_RENDER_CHUNK);
+                  }}
+                >
+                  {eventsHasMore
+                    ? "Load older messages…"
+                    : `Show older (${items.length - renderWindow} hidden)`}
+                </button>
+              </div>
+            )}
+            {items.slice(Math.max(0, items.length - renderWindow)).map((item, i, arr) => {
+              const absoluteIndex = items.length - arr.length + i;
+              return (
+                <TranscriptItem
+                  key={absoluteIndex}
+                  item={item}
+                  setItems={setItems}
+                  onAskDraftChange={handleAskDraftChange}
+                  showStreamingCursor={
+                    busy && streamingRef.current && absoluteIndex === items.length - 1
+                  }
+                />
+              );
+            })}
             <div ref={bottomRef} />
           </main>
 

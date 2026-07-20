@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    name: typecheck · tests · vsix · clawagents floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install JS deps
+        run: npm run install:all
+
+      - name: Typecheck + build
+        run: npm run build
+
+      - name: Node tests
+        run: npm test
+
+      - name: Sidecar Python tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r python/requirements.txt pytest
+          # Prefer workspace clawagents when developing in a monorepo checkout;
+          # on the extension-only GitHub repo this installs from PyPI / extras.
+          if [ -d ../clawagents_py ]; then
+            pip install -e "../clawagents_py[gemini,anthropic,bedrock,mcp,media,accurate-tokens,dev]"
+          fi
+          cd python && PYTHONPATH=. python -m pytest -q
+
+      - name: Package VSIX
+        run: npm run package
+
+      - name: Assert VSIX exists + clawagents floor
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
+            const src = fs.readFileSync('src/pythonDeps.ts','utf8');
+            const m = src.match(/MIN_CLAWAGENTS_VERSION:\s*\[[^\]]+\]\s*=\s*\[(\d+),\s*(\d+),\s*(\d+)\]/);
+            if (!m) throw new Error('could not parse MIN_CLAWAGENTS_VERSION');
+            const floor = m.slice(1).join('.');
+            const vsix = 'clawagents-' + pkg.version + '.vsix';
+            if (!fs.existsSync(vsix)) throw new Error('missing ' + vsix);
+            const req = fs.readFileSync('python/requirements.txt','utf8');
+            if (!req.includes(floor)) throw new Error('requirements.txt missing floor ' + floor);
+            if (!req.includes('accurate-tokens')) throw new Error('requirements.txt missing accurate-tokens');
+            console.log('ok', vsix, 'clawagents>=' + floor);
+          "
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawagents-vsix
+          path: clawagents-*.vsix

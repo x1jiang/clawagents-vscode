@@ -109,6 +109,19 @@ def run_diagnostics() -> dict[str, Any]:
     agents = WORKSPACE / "AGENTS.md"
     add("agents_md", agents.is_file(), str(agents) if agents.is_file() else "none")
 
+    try:
+        from clawagents.tokenizer import token_estimator_info
+
+        model_id = str(settings.get("model") or MODEL or "")
+        info = token_estimator_info(model_id or None)
+        add(
+            "token_estimator",
+            bool(info.get("accurate")),
+            str(info.get("detail") or info.get("estimator") or ""),
+        )
+    except Exception as exc:  # noqa: BLE001
+        add("token_estimator", False, str(exc))
+
     return {
         "ok": all(c["ok"] for c in checks if c["name"] in ("clawagents", "workspace", "api_key")),
         "checks": checks,

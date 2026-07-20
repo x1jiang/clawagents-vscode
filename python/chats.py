@@ -246,7 +246,19 @@ def append_ui_event(chat_id: str, event: dict[str, Any]) -> None:
         f.write(json.dumps({"ts": now_ts(), **event}, default=str) + "\n")
 
 
-def read_ui_events(chat_id: str) -> list[dict[str, Any]]:
+def read_ui_events(
+    chat_id: str,
+    *,
+    offset: int | None = None,
+    limit: int | None = None,
+    tail: int | None = None,
+) -> list[dict[str, Any]]:
+    """Load UI log events, optionally windowed.
+
+    ``tail=N`` returns the last N events (preferred for chat restore).
+    ``offset``/``limit`` page from the start (0-based). Without windowing,
+    returns the full log (used by truncate/regenerate).
+    """
     try:
         path = chat_ui_log_path(chat_id)
     except ValueError:
@@ -254,15 +266,83 @@ def read_ui_events(chat_id: str) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return []
+    if tail is not None and tail >= 0:
+        return events[-tail:] if tail else []
+    if offset is not None or limit is not None:
+        start = max(0, int(offset or 0))
+        if limit is None:
+            return events[start:]
+        end = start + max(0, int(limit))
+        return events[start:end]
     return events
+
+
+def count_ui_events(chat_id: str) -> int:
+    """Count JSONL lines without building the event list."""
+    try:
+        path = chat_ui_log_path(chat_id)
+    except ValueError:
+        return 0
+    if not path.exists():
+        return 0
+    n = 0
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    n += 1
+    except OSError:
+        return 0
+    return n
+
+
+DEFAULT_UI_EVENTS_TAIL = 400
+
+
+def read_ui_events_page(
+    chat_id: str,
+    *,
+    tail: int = DEFAULT_UI_EVENTS_TAIL,
+    before: int | None = None,
+) -> dict[str, Any]:
+    """Paginated UI log for chat restore / load-older.
+
+    - Default: last ``tail`` events.
+    - ``before``: exclusive end index into the full log (load older page ending
+      just before that index).
+    """
+    total = count_ui_events(chat_id)
+    page_size = max(1, min(int(tail), 2000))
+    if before is None:
+        start = max(0, total - page_size)
+        events = read_ui_events(chat_id, offset=start, limit=page_size)
+        return {
+            "events": events,
+            "total": total,
+            "offset": start,
+            "has_more": start > 0,
+        }
+    end = max(0, min(int(before), total))
+    start = max(0, end - page_size)
+    events = read_ui_events(chat_id, offset=start, limit=end - start)
+    return {
+        "events": events,
+        "total": total,
+        "offset": start,
+        "has_more": start > 0,
+    }
 
 
 def _ui_log_contains(chat_id: str, needle: str, *, max_bytes: int = 512_000) -> bool:

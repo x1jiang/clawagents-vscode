@@ -110,6 +110,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private abort?: AbortController;
   private chatId: string | undefined;
+  /** Absolute UI-log offset of the oldest event currently shown (for load-older). */
+  private eventsOffset = 0;
+  private eventsHasMore = false;
   private mode: AgentMode;
   private interaction: InteractionStyle = "interactive";
   private caveman = true;
@@ -218,6 +221,51 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   post(msg: HostToWebview): void {
     void this.view?.webview.postMessage(msg);
+  }
+
+  private async postChatRestore(
+    chatId: string,
+    chat: Record<string, unknown>,
+    draft = "",
+  ): Promise<void> {
+    const events = (chat.events as Array<Record<string, unknown>>) || [];
+    this.eventsOffset = Number(chat.events_offset ?? 0) || 0;
+    this.eventsHasMore = Boolean(chat.events_has_more);
+    this.post({
+      type: "restore",
+      items: eventsToItems(events),
+      draft,
+      mode: (chat.mode as AgentMode) || this.mode,
+      chatId,
+      autoApprove: this.autoApprove,
+      interaction: this.interaction,
+      caveman: this.caveman,
+      goal: this.goalMode,
+      sessionCostUsd: sessionCostFromChat(chat),
+      eventsOffset: this.eventsOffset,
+      eventsTotal: Number(chat.events_total ?? events.length) || events.length,
+      eventsHasMore: this.eventsHasMore,
+    });
+  }
+
+  private async loadOlderChatEvents(): Promise<void> {
+    if (!this.chatId || !this.eventsHasMore || this.eventsOffset <= 0) {
+      return;
+    }
+    const chat = await this.gateway.getChat(this.chatId, {
+      before: this.eventsOffset,
+      tail: 400,
+    });
+    const events = (chat.events as Array<Record<string, unknown>>) || [];
+    this.eventsOffset = Number(chat.events_offset ?? 0) || 0;
+    this.eventsHasMore = Boolean(chat.events_has_more);
+    this.post({
+      type: "prepend_items",
+      items: eventsToItems(events),
+      eventsOffset: this.eventsOffset,
+      eventsTotal: Number(chat.events_total ?? 0) || undefined,
+      eventsHasMore: this.eventsHasMore,
+    });
   }
 
   get busy(): boolean {
@@ -416,21 +464,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
     try {
-      const chat = await this.gateway.getChat(this.chatId);
-      const events = (chat.events as Array<Record<string, unknown>>) || [];
-      const items = eventsToItems(events);
-      this.post({
-        type: "restore",
-        items,
-        draft: "",
-        mode: this.mode,
-        chatId: this.chatId,
-        autoApprove: this.autoApprove,
-        interaction: this.interaction,
-        caveman: this.caveman,
-        goal: this.goalMode,
-        sessionCostUsd: sessionCostFromChat(chat),
-      });
+      const chat = await this.gateway.getChat(this.chatId, { tail: 400 });
+      await this.postChatRestore(this.chatId, chat);
     } catch {
       /* ignore */
     }
@@ -626,20 +661,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.chatId = msg.chatId;
         await this.persistLocal(this.persistState());
         try {
-          const chat = await this.gateway.getChat(msg.chatId);
-          const events = (chat.events as Array<Record<string, unknown>>) || [];
+          const chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          await this.postChatRestore(msg.chatId, chat);
+        } catch (err) {
           this.post({
-            type: "restore",
-            items: eventsToItems(events),
-            draft: "",
-            mode: (chat.mode as AgentMode) || this.mode,
-            chatId: msg.chatId,
-            autoApprove: this.autoApprove,
-            interaction: this.interaction,
-            caveman: this.caveman,
-            goal: this.goalMode,
-            sessionCostUsd: sessionCostFromChat(chat),
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
           });
+        }
+        break;
+      case "load_older_chat":
+        try {
+          await this.loadOlderChatEvents();
         } catch (err) {
           this.post({
             type: "error",
@@ -708,20 +741,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             break;
           }
           // Sync webview to truncated history before re-running.
-          const chat = await this.gateway.getChat(this.chatId);
-          const events = (chat.events as Array<Record<string, unknown>>) || [];
-          this.post({
-            type: "restore",
-            items: eventsToItems(events),
-            draft: "",
-            mode: (chat.mode as AgentMode) || this.mode,
-            chatId: this.chatId,
-            autoApprove: this.autoApprove,
-            interaction: this.interaction,
-            caveman: this.caveman,
-            goal: this.goalMode,
-            sessionCostUsd: sessionCostFromChat(chat),
-          });
+          const chat = await this.gateway.getChat(this.chatId, { tail: 400 });
+          await this.postChatRestore(this.chatId, chat);
           await this.runTask(res.task, false, this.chatId);
         } catch (err) {
           this.post({
@@ -835,24 +856,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               : `Restore failed: ${String(res.error || "unknown")}`,
           });
           if (res.ok && (msg.mode === "conversation" || msg.mode === "both") && this.chatId) {
-            const chat = await this.gateway.getChat(this.chatId);
-            const events = (chat.events as Array<Record<string, unknown>>) || [];
-            // Carry draft + session cost through: the webview's restore
-            // handler overwrites both, and omitting them wiped whatever the
-            // user was typing and zeroed the cost readout.
+            // Carry draft through: restore overwrites it.
             const saved = this.context.workspaceState.get<PersistedState>(STATE_KEY);
-            this.post({
-              type: "restore",
-              items: eventsToItems(events),
-              draft: saved?.draft || "",
-              mode: (chat.mode as AgentMode) || this.mode,
-              chatId: this.chatId,
-              autoApprove: this.autoApprove,
-              interaction: this.interaction,
-              caveman: this.caveman,
-              goal: this.goalMode,
-              sessionCostUsd: sessionCostFromChat(chat),
-            });
+            const chat = await this.gateway.getChat(this.chatId, { tail: 400 });
+            await this.postChatRestore(this.chatId, chat, saved?.draft || "");
           }
         } catch (err) {
           this.post({

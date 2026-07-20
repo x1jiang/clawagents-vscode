@@ -1,3 +1,10 @@
+## 1.0.117
+
+- **Overlap-safe read reuse** (clawagents≥6.20.30): stub only when the new range is fully contained; partial overlaps fetch fresh content.
+- **Accurate tokens:** sidecar installs `accurate-tokens` (tiktoken); diagnostics report active estimator.
+- **Long-session scale:** paginated UI logs (tail/before), transcript virtualization + load-older, bounded SSE queue.
+- Mode tool profiles (read-only / coding / goal); CI release gate (typecheck, Node/Python tests, VSIX, floor).
+
 ## 1.0.116
 
 - Per-request cost summing (no false >272K cliff on run totals); request/max/long-context stats

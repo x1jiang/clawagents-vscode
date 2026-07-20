@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 29];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 30];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 export const MIN_CLAWAGENTS_VERSION_STR = MIN_CLAWAGENTS_VERSION.join(".");
 
@@ -14,8 +14,9 @@ export const CLAWAGENTS_GITHUB_WHEEL =
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
   // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION.
-  // `media` pulls Pillow so image attach resize/recompress works in the sidecar.
-  `clawagents[gemini,anthropic,bedrock,mcp,media]>=${MIN_CLAWAGENTS_VERSION_STR},<7`,
+  // `media` pulls Pillow; `accurate-tokens` pulls tiktoken for BPE counts
+  // used by Luna 231K/258K compaction thresholds.
+  `clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens]>=${MIN_CLAWAGENTS_VERSION_STR},<7`,
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -30,6 +31,7 @@ export const SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK = [
   "boto3>=1.34.0",
   "mcp>=1.0.0",
   "Pillow>=10.0.0",
+  "tiktoken>=0.5.0",
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",

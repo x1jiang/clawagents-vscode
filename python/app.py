@@ -22,6 +22,7 @@ from chats import (
     list_chats,
     patch_chat,
     read_ui_events,
+    read_ui_events_page,
     run_chat_turn,
     search_chats,
     truncate_after_last_user,
@@ -1136,7 +1137,36 @@ def create_app() -> FastAPI:
         meta = get_chat(chat_id)
         if not meta:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
-        return {**meta, "events": read_ui_events(chat_id)}
+        # Paginate by default so long sessions do not load megabytes of JSONL.
+        # ?all=1 restores the previous full-log behaviour for tooling.
+        qs = request.query_params
+        if qs.get("all") in ("1", "true", "yes"):
+            events = read_ui_events(chat_id)
+            return {
+                **meta,
+                "events": events,
+                "events_total": len(events),
+                "events_offset": 0,
+                "events_has_more": False,
+            }
+        try:
+            tail = int(qs.get("tail") or 400)
+        except ValueError:
+            tail = 400
+        before_raw = qs.get("before")
+        before: int | None
+        try:
+            before = int(before_raw) if before_raw is not None else None
+        except ValueError:
+            before = None
+        page = read_ui_events_page(chat_id, tail=tail, before=before)
+        return {
+            **meta,
+            "events": page["events"],
+            "events_total": page["total"],
+            "events_offset": page["offset"],
+            "events_has_more": page["has_more"],
+        }
 
     @app.patch("/chats/{chat_id}")
     async def chats_patch(chat_id: str, body: PatchChatBody, request: Request):
@@ -1352,7 +1382,9 @@ def create_app() -> FastAPI:
         if denied:
             return denied
 
-        event_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        # Bound + coalesce so a slow webview cannot OOM the sidecar on long runs.
+        _SSE_QUEUE_MAX = 512
+        event_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_SSE_QUEUE_MAX)
         loop = asyncio.get_running_loop()
         chat_id = body.chat_id or body.session_id
         if not chat_id:
@@ -1382,14 +1414,48 @@ def create_app() -> FastAPI:
             "interactive" if effective_mode == "read_only" else body.interaction
         )
 
+        def _enqueue_sse(payload: str | None) -> None:
+            def _put() -> None:
+                # Close sentinel always wins: make room if needed.
+                if payload is None:
+                    while True:
+                        try:
+                            event_queue.put_nowait(None)
+                            return
+                        except asyncio.QueueFull:
+                            try:
+                                event_queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                return
+                # Prefer dropping oldest high-churn frames (usage/agent) over blocking
+                # the agent thread. Critical events (error/done) still get through.
+                for _ in range(_SSE_QUEUE_MAX + 1):
+                    try:
+                        event_queue.put_nowait(payload)
+                        return
+                    except asyncio.QueueFull:
+                        try:
+                            dropped = event_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            return
+                        # Never discard an already-queued close sentinel.
+                        if dropped is None:
+                            try:
+                                event_queue.put_nowait(None)
+                            except asyncio.QueueFull:
+                                pass
+                            return
+
+            loop.call_soon_threadsafe(_put)
+
         def sse(event: str, data: Any) -> None:
             payload = f"event: {event}\ndata: {json.dumps(data)}\n\n"
-            loop.call_soon_threadsafe(event_queue.put_nowait, payload)
+            _enqueue_sse(payload)
 
         def close_stream() -> None:
             # Same scheduling path as sse() so the sentinel can never
             # overtake a previously emitted event.
-            loop.call_soon_threadsafe(event_queue.put_nowait, None)
+            _enqueue_sse(None)
 
         # tool_started args by call id, so tool_completed can resolve which
         # file changed even though the result event carries no args.

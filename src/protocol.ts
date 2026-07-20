@@ -139,6 +139,17 @@ export type HostToWebview =
       caveman?: boolean;
       goal?: boolean;
       sessionCostUsd?: number;
+      /** Absolute offset of first restored event in the UI log. */
+      eventsOffset?: number;
+      eventsTotal?: number;
+      eventsHasMore?: boolean;
+    }
+  | {
+      type: "prepend_items";
+      items: unknown[];
+      eventsOffset: number;
+      eventsTotal?: number;
+      eventsHasMore: boolean;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
   | {
@@ -283,6 +294,7 @@ export type WebviewToHost =
   | { type: "clear" }
   | { type: "new_chat" }
   | { type: "select_chat"; chatId: string }
+  | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
   | { type: "search_chats"; query: string }
   | { type: "regenerate" }
@@ -371,7 +383,7 @@ const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "cancel", "clear", "new_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
-  "load_stats", "bug_report_capture_screenshot",
+  "load_stats", "bug_report_capture_screenshot", "load_older_chat",
 ]);
 const AGENT_MODES = new Set(["ask", "read_only", "auto", "full_access"]);
 const PROVIDERS = new Set(["openai", "anthropic", "gemini", "bedrock", "tavily"]);
