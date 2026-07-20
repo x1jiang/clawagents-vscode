@@ -918,6 +918,23 @@ def create_app() -> FastAPI:
             return denied
         return run_diagnostics()
 
+    @app.get("/graphify/status")
+    async def graphify_status_endpoint(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        from mcp_loader import graphify_status
+        from settings_store import load_settings
+
+        settings = load_settings()
+        return {
+            "enabled": bool(settings.get("graphify")),
+            **graphify_status(
+                graph_path=str(settings.get("graphify_graph_path") or ""),
+                corpus=str(settings.get("graphify_corpus") or "workspace"),
+            ),
+        }
+
     @app.get("/providers")
     async def providers(request: Request):
         denied = _auth_or_401(request)

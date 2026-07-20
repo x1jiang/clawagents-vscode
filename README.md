@@ -54,7 +54,7 @@ Sidebar **Settings** cover provider, model, base URL, skills, MCP, Graphify, bro
 
 For multi-root workspaces, run **ClawAgents: Select Workspace Root**. Switching roots restarts the sidecar and opens a fresh chat so paths, `.env`, history, and trust approvals stay scoped to one folder.
 
-## Companions (lockstep with clawagents ≥6.20.31)
+## Companions (lockstep with clawagents ≥6.20.32)
 
 | Companion | Floor | Auto-ensure | Manual |
 | --- | --- | --- | --- |

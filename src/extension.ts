@@ -1,4 +1,3 @@
-import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
@@ -12,7 +11,13 @@ import {
   workspaceRoot,
   workspaceRoots,
 } from "./config";
-import { ensureCompanions, probeCompanions, probeGraphify } from "./companionDeps";
+import { ensureCompanions, probeCompanions } from "./companionDeps";
+import {
+  adoptUpstreamGraph,
+  getGraphifyStatus,
+  openGraphifyFolder,
+  runGraphifyMode,
+} from "./graphifyOps";
 import {
   ensureSidecarDeps,
   MIN_CLAWAGENTS_VERSION_STR,
@@ -32,88 +37,6 @@ const GRAPHIFY_AGENTS_BLOCK = `<!-- graphify-clawagents -->
 Prefer Graphify knowledge-graph tools (\`query_graph\`, \`shortest_path\`, \`god_nodes\`) before bulk file reads when asking architecture or dependency questions. Graph lives at \`.clawagents/graphify/graph.json\` (or \`graphify-out/graph.json\`). Do not paste graph.json into prompts — query it.
 <!-- /graphify-clawagents -->
 `;
-
-async function runGraphifyWorkspaceCommand(
-  config: ExtensionConfig,
-  mgr: SidecarManager | undefined,
-  mode: "extract" | "update",
-): Promise<void> {
-  const root = workspaceRoot();
-  if (!root) {
-    void vscode.window.showErrorMessage("ClawAgents Graphify: open a workspace folder first.");
-    return;
-  }
-  const out = mgr?.output;
-  const python = config.pythonPath;
-  const probe = probeGraphify(python);
-  if (!probe.ok) {
-    const choice = await vscode.window.showWarningMessage(
-      `Graphify package missing or below floor in sidecar Python.\n${probe.detail}`,
-      { modal: true },
-      "Ensure Companions",
-      "Cancel",
-    );
-    if (choice === "Ensure Companions") {
-      await vscode.commands.executeCommand("clawagents.ensureCompanions");
-    }
-    return;
-  }
-  const confirm = await vscode.window.showWarningMessage(
-    `Run \`python -m graphify ${mode} .\` in:\n${root}\n\nOutput: .clawagents/graphify/`,
-    { modal: true },
-    "Run",
-    "Cancel",
-  );
-  if (confirm !== "Run") {
-    return;
-  }
-  const graphOut = path.join(root, ".clawagents", "graphify");
-  fs.mkdirSync(graphOut, { recursive: true });
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: `ClawAgents: graphify ${mode}…`,
-      cancellable: false,
-    },
-    async () =>
-      new Promise<void>((resolve) => {
-        out?.appendLine(`=== graphify ${mode} @ ${root} ===`);
-        const child = spawn(python, ["-m", "graphify", mode, "."], {
-          cwd: root,
-          env: {
-            ...process.env,
-            GRAPHIFY_OUT: graphOut,
-          },
-          shell: process.platform === "win32",
-        });
-        const onData = (buf: Buffer) => {
-          for (const line of buf.toString().split(/\r?\n/)) {
-            if (line.trim()) {
-              out?.appendLine(line);
-            }
-          }
-        };
-        child.stdout?.on("data", onData);
-        child.stderr?.on("data", onData);
-        child.on("error", (err) => {
-          void vscode.window.showErrorMessage(`graphify ${mode} failed: ${err.message}`);
-          resolve();
-        });
-        child.on("exit", (code) => {
-          if (code === 0) {
-            void vscode.window.showInformationMessage(
-              `Graphify ${mode} finished → ${path.join(graphOut, "graph.json")}`,
-            );
-          } else {
-            void vscode.window.showErrorMessage(
-              `graphify ${mode} exited ${code} — see ClawAgents Sidecar output.`,
-            );
-          }
-          resolve();
-        });
-      }),
-  );
-}
 
 async function appendGraphifyAgentsBlock(): Promise<void> {
   const root = workspaceRoot();
@@ -369,10 +292,41 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand("clawagents.graphifyExtract", async () => {
-      await runGraphifyWorkspaceCommand(config, sidecar, "extract");
+      // Default extract is code-only — bare extract often exits 0 with no graph.json.
+      await runGraphifyMode(config.pythonPath, "extract_code", sidecar?.output);
+      provider?.postGraphifyStatus(
+        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+      );
+    }),
+    vscode.commands.registerCommand("clawagents.graphifyExtractFull", async () => {
+      await runGraphifyMode(config.pythonPath, "extract_full", sidecar?.output);
+      provider?.postGraphifyStatus(
+        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+      );
     }),
     vscode.commands.registerCommand("clawagents.graphifyUpdate", async () => {
-      await runGraphifyWorkspaceCommand(config, sidecar, "update");
+      await runGraphifyMode(config.pythonPath, "update", sidecar?.output);
+      provider?.postGraphifyStatus(
+        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+      );
+    }),
+    vscode.commands.registerCommand("clawagents.graphifyAdoptUpstream", async () => {
+      await adoptUpstreamGraph(sidecar?.output);
+      provider?.postGraphifyStatus(
+        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+      );
+    }),
+    vscode.commands.registerCommand("clawagents.graphifyStatus", async () => {
+      const st = getGraphifyStatus(config.pythonPath);
+      provider?.postGraphifyStatus(st as unknown as Record<string, unknown>);
+      void vscode.window.showInformationMessage(
+        st.ready
+          ? `Graphify ready — ${st.nodeCount ?? "?"} nodes @ ${st.graphPath}`
+          : `Graphify: ${st.hint}`,
+      );
+    }),
+    vscode.commands.registerCommand("clawagents.graphifyOpenFolder", async () => {
+      await openGraphifyFolder();
     }),
     vscode.commands.registerCommand("clawagents.graphifyAppendAgentsMd", async () => {
       await appendGraphifyAgentsBlock();

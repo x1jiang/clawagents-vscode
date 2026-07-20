@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.119",
+  "version": "1.0.120",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -149,11 +149,27 @@
       },
       {
         "command": "clawagents.graphifyExtract",
-        "title": "ClawAgents: Graphify — Extract Workspace"
+        "title": "ClawAgents: Graphify — Build Graph (code-only)"
+      },
+      {
+        "command": "clawagents.graphifyExtractFull",
+        "title": "ClawAgents: Graphify — Full Extract (docs + LLM)"
       },
       {
         "command": "clawagents.graphifyUpdate",
-        "title": "ClawAgents: Graphify — Update Workspace"
+        "title": "ClawAgents: Graphify — Augment Graph (update)"
+      },
+      {
+        "command": "clawagents.graphifyAdoptUpstream",
+        "title": "ClawAgents: Graphify — Use Existing graphify-out"
+      },
+      {
+        "command": "clawagents.graphifyStatus",
+        "title": "ClawAgents: Graphify — Show Status"
+      },
+      {
+        "command": "clawagents.graphifyOpenFolder",
+        "title": "ClawAgents: Graphify — Reveal Graph Folder"
       },
       {
         "command": "clawagents.graphifyAppendAgentsMd",

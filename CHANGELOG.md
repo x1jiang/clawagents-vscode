@@ -1,3 +1,9 @@
+## 1.0.120
+
+- **Graphify UX hardened:** Build graph defaults to `extract --code-only` (offline); verify `graph.json` after run; Augment = `update`; Use existing `graphify-out`; Settings panel with status + explicit actions.
+- Sidecar `GET /graphify/status`; package probe no longer fails when clawagents heavy imports lack openai.
+- Require clawagents≥6.20.32.
+
 ## 1.0.119
 
 - **Native Graphify companion** (clawagents≥6.20.31): settings toggle, MCP `query_graph` / path tools, diagnostics, Ensure Companions installs `graphifyy[mcp]` into sidecar Python.

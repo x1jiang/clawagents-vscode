@@ -509,6 +509,9 @@ export function App() {
   const [skillsPreview, setSkillsPreview] = useState<SkillsPreview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [diagnostics, setDiagnostics] = useState<unknown>();
+  const [graphifyStatus, setGraphifyStatus] = useState<Record<string, unknown> | null>(
+    null,
+  );
   const [stats, setStats] = useState<unknown>();
   const [usage, setUsage] = useState<{
     promptTokens?: number;
@@ -936,6 +939,9 @@ export function App() {
           break;
         case "diagnostics":
           setDiagnostics(msg.data);
+          break;
+        case "graphify_status":
+          setGraphifyStatus(msg.data || null);
           break;
         case "stats":
           setStats(msg.data);
@@ -2316,6 +2322,7 @@ export function App() {
                 setPanel(p);
                 if (p === "settings") {
                   post({ type: "load_settings" });
+                  post({ type: "graphify_action", action: "status" });
                 }
                 if (p === "diagnostics") {
                   post({ type: "load_diagnostics" });
@@ -3823,46 +3830,119 @@ export function App() {
               />
               Context Mode (token-efficient ctx_* tools)
             </label>
-            <label
-              className="check"
-              title="Local knowledge-graph MCP (Graphify). Requires graphifyy[mcp] in the sidecar Python and a graph at .clawagents/graphify/graph.json. Use Command Palette: Graphify — Extract/Update Workspace."
-            >
-              <input
-                type="checkbox"
-                checked={Boolean(settings.graphify ?? false)}
-                onChange={(e) => setSettings((s) => ({ ...s, graphify: e.target.checked }))}
-              />
-              Graphify (knowledge-graph MCP)
-            </label>
-            {Boolean(settings.graphify) && (
-              <>
+            <div className="graphify-panel" style={{ marginTop: 10, marginBottom: 8 }}>
+              <div className="muted tiny" style={{ marginBottom: 6 }}>
+                <strong>Graphify</strong> — local knowledge graph for architecture /
+                dependency questions (query before bulk reads).
+              </div>
+              <label
+                className="check"
+                title="When on, the sidecar starts Graphify MCP against the active graph.json so the agent can call query_graph / shortest_path / god_nodes."
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.graphify ?? false)}
+                  onChange={(e) => setSettings((s) => ({ ...s, graphify: e.target.checked }))}
+                />
+                Enable Graphify MCP (agent can query the graph)
+              </label>
+              <div className="muted tiny" style={{ marginTop: 6, marginBottom: 6 }}>
+                {graphifyStatus
+                  ? graphifyStatus.ready
+                    ? `Ready — ${String(graphifyStatus.nodeCount ?? "?")} nodes` +
+                      (graphifyStatus.linkCount != null
+                        ? `, ${String(graphifyStatus.linkCount)} links`
+                        : "") +
+                      ` @ ${String(graphifyStatus.graphPath || graphifyStatus.graph_path || "")}`
+                    : String(
+                        graphifyStatus.hint ||
+                          graphifyStatus.summary ||
+                          "Not ready — build or adopt a graph.",
+                      )
+                  : "Status unknown — click Refresh."}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "status" })}
+                >
+                  Refresh status
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "ensure" })}
+                  title="pip install graphifyy[mcp] into sidecar Python"
+                >
+                  Install package
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "extract_code" })}
+                  title="AST extract — offline, writes .clawagents/graphify/graph.json"
+                >
+                  Build graph (code)
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "update" })}
+                  title="Incremental AST update — augment after code changes"
+                >
+                  Augment graph
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "adopt_upstream" })}
+                  title="Copy existing graphify-out/graph.json into .clawagents/graphify/"
+                >
+                  Use existing graphify-out
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "extract_full" })}
+                  title="Includes docs; needs LLM API keys — prefer code-only if unsure"
+                >
+                  Full extract (LLM)
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "open_folder" })}
+                >
+                  Reveal folder
+                </button>
+              </div>
+              <label>
+                Graph source
+                <select
+                  value={String(settings.graphify_corpus || "workspace")}
+                  onChange={(e) =>
+                    setSettings((s) => ({ ...s, graphify_corpus: e.target.value }))
+                  }
+                >
+                  <option value="workspace">Workspace (.clawagents/graphify or graphify-out)</option>
+                  <option value="path">Custom graph.json path</option>
+                </select>
+              </label>
+              {String(settings.graphify_corpus || "workspace") === "path" && (
                 <label>
-                  Graphify corpus
-                  <select
-                    value={String(settings.graphify_corpus || "workspace")}
+                  Custom graph path
+                  <input
+                    type="text"
+                    value={String(settings.graphify_graph_path || "")}
                     onChange={(e) =>
-                      setSettings((s) => ({ ...s, graphify_corpus: e.target.value }))
+                      setSettings((s) => ({ ...s, graphify_graph_path: e.target.value }))
                     }
-                  >
-                    <option value="workspace">Workspace (.clawagents/graphify)</option>
-                    <option value="path">Custom graph path</option>
-                  </select>
+                    placeholder="~/.graphify/global-graph.json"
+                  />
                 </label>
-                {String(settings.graphify_corpus || "workspace") === "path" && (
-                  <label>
-                    Graph path (graph.json or directory)
-                    <input
-                      type="text"
-                      value={String(settings.graphify_graph_path || "")}
-                      onChange={(e) =>
-                        setSettings((s) => ({ ...s, graphify_graph_path: e.target.value }))
-                      }
-                      placeholder="~/.graphify/global-graph.json"
-                    />
-                  </label>
-                )}
-              </>
-            )}
+              )}
+            </div>
             <label
               className="check"
               title="Register Playwright browser_* tools (navigate, snapshot, click). Needs: pip install 'clawagents[browser]' && playwright install chromium. Auto-approve → Browser still decides whether each call asks first."

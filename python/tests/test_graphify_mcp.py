@@ -52,6 +52,24 @@ def test_resolve_graphify_directory_appends_graph_json(tmp_path: Path):
     assert got == (d / "graph.json").resolve()
 
 
+def test_probe_graphify_package_light_without_clawagents(monkeypatch):
+    """Light probe must work even when clawagents.companions import fails."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _boom(name, *a, **k):
+        if name == "clawagents" or name.startswith("clawagents."):
+            raise ImportError("blocked")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _boom)
+    # Force the except path
+    status = mcp_loader._probe_graphify_package_light()
+    assert "min_version" in status
+    assert "summary" in status
+
+
 def test_create_graphify_server_none_without_graph(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         mcp_loader,

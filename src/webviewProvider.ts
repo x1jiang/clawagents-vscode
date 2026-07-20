@@ -26,6 +26,13 @@ import {
 } from "./localAttachments";
 import { captureBugScreenshot, sendBugReportEmail } from "./bugReport";
 import { hostDictation } from "./hostDictation";
+import { ensureCompanions } from "./companionDeps";
+import {
+  adoptUpstreamGraph,
+  getGraphifyStatus,
+  openGraphifyFolder,
+  runGraphifyMode,
+} from "./graphifyOps";
 import { parseWebviewToHost } from "./protocol";
 import type {
   AgentMode,
@@ -221,6 +228,52 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   post(msg: HostToWebview): void {
     void this.view?.webview.postMessage(msg);
+  }
+
+  /** Push Graphify companion status into the webview Settings panel. */
+  postGraphifyStatus(data: Record<string, unknown>): void {
+    this.post({ type: "graphify_status", data });
+  }
+
+  private async handleGraphifyAction(
+    action:
+      | "status"
+      | "extract_code"
+      | "extract_full"
+      | "update"
+      | "adopt_upstream"
+      | "ensure"
+      | "open_folder",
+  ): Promise<void> {
+    const python = this.config.pythonPath;
+    const out = this.sidecar.output;
+    try {
+      if (action === "ensure") {
+        await ensureCompanions(out, { force: true, python });
+      } else if (action === "extract_code") {
+        await runGraphifyMode(python, "extract_code", out);
+      } else if (action === "extract_full") {
+        await runGraphifyMode(python, "extract_full", out);
+      } else if (action === "update") {
+        await runGraphifyMode(python, "update", out);
+      } else if (action === "adopt_upstream") {
+        await adoptUpstreamGraph(out);
+      } else if (action === "open_folder") {
+        await openGraphifyFolder();
+      }
+      // Prefer sidecar status when running; fall back to host filesystem probe.
+      try {
+        const remote = await this.gateway.getGraphifyStatus();
+        this.postGraphifyStatus(remote as Record<string, unknown>);
+      } catch {
+        this.postGraphifyStatus(getGraphifyStatus(python) as unknown as Record<string, unknown>);
+      }
+    } catch (err) {
+      this.post({
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private async postChatRestore(
@@ -1546,6 +1599,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             message: err instanceof Error ? err.message : String(err),
           });
         }
+        break;
+      case "graphify_action":
+        await this.handleGraphifyAction(msg.action);
         break;
       case "load_stats":
         try {

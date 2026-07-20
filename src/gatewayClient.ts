@@ -372,6 +372,14 @@ export class GatewayClient {
     return requestJson<unknown>(this.requireHandle(), "GET", "/diagnostics");
   }
 
+  getGraphifyStatus() {
+    return requestJson<Record<string, unknown>>(
+      this.requireHandle(),
+      "GET",
+      "/graphify/status",
+    );
+  }
+
   getStats() {
     return requestJson<unknown>(this.requireHandle(), "GET", "/stats");
   }

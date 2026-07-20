@@ -211,6 +211,7 @@ export type HostToWebview =
       hasGeminiKey?: boolean;
     }
   | { type: "diagnostics"; data: unknown }
+  | { type: "graphify_status"; data: Record<string, unknown> }
   | { type: "stats"; data: unknown }
   | {
       type: "bug_report_result";
@@ -354,6 +355,17 @@ export type WebviewToHost =
     }
   | { type: "clear_api_key" }
   | { type: "load_diagnostics" }
+  | {
+      type: "graphify_action";
+      action:
+        | "status"
+        | "extract_code"
+        | "extract_full"
+        | "update"
+        | "adopt_upstream"
+        | "ensure"
+        | "open_folder";
+    }
   | { type: "load_stats" }
   | {
       type: "persist";
@@ -386,6 +398,16 @@ const NO_PAYLOAD_MESSAGES = new Set([
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
   "load_stats", "bug_report_capture_screenshot", "load_older_chat",
+]);
+
+const GRAPHIFY_ACTIONS = new Set([
+  "status",
+  "extract_code",
+  "extract_full",
+  "update",
+  "adopt_upstream",
+  "ensure",
+  "open_folder",
 ]);
 const AGENT_MODES = new Set(["ask", "read_only", "auto", "full_access"]);
 const PROVIDERS = new Set(["openai", "anthropic", "gemini", "bedrock", "tavily"]);
@@ -463,6 +485,10 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         && ["approve", "request_changes", "reject"].includes(String(value.decision))
         && (value.comment === undefined || optionalText(value.comment))
         ? value as WebviewToHost : undefined;
+    case "graphify_action":
+      return GRAPHIFY_ACTIONS.has(String(value.action))
+        ? value as WebviewToHost
+        : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
     case "search_chats":

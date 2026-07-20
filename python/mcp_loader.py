@@ -202,6 +202,47 @@ def resolve_graphify_graph_path(
     return preferred
 
 
+def _probe_graphify_package_light() -> dict[str, Any]:
+    """Probe graphifyy without importing clawagents (avoids heavy __init__ / openai)."""
+    min_v = ".".join(str(x) for x in _min_graphify())
+    try:
+        import importlib.metadata as md
+
+        ver = md.version("graphifyy")
+    except Exception:  # noqa: BLE001
+        try:
+            import graphify  # noqa: F401
+
+            ver = str(getattr(graphify, "__version__", "") or "")
+            if not ver:
+                raise ImportError("no version")
+        except Exception:  # noqa: BLE001
+            return {
+                "found": False,
+                "version": None,
+                "ok": False,
+                "min_version": min_v,
+                "path": sys.executable,
+                "hint": "pip install 'graphifyy[mcp]'",
+                "summary": f"graphify: missing — need >={min_v}",
+            }
+    parts = tuple(int(x) for x in ver.split(".")[:3] if x.isdigit())
+    while len(parts) < 3:
+        parts = parts + (0,)
+    ok = parts >= _min_graphify()
+    return {
+        "found": True,
+        "version": ver,
+        "ok": ok,
+        "min_version": min_v,
+        "path": sys.executable,
+        "hint": "ok" if ok else f"upgrade: pip install -U 'graphifyy[mcp]' (have {ver})",
+        "summary": (
+            f"graphify: {ver} ({'ok' if ok else 'below floor'}, need >={min_v})"
+        ),
+    }
+
+
 def graphify_status(
     *,
     graph_path: str | None = None,
@@ -209,6 +250,7 @@ def graphify_status(
     workspace: Path | None = None,
 ) -> dict[str, Any]:
     """Version + graph path status for doctor / diagnostics."""
+    package: dict[str, Any]
     try:
         from clawagents.companions import probe_graphify
 
@@ -222,17 +264,8 @@ def graphify_status(
             "hint": s.hint,
             "summary": s.summary(),
         }
-    except ImportError:
-        min_v = ".".join(str(x) for x in _min_graphify())
-        package = {
-            "found": False,
-            "version": None,
-            "ok": False,
-            "min_version": min_v,
-            "path": None,
-            "hint": "pip install 'graphifyy[mcp]'",
-            "summary": f"graphify: missing — need >={min_v}",
-        }
+    except Exception:  # noqa: BLE001 — ImportError or clawagents __init__ side effects
+        package = _probe_graphify_package_light()
 
     resolved = resolve_graphify_graph_path(
         graph_path=graph_path,
