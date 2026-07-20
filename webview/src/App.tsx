@@ -4530,6 +4530,11 @@ export function App() {
                       finishAttachmentRequest,
                     );
                   }}
+                  onDrop={(e) => {
+                    // Prevent the browser's default path-insertion behavior inside textarea,
+                    // but allow it to bubble up to .compose-row for custom attachment logic.
+                    e.preventDefault();
+                  }}
                   placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · mic / ⌃␣ / F8 dictate · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
                   rows={3}
                   onKeyDown={(e) => {
@@ -5139,17 +5144,24 @@ function collectDropUris(dt: DataTransfer): string[] {
     }
     pushLine(data);
   };
-  const types = new Set<string>([
+  const types = [
     "application/vnd.code.uri-list",
     "text/uri-list",
     "ResourceURLs",
     "resourceurls",
-    "text/plain",
-    ...Array.from(dt.types ?? []),
-  ]);
+  ];
   for (const type of types) {
+    if (!dt.types.includes(type)) continue;
     try {
       pushPayload(type, dt.getData(type));
+    } catch {
+      /* ignore */
+    }
+  }
+  
+  if (found.length === 0 && dt.types.includes("text/plain")) {
+    try {
+      pushPayload("text/plain", dt.getData("text/plain"));
     } catch {
       /* ignore */
     }
