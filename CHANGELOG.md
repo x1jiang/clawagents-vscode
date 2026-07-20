@@ -1,3 +1,8 @@
+## 1.0.124
+
+- Add failure discipline for authentication, missing packages, patch rereads, and secret-safe `.env` handling.
+- Require `clawagents>=6.20.35` — default three-failure rethink guard, structured failure classification, shell-secret redaction, and heredoc-safe shell sessions.
+
 ## 1.0.123
 
 - Prefer engine `output` / `ui_output` over short `preview` for tool cards (shows stderr on long execute failures).

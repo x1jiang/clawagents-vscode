@@ -1177,6 +1177,17 @@ async def run_chat_turn(
         "answer; do not re-read the same range or load skills unless required. "
         "Use activate_tool_group for optional web/git/pty tools."
     )
+    instructions.append(
+        "Failure and credential discipline: classify a failed command before another "
+        "tool attempt. Never source a workspace `.env`, echo credentials, interpolate "
+        "passwords into shell command strings, or pass them as CLI arguments; use a "
+        "literal env-file or a mode-0600 authentication file. If a remote client reports "
+        "NT_STATUS_LOGON_FAILURE, authentication rejected, or access denied, the "
+        "transport reached the service: stop changing clients/runtimes and report the "
+        "exact response so the user can verify the domain-qualified username and rotate "
+        "the credential. If a package is unavailable, do not hop package managers. "
+        "After an apply_patch SEARCH miss, re-read the exact current span before retrying."
+    )
     if caveman:
         instructions.append(CAVEMAN_INSTRUCTION)
     if goal:
