@@ -45,13 +45,15 @@ test("ensureCompanions defaults to probe-only (off)", () => {
 test("companion floors match lockstep constants", () => {
   assert.deepEqual(deps.MIN_CONTEXT_MODE_VERSION, [1, 0, 169]);
   assert.deepEqual(deps.MIN_RTK_VERSION, [0, 43, 0]);
+  assert.deepEqual(deps.MIN_GRAPHIFY_VERSION, [0, 9, 20]);
 });
 
-test("probeCompanions returns context-mode and rtk", () => {
+test("probeCompanions returns context-mode, rtk, and graphify", () => {
   const probes = deps.probeCompanions();
-  assert.equal(probes.length, 2);
+  assert.equal(probes.length, 3);
   assert.equal(probes[0].name, "context-mode");
   assert.equal(probes[1].name, "rtk");
+  assert.equal(probes[2].name, "graphify");
   for (const p of probes) {
     assert.equal(typeof p.ok, "boolean");
     assert.equal(typeof p.detail, "string");

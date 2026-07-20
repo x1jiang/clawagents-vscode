@@ -3825,6 +3825,46 @@ export function App() {
             </label>
             <label
               className="check"
+              title="Local knowledge-graph MCP (Graphify). Requires graphifyy[mcp] in the sidecar Python and a graph at .clawagents/graphify/graph.json. Use Command Palette: Graphify — Extract/Update Workspace."
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(settings.graphify ?? false)}
+                onChange={(e) => setSettings((s) => ({ ...s, graphify: e.target.checked }))}
+              />
+              Graphify (knowledge-graph MCP)
+            </label>
+            {Boolean(settings.graphify) && (
+              <>
+                <label>
+                  Graphify corpus
+                  <select
+                    value={String(settings.graphify_corpus || "workspace")}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, graphify_corpus: e.target.value }))
+                    }
+                  >
+                    <option value="workspace">Workspace (.clawagents/graphify)</option>
+                    <option value="path">Custom graph path</option>
+                  </select>
+                </label>
+                {String(settings.graphify_corpus || "workspace") === "path" && (
+                  <label>
+                    Graph path (graph.json or directory)
+                    <input
+                      type="text"
+                      value={String(settings.graphify_graph_path || "")}
+                      onChange={(e) =>
+                        setSettings((s) => ({ ...s, graphify_graph_path: e.target.value }))
+                      }
+                      placeholder="~/.graphify/global-graph.json"
+                    />
+                  </label>
+                )}
+              </>
+            )}
+            <label
+              className="check"
               title="Register Playwright browser_* tools (navigate, snapshot, click). Needs: pip install 'clawagents[browser]' && playwright install chromium. Auto-approve → Browser still decides whether each call asks first."
             >
               <input

@@ -22,6 +22,7 @@ export function normalizeSettingsForSave(
 const SETTINGS_SAVE_KEYS = [
   "model", "provider", "base_url", "default_mode", "telemetry", "trajectory",
   "learn", "browser_tools", "mcp_enabled", "mcp_trust_workspace", "context_mode",
+  "graphify", "graphify_corpus", "graphify_graph_path",
   "workspace_system_prompt", "skill_dirs", "skill_auto_discover", "skill_ignore_dirs",
   "skill_exclude", "allow_full_access", "allow_external_skill_dirs", "skill_user_homes",
   "aws_region", "aws_profile", "bedrock_mode", "reasoning_effort", "wire_api",

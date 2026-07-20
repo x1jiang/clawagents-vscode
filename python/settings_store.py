@@ -27,6 +27,12 @@ DEFAULTS: dict[str, Any] = {
     # When False, only ~/.clawagents/mcp.json is loaded (not workspace).
     "mcp_trust_workspace": False,
     "context_mode": True,
+    # Graphify local knowledge graph MCP (https://github.com/Graphify-Labs/graphify).
+    "graphify": False,
+    # workspace = .clawagents/graphify (or graphify-out); path = use graphify_graph_path.
+    "graphify_corpus": "workspace",
+    # Absolute or workspace-relative path to graph.json (or a directory containing it).
+    "graphify_graph_path": "",
     "workspace_system_prompt": "",
     # Extra skill roots (absolute or workspace-relative). Each folder may be a
     # single skill (SKILL.md) or a container of skill subfolders / .md files.
@@ -163,6 +169,9 @@ def _env_defaults() -> dict[str, Any]:
     cm = os.environ.get("CLAW_CONTEXT_MODE")
     if cm is not None:
         out["context_mode"] = cm.strip() not in ("0", "false", "False", "")
+    gf = os.environ.get("CLAW_GRAPHIFY")
+    if gf is not None:
+        out["graphify"] = gf.strip() not in ("0", "false", "False", "")
     return out
 
 

@@ -46,19 +46,21 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.defaultMode` | `auto` | Default permission mode |
 | `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
 | `clawagents.contextMode` | `true` | Context Mode tools (`context-mode` ≥1.0.169) |
-| `clawagents.ensureCompanions` | `false` | Offer companion installs on sidecar start after confirmation (`context-mode`, `rtk`); default is probe-only |
+| `clawagents.graphify` | `false` | Graphify knowledge-graph MCP (`graphifyy[mcp]` ≥0.9.20 + workspace graph) |
+| `clawagents.ensureCompanions` | `false` | Offer companion installs on sidecar start after confirmation (`context-mode`, `rtk`, `graphifyy`); default is probe-only |
 | `clawagents.syncPathPythons` | `false` | Offer (with confirmation) to upgrade other PATH Pythons below the floor; default manages only `pythonPath` |
 
-Sidebar **Settings** cover provider, model, base URL, skills, MCP, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
+Sidebar **Settings** cover provider, model, base URL, skills, MCP, Graphify, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
 
 For multi-root workspaces, run **ClawAgents: Select Workspace Root**. Switching roots restarts the sidecar and opens a fresh chat so paths, `.env`, history, and trust approvals stay scoped to one folder.
 
-## Companions (lockstep with clawagents ≥6.20.30)
+## Companions (lockstep with clawagents ≥6.20.31)
 
 | Companion | Floor | Auto-ensure | Manual |
 | --- | --- | --- | --- |
 | [Context Mode](https://github.com/mksglu/context-mode) | **1.0.169** | `npm install -g context-mode@latest` | Node ≥ 22.5 |
 | [RTK](https://www.rtk-ai.app/) | **0.43.0** | `brew install rtk` / `brew upgrade rtk` | PATH `rtk` |
+| [Graphify](https://github.com/Graphify-Labs/graphify) | **0.9.20** (`graphifyy`) | `pip install 'graphifyy[mcp]'` into sidecar Python | Extract via **ClawAgents: Graphify — Extract Workspace** |
 | Caveman | vendored skill | composer toggle | JuliusBrussee/caveman |
 
 Command Palette → **ClawAgents: Ensure Companions** forces a re-probe/upgrade.

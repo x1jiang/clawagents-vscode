@@ -7,13 +7,15 @@ import { versionAtLeast } from "./pythonDeps";
 
 /**
  * Floors must stay in lockstep with clawagents.companions
- * (MIN_CONTEXT_MODE / MIN_RTK in clawagents_py).
+ * (MIN_CONTEXT_MODE / MIN_RTK / MIN_GRAPHIFY in clawagents_py).
  */
 export const MIN_CONTEXT_MODE_VERSION: [number, number, number] = [1, 0, 169];
 export const MIN_RTK_VERSION: [number, number, number] = [0, 43, 0];
+export const MIN_GRAPHIFY_VERSION: [number, number, number] = [0, 9, 20];
+export const GRAPHIFY_PIP_SPEC = "graphifyy[mcp]>=0.9.20";
 
 export type CompanionProbe = {
-  name: "context-mode" | "rtk";
+  name: "context-mode" | "rtk" | "graphify";
   found: boolean;
   version?: string;
   path?: string;
@@ -136,8 +138,50 @@ export function probeRtk(): CompanionProbe {
   };
 }
 
-export function probeCompanions(): CompanionProbe[] {
-  return [probeContextMode(), probeRtk()];
+export function probeGraphify(python?: string): CompanionProbe {
+  const py =
+    python ||
+    vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
+    "python3";
+  const result = spawnSync(
+    py,
+    [
+      "-c",
+      "import importlib.metadata as m; print(m.version('graphifyy'))",
+    ],
+    {
+      encoding: "utf8",
+      timeout: 15_000,
+      env: process.env,
+    },
+  );
+  if (result.status !== 0) {
+    const floor = MIN_GRAPHIFY_VERSION.join(".");
+    return {
+      name: "graphify",
+      found: false,
+      ok: false,
+      path: py,
+      detail: `missing — pip install '${GRAPHIFY_PIP_SPEC}' (need >=${floor})`,
+    };
+  }
+  const version = (result.stdout || "").trim().split(/\r?\n/).find(Boolean);
+  const ok = versionAtLeast(version, MIN_GRAPHIFY_VERSION);
+  const floor = MIN_GRAPHIFY_VERSION.join(".");
+  return {
+    name: "graphify",
+    found: true,
+    version,
+    path: py,
+    ok,
+    detail: ok
+      ? `${version || "?"} >= ${floor}`
+      : `have ${version || "?"}, need >=${floor} — pip install -U '${GRAPHIFY_PIP_SPEC}'`,
+  };
+}
+
+export function probeCompanions(python?: string): CompanionProbe[] {
+  return [probeContextMode(), probeRtk(), probeGraphify(python)];
 }
 
 function runCommand(
@@ -291,9 +335,9 @@ const ensureInFlight = new Map<string, Promise<CompanionProbe[]>>();
 /** Probe and auto-upgrade companions when below floor. Non-fatal. */
 export function ensureCompanions(
   output: { appendLine(s: string): void },
-  options?: { force?: boolean },
+  options?: { force?: boolean; python?: string },
 ): Promise<CompanionProbe[]> {
-  const key = "global";
+  const key = options?.python ? `py:${options.python}` : "global";
   const existing = ensureInFlight.get(key);
   if (existing && !options?.force) {
     return existing;
@@ -307,12 +351,55 @@ export function ensureCompanions(
   return run;
 }
 
+async function ensureGraphify(
+  output: { appendLine(s: string): void },
+  options?: { force?: boolean; python?: string },
+): Promise<CompanionProbe> {
+  const python =
+    options?.python ||
+    vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
+    "python3";
+  let probe = probeGraphify(python);
+  if (probe.ok) {
+    return probe;
+  }
+  const ok = options?.force
+    ? true
+    : await confirmGlobalInstall(
+        `ClawAgents wants to run \`${python} -m pip install -U '${GRAPHIFY_PIP_SPEC}'\` into the sidecar interpreter (not a global npm install). Continue?`,
+      );
+  if (!ok) {
+    output.appendLine("graphify: install skipped (user declined or probe-only)");
+    return probe;
+  }
+  const result = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "ClawAgents: installing graphifyy into sidecar Python…",
+      cancellable: false,
+    },
+    async () =>
+      runCommand(python, ["-m", "pip", "install", "-U", GRAPHIFY_PIP_SPEC], output),
+  );
+  if (!result.ok) {
+    output.appendLine(`graphify install failed: ${result.detail}`);
+    return probeGraphify(python);
+  }
+  probe = probeGraphify(python);
+  output.appendLine(`graphify after ensure: ${probe.detail}`);
+  return probe;
+}
+
 async function ensureCompanionsOnce(
   output: { appendLine(s: string): void },
-  options?: { force?: boolean },
+  options?: { force?: boolean; python?: string },
 ): Promise<CompanionProbe[]> {
-  output.appendLine("=== Companion probe (context-mode, rtk) ===");
-  const before = probeCompanions();
+  const python =
+    options?.python ||
+    vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
+    undefined;
+  output.appendLine("=== Companion probe (context-mode, rtk, graphify) ===");
+  const before = probeCompanions(python);
   for (const p of before) {
     output.appendLine(`  ${p.name}: ${p.detail}`);
   }
@@ -324,15 +411,24 @@ async function ensureCompanionsOnce(
   }
 
   const results: CompanionProbe[] = [];
-  if (!before[0]?.ok) {
+  const byName = Object.fromEntries(before.map((p) => [p.name, p])) as Record<
+    string,
+    CompanionProbe
+  >;
+  if (!byName["context-mode"]?.ok) {
     results.push(await ensureContextMode(output, options));
   } else {
-    results.push(before[0]);
+    results.push(byName["context-mode"]);
   }
-  if (!before[1]?.ok) {
+  if (!byName.rtk?.ok) {
     results.push(await ensureRtk(output, options));
   } else {
-    results.push(before[1]);
+    results.push(byName.rtk);
+  }
+  if (!byName.graphify?.ok) {
+    results.push(await ensureGraphify(output, { ...options, python }));
+  } else {
+    results.push(byName.graphify);
   }
 
   const allOk = results.every((r) => r.ok);

@@ -97,6 +97,23 @@ def run_diagnostics() -> dict[str, Any]:
         add("context_mode", False, str(exc))
 
     try:
+        from mcp_loader import graphify_status
+
+        gf = graphify_status(
+            graph_path=str(settings.get("graphify_graph_path") or ""),
+            corpus=str(settings.get("graphify_corpus") or "workspace"),
+        )
+        # Soft check: package floor matters when the toggle is on; otherwise report.
+        want = bool(settings.get("graphify"))
+        add(
+            "graphify",
+            bool(gf.get("ok")) if want else True,
+            gf.get("summary") or str(gf),
+        )
+    except Exception as exc:  # noqa: BLE001
+        add("graphify", False, str(exc))
+
+    try:
         from clawagents.companions import probe_rtk
 
         rtk = probe_rtk()

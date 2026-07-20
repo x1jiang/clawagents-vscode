@@ -1280,6 +1280,24 @@ async def run_chat_turn(
                 instructions.append(CONTEXT_MODE_ROUTING_INSTRUCTION)
         except Exception:  # noqa: BLE001
             pass
+    if settings.get("graphify", False):
+        try:
+            from mcp_loader import (
+                GRAPHIFY_ROUTING_INSTRUCTION,
+                create_graphify_server,
+            )
+
+            already_gf = any(getattr(s, "name", "") == "graphify" for s in mcp_servers)
+            gf_server = None if already_gf else create_graphify_server(
+                graph_path=str(settings.get("graphify_graph_path") or ""),
+                corpus=str(settings.get("graphify_corpus") or "workspace"),
+            )
+            if gf_server is not None:
+                mcp_servers.append(gf_server)
+            if already_gf or gf_server is not None:
+                instructions.append(GRAPHIFY_ROUTING_INSTRUCTION)
+        except Exception:  # noqa: BLE001
+            pass
     if mcp_servers:
         kwargs["mcp_servers"] = mcp_servers
     if instructions:

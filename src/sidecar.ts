@@ -216,7 +216,7 @@ export class SidecarManager {
 
     // Companions (context-mode / rtk): non-fatal — chat works without them.
     try {
-      await ensureCompanions(this.output);
+      await ensureCompanions(this.output, { python });
     } catch (err) {
       this.output.appendLine(
         `Companion ensure error (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
@@ -273,6 +273,7 @@ export class SidecarManager {
       PYTHONUNBUFFERED: "1",
       CLAW_KEY_SOURCES: JSON.stringify(keySources),
       CLAW_CONTEXT_MODE: this.config.contextMode ? "1" : "0",
+      CLAW_GRAPHIFY: this.config.graphify ? "1" : "0",
       // Repository files cannot grant these approvals. They are restored from
       // workspace-scoped VS Code SecretStorage before the sidecar serves probes.
       CLAW_RUNTIME_TRUST: JSON.stringify(runtimeTrust),

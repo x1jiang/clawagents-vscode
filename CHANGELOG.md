@@ -1,3 +1,9 @@
+## 1.0.119
+
+- **Native Graphify companion** (clawagents≥6.20.31): settings toggle, MCP `query_graph` / path tools, diagnostics, Ensure Companions installs `graphifyy[mcp]` into sidecar Python.
+- Commands: Graphify Extract/Update Workspace; optional Append AGENTS.md block.
+- Graph path: `.clawagents/graphify/graph.json` (or custom / `graphify-out/`).
+
 ## 1.0.118
 
 - Extension-managed Python virtualenv by default; custom interpreter remains available.

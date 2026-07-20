@@ -1,3 +1,6 @@
+import { spawn } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import * as vscode from "vscode";
 import {
   buildProblemsContext,
@@ -9,7 +12,7 @@ import {
   workspaceRoot,
   workspaceRoots,
 } from "./config";
-import { ensureCompanions, probeCompanions } from "./companionDeps";
+import { ensureCompanions, probeCompanions, probeGraphify } from "./companionDeps";
 import {
   ensureSidecarDeps,
   MIN_CLAWAGENTS_VERSION_STR,
@@ -22,6 +25,128 @@ import {
 } from "./pythonPathPin";
 import { SidecarManager } from "./sidecar";
 import { ClawAgentsWebviewProvider } from "./webviewProvider";
+
+const GRAPHIFY_AGENTS_BLOCK = `<!-- graphify-clawagents -->
+## Graphify
+
+Prefer Graphify knowledge-graph tools (\`query_graph\`, \`shortest_path\`, \`god_nodes\`) before bulk file reads when asking architecture or dependency questions. Graph lives at \`.clawagents/graphify/graph.json\` (or \`graphify-out/graph.json\`). Do not paste graph.json into prompts — query it.
+<!-- /graphify-clawagents -->
+`;
+
+async function runGraphifyWorkspaceCommand(
+  config: ExtensionConfig,
+  mgr: SidecarManager | undefined,
+  mode: "extract" | "update",
+): Promise<void> {
+  const root = workspaceRoot();
+  if (!root) {
+    void vscode.window.showErrorMessage("ClawAgents Graphify: open a workspace folder first.");
+    return;
+  }
+  const out = mgr?.output;
+  const python = config.pythonPath;
+  const probe = probeGraphify(python);
+  if (!probe.ok) {
+    const choice = await vscode.window.showWarningMessage(
+      `Graphify package missing or below floor in sidecar Python.\n${probe.detail}`,
+      { modal: true },
+      "Ensure Companions",
+      "Cancel",
+    );
+    if (choice === "Ensure Companions") {
+      await vscode.commands.executeCommand("clawagents.ensureCompanions");
+    }
+    return;
+  }
+  const confirm = await vscode.window.showWarningMessage(
+    `Run \`python -m graphify ${mode} .\` in:\n${root}\n\nOutput: .clawagents/graphify/`,
+    { modal: true },
+    "Run",
+    "Cancel",
+  );
+  if (confirm !== "Run") {
+    return;
+  }
+  const graphOut = path.join(root, ".clawagents", "graphify");
+  fs.mkdirSync(graphOut, { recursive: true });
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `ClawAgents: graphify ${mode}…`,
+      cancellable: false,
+    },
+    async () =>
+      new Promise<void>((resolve) => {
+        out?.appendLine(`=== graphify ${mode} @ ${root} ===`);
+        const child = spawn(python, ["-m", "graphify", mode, "."], {
+          cwd: root,
+          env: {
+            ...process.env,
+            GRAPHIFY_OUT: graphOut,
+          },
+          shell: process.platform === "win32",
+        });
+        const onData = (buf: Buffer) => {
+          for (const line of buf.toString().split(/\r?\n/)) {
+            if (line.trim()) {
+              out?.appendLine(line);
+            }
+          }
+        };
+        child.stdout?.on("data", onData);
+        child.stderr?.on("data", onData);
+        child.on("error", (err) => {
+          void vscode.window.showErrorMessage(`graphify ${mode} failed: ${err.message}`);
+          resolve();
+        });
+        child.on("exit", (code) => {
+          if (code === 0) {
+            void vscode.window.showInformationMessage(
+              `Graphify ${mode} finished → ${path.join(graphOut, "graph.json")}`,
+            );
+          } else {
+            void vscode.window.showErrorMessage(
+              `graphify ${mode} exited ${code} — see ClawAgents Sidecar output.`,
+            );
+          }
+          resolve();
+        });
+      }),
+  );
+}
+
+async function appendGraphifyAgentsBlock(): Promise<void> {
+  const root = workspaceRoot();
+  if (!root) {
+    void vscode.window.showErrorMessage("Open a workspace folder first.");
+    return;
+  }
+  const agentsPath = path.join(root, "AGENTS.md");
+  const confirm = await vscode.window.showWarningMessage(
+    `Append Graphify routing block to ${agentsPath}?`,
+    { modal: true },
+    "Append",
+    "Cancel",
+  );
+  if (confirm !== "Append") {
+    return;
+  }
+  let existing = "";
+  try {
+    existing = fs.readFileSync(agentsPath, "utf8");
+  } catch {
+    existing = "";
+  }
+  if (existing.includes("<!-- graphify-clawagents -->")) {
+    void vscode.window.showInformationMessage("AGENTS.md already has the Graphify block.");
+    return;
+  }
+  const next = existing.trimEnd()
+    ? `${existing.trimEnd()}\n\n${GRAPHIFY_AGENTS_BLOCK}`
+    : GRAPHIFY_AGENTS_BLOCK;
+  fs.writeFileSync(agentsPath, next, "utf8");
+  void vscode.window.showInformationMessage(`Appended Graphify block to ${agentsPath}`);
+}
 
 let sidecar: SidecarManager | undefined;
 let provider: ClawAgentsWebviewProvider | undefined;
@@ -228,7 +353,10 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       out.show(true);
-      const results = await ensureCompanions(out, { force: true });
+      const results = await ensureCompanions(out, {
+        force: true,
+        python: config.pythonPath,
+      });
       const ok = results.every((r) => r.ok);
       if (ok) {
         void vscode.window.showInformationMessage(
@@ -239,6 +367,15 @@ export function activate(context: vscode.ExtensionContext): void {
           "Some companions are still missing or below floor — see ClawAgents Sidecar output.",
         );
       }
+    }),
+    vscode.commands.registerCommand("clawagents.graphifyExtract", async () => {
+      await runGraphifyWorkspaceCommand(config, sidecar, "extract");
+    }),
+    vscode.commands.registerCommand("clawagents.graphifyUpdate", async () => {
+      await runGraphifyWorkspaceCommand(config, sidecar, "update");
+    }),
+    vscode.commands.registerCommand("clawagents.graphifyAppendAgentsMd", async () => {
+      await appendGraphifyAgentsBlock();
     }),
     vscode.commands.registerCommand("clawagents.setApiKey", async () => {
       const saved = await config.promptSetApiKey();
@@ -262,6 +399,7 @@ export function activate(context: vscode.ExtensionContext): void {
     "clawagents.model",
     "clawagents.provider",
     "clawagents.contextMode",
+    "clawagents.graphify",
   ];
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (e) => {

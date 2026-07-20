@@ -695,13 +695,14 @@ def _make_before_tool(
     from clawagents import HookResult
     from clawagents.permissions.mode import WRITE_CLASS_TOOLS
 
-    from mcp_loader import CONTEXT_MODE_WRITE_TOOLS
+    from mcp_loader import CONTEXT_MODE_WRITE_TOOLS, GRAPHIFY_WRITE_TOOLS
 
     # web_fetch / web_search / browser_* leave the machine — gated under
     # auto_approve.web and auto_approve.browser respectively.
     gated_tools = (
         frozenset(WRITE_CLASS_TOOLS)
         | CONTEXT_MODE_WRITE_TOOLS
+        | GRAPHIFY_WRITE_TOOLS
         | _WEB_TOOLS
         | _BROWSER_TOOLS
     )
