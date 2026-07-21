@@ -4511,6 +4511,28 @@ export function App() {
               }}
             >
               <div className="compose-shell">
+                <div
+                  className="compose-resize-handle"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    const ta = textareaRef.current;
+                    if (!ta) return;
+                    const startY = e.clientY;
+                    const startH = ta.offsetHeight;
+                    const onMove = (ev: PointerEvent) => {
+                      // dragging up (negative delta) → taller
+                      const delta = startY - ev.clientY;
+                      const next = Math.min(Math.max(startH + delta, 52), 320);
+                      ta.style.height = `${next}px`;
+                    };
+                    const onUp = () => {
+                      document.removeEventListener("pointermove", onMove);
+                      document.removeEventListener("pointerup", onUp);
+                    };
+                    document.addEventListener("pointermove", onMove);
+                    document.addEventListener("pointerup", onUp);
+                  }}
+                />
                 <textarea
                   ref={textareaRef}
                   value={draft}
@@ -4529,6 +4551,11 @@ export function App() {
                       beginAttachmentRequest,
                       finishAttachmentRequest,
                     );
+                  }}
+                  onDrop={(e) => {
+                    // Prevent the browser's default path-insertion behavior inside textarea,
+                    // but allow it to bubble up to .compose-row for custom attachment logic.
+                    e.preventDefault();
                   }}
                   placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · mic / ⌃␣ / F8 dictate · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
                   rows={3}
@@ -5139,17 +5166,24 @@ function collectDropUris(dt: DataTransfer): string[] {
     }
     pushLine(data);
   };
-  const types = new Set<string>([
+  const types = [
     "application/vnd.code.uri-list",
     "text/uri-list",
     "ResourceURLs",
     "resourceurls",
-    "text/plain",
-    ...Array.from(dt.types ?? []),
-  ]);
+  ];
   for (const type of types) {
+    if (!dt.types.includes(type)) continue;
     try {
       pushPayload(type, dt.getData(type));
+    } catch {
+      /* ignore */
+    }
+  }
+  
+  if (found.length === 0 && dt.types.includes("text/plain")) {
+    try {
+      pushPayload("text/plain", dt.getData("text/plain"));
     } catch {
       /* ignore */
     }

@@ -602,12 +602,36 @@ summary {
   overflow: hidden;
 }
 
+.compose-resize-handle {
+  height: 6px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.compose-resize-handle::after {
+  content: "";
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.compose-resize-handle:hover::after {
+  background: var(--muted);
+}
+
 .compose-shell textarea {
   display: block;
   width: 100%;
-  resize: vertical;
+  resize: none;
   min-height: 52px;
-  max-height: 180px;
+  max-height: 320px;
   background: transparent;
   color: var(--input-fg);
   border: none;

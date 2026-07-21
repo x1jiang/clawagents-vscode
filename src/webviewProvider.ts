@@ -1793,14 +1793,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         message: `Attached ${filesStaged} document${filesStaged === 1 ? "" : "s"}`,
       });
     }
-    if (refs.length) {
-      this.post({ type: "prepend", text: `${refs.join("\n")}\n` });
+    const uniqueRefs = [...new Set(refs)];
+    if (uniqueRefs.length) {
+      this.post({ type: "prepend", text: `${uniqueRefs.join("\n")}\n` });
       this.post({
         type: "status",
         message:
-          refs.length === 1
-            ? `Attached ${refs[0].replace(/^@/, "")}`
-            : `Attached ${refs.length} files`,
+          uniqueRefs.length === 1
+            ? `Attached ${uniqueRefs[0].replace(/^@/, "")}`
+            : `Attached ${uniqueRefs.length} files`,
       });
     } else if (imagesStaged === 0 && filesStaged === 0) {
       this.post({
@@ -1809,7 +1810,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           "Drop workspace files onto the draft (hold Shift), or use +Attach.",
       });
     }
-    if (skipped.length && !refs.length && imagesStaged === 0 && filesStaged === 0) {
+    if (skipped.length && !uniqueRefs.length && imagesStaged === 0 && filesStaged === 0) {
       this.post({
         type: "error",
         message: `Not in workspace: ${skipped.slice(0, 3).join(", ")}`,
