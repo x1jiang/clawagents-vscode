@@ -1,3 +1,8 @@
+## 1.0.136
+
+- Require `clawagents>=6.20.45` — Mantle Claude uses `AsyncAnthropicBedrockMantle`
+  (Bearer auth). Plain Anthropic `X-Api-Key` failed on Mantle Messages.
+
 ## 1.0.135
 
 - Require `clawagents>=6.20.44` — Mantle frontier models (GPT-5.x / Grok) use

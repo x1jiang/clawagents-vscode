@@ -30,7 +30,7 @@ _MANTLE_MODELS: list[dict[str, Any]] = [
     {"id": "zai.glm-4.7", "label": "Z.ai GLM-4.7 (Mantle · chat)"},
     {"id": "zai.glm-4.7-flash", "label": "Z.ai GLM-4.7 Flash (Mantle)"},
     {"id": "zai.glm-4.6", "label": "Z.ai GLM-4.6 (Mantle · chat)"},
-    # Anthropic Messages path (…/anthropic/v1/messages)
+    # Anthropic Messages path (…/anthropic/v1/messages, Bearer via Mantle client)
     {"id": "anthropic.claude-haiku-4-5", "label": "Claude Haiku 4.5 (Mantle · messages)"},
     {"id": "anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (Mantle · messages)"},
     {"id": "anthropic.claude-opus-4-8", "label": "Claude Opus 4.8 (Mantle · messages)"},
