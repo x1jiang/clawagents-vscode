@@ -14,9 +14,9 @@ export const CLAWAGENTS_GITHUB_WHEEL =
 /** Packages installed into clawagents.pythonPath on first run / when missing. */
 export const SIDECAR_PIP_PACKAGES = [
   // Keep in lockstep with python/requirements.txt and MIN_CLAWAGENTS_VERSION.
-  // `media` pulls Pillow; `accurate-tokens` pulls tiktoken for BPE counts
-  // used by Luna 231K/258K compaction thresholds.
-  `clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens]>=${MIN_CLAWAGENTS_VERSION_STR},<7`,
+  // `media` pulls Pillow; `accurate-tokens` pulls tiktoken for BPE counts;
+  // `pty` pulls pexpect+pyte for interactive commands such as gcloud auth.
+  `clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=${MIN_CLAWAGENTS_VERSION_STR},<7`,
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -32,6 +32,8 @@ export const SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK = [
   "mcp>=1.0.0",
   "Pillow>=10.0.0",
   "tiktoken>=0.5.0",
+  "pexpect>=4.8,<5",
+  "pyte>=0.8,<1",
   "fastapi>=0.115.0,<1",
   "uvicorn>=0.30.0,<1",
   "pydantic>=2.7.0,<3",
@@ -85,6 +87,7 @@ export function probeSidecarDepsSync(
         [
           "import sys, inspect",
           "import fastapi, uvicorn, pydantic",
+          "import pexpect, pyte",
           "import clawagents",
           "from clawagents.agent import create_claw_agent",
           "print(sys.executable)",

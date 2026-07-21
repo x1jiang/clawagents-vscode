@@ -1,3 +1,8 @@
+## 1.0.127
+
+- Install the existing `pty` extra (`pexpect` + `pyte`) in managed sidecars so
+  interactive commands such as `gcloud auth login` can start successfully.
+
 ## 1.0.126
 
 - Require `clawagents>=6.20.37` so approved Plan invariants remain enforceable

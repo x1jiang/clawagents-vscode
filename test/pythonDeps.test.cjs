@@ -73,6 +73,20 @@ test("dependency versions stay inside the supported major ranges", () => {
       (spec) => spec.includes("clawagents") && spec.includes(floor),
     ),
   );
+  const clawagentsSpec = deps.SIDECAR_PIP_PACKAGES.find((spec) =>
+    spec.startsWith("clawagents["),
+  );
+  assert.match(clawagentsSpec, /\[[^\]]*\bpty\b[^\]]*\]/);
+  assert.ok(
+    deps.SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.some((spec) =>
+      spec.startsWith("pexpect>=4.8"),
+    ),
+  );
+  assert.ok(
+    deps.SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.some((spec) =>
+      spec.startsWith("pyte>=0.8"),
+    ),
+  );
   assert.ok(!deps.SIDECAR_PIP_PACKAGES.some((spec) => spec.includes("atlas")));
   assert.match(
     deps.CLAWAGENTS_GITHUB_WHEEL,
@@ -81,6 +95,27 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.ok(
     deps.SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.includes(deps.CLAWAGENTS_GITHUB_WHEEL),
   );
+});
+
+test("dependency probe requires PTY runtime imports", () => {
+  const fakePython = path.join(tempDir, "python-without-pty");
+  fs.writeFileSync(
+    fakePython,
+    `#!/bin/sh
+case "$*" in
+  *"import pexpect, pyte"*)
+    printf 'ModuleNotFoundError: No module named pexpect\\n' >&2
+    exit 1
+    ;;
+esac
+exit 0
+`,
+    { mode: 0o755 },
+  );
+  const probe = deps.probeSidecarDepsSync(fakePython, {});
+  assert.equal(probe.ok, false);
+  assert.equal(deps.needsPipInstall(probe), true);
+  assert.match(probe.detail, /ModuleNotFoundError/);
 });
 
 test("concurrent dependency checks share one in-flight promise", async () => {
