@@ -1,3 +1,8 @@
+## 1.0.134
+
+- Mantle catalog list prices from AWS Bedrock US Standard for Grok, DeepSeek,
+  Kimi, GLM, GPT-OSS / Safeguard (dropdown `· $in/$out per 1M` + cost estimates).
+
 ## 1.0.133
 
 - Require `clawagents>=6.20.43` — Mantle `xai.grok-4.3` uses `/openai/v1`

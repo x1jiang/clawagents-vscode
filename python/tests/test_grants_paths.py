@@ -171,6 +171,20 @@ class GrantPathTests(unittest.TestCase):
             pricing_mod.price_for("openai.gpt-5.6-luna"), (1.1, 6.6)
         )
         self.assertEqual(pricing_mod.price_for("gpt-5.6-luna"), (1.0, 6.0))
+        # Mantle open catalog — AWS Bedrock US Standard list prices.
+        self.assertEqual(pricing_mod.price_for("xai.grok-4.3"), (1.25, 2.5))
+        self.assertEqual(pricing_mod.price_for("deepseek.v3.2"), (0.62, 1.85))
+        self.assertEqual(pricing_mod.price_for("moonshot.kimi-k2.5"), (0.6, 3.0))
+        self.assertEqual(pricing_mod.price_for("zai.glm-5"), (1.0, 3.2))
+        self.assertEqual(pricing_mod.price_for("openai.gpt-oss-20b"), (0.07, 0.3))
+        self.assertEqual(
+            pricing_mod.price_for("openai.gpt-oss-safeguard-20b"), (0.07, 0.2)
+        )
+        priced = pricing_mod.attach_prices(
+            [{"id": "xai.grok-4.3", "label": "Grok"}]
+        )
+        self.assertEqual(priced[0]["input_per_mtok"], 1.25)
+        self.assertEqual(priced[0]["output_per_mtok"], 2.5)
         cost = pricing_mod.estimate_usd(
             "anthropic.claude-opus-4-8", prompt_tokens=1_000_000, completion_tokens=0
         )
