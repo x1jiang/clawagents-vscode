@@ -1,6 +1,6 @@
 import * as http from "http";
 import type { SidecarHandle } from "./sidecar";
-import type { AgentMode, AutoApprove, HostToWebview, InteractionStyle } from "./protocol";
+import type { AgentMode, AutoApprove, ChatSummary, HostToWebview, InteractionStyle } from "./protocol";
 
 export type StreamHandlers = {
   onEvent: (msg: HostToWebview) => void;
@@ -307,6 +307,14 @@ export class GatewayClient {
       this.requireHandle(),
       "DELETE",
       `/chats/${encodeURIComponent(chatId)}`,
+    );
+  }
+
+  forkChat(chatId: string) {
+    return requestJson<{ ok: boolean; chat: ChatSummary; chat_id: string }>(
+      this.requireHandle(),
+      "POST",
+      `/chats/${encodeURIComponent(chatId)}/fork`,
     );
   }
 

@@ -712,6 +712,27 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "new_chat":
         await this.newChat();
         break;
+      case "fork_chat": {
+        const targetId = msg.chatId || this.chatId;
+        if (!targetId) {
+          await this.newChat();
+          break;
+        }
+        try {
+          const res = await this.gateway.forkChat(targetId);
+          this.chatId = res.chat_id;
+          await this.persistLocal(this.persistState());
+          const chat = await this.gateway.getChat(res.chat_id, { tail: 400 });
+          await this.postChatRestore(res.chat_id, chat);
+          await this.refreshChats();
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      }
       case "select_chat":
         this.chatId = msg.chatId;
         await this.persistLocal(this.persistState());

@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from chats import (
     create_chat,
     delete_chat,
+    fork_chat,
     get_chat,
     list_chats,
     patch_chat,
@@ -1203,6 +1204,17 @@ def create_app() -> FastAPI:
             return denied
         delete_chat(chat_id)
         return {"ok": True}
+
+    @app.post("/chats/{chat_id}/fork")
+    async def chats_fork(chat_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            meta = fork_chat(chat_id)
+            return {"ok": True, "chat": meta, "chat_id": meta["id"]}
+        except KeyError:
+            return Response(status_code=404, content=json.dumps({"error": "chat not found"}))
 
     @app.post("/chats/{chat_id}/regenerate")
     async def chats_regenerate(chat_id: str, request: Request):
