@@ -505,6 +505,9 @@ export function App() {
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
   const [panel, setPanel] = useState<Panel>("chat");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
+  const pendingForkRef = useRef(false);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [skillsPreview, setSkillsPreview] = useState<SkillsPreview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -975,6 +978,13 @@ export function App() {
           );
           setBusy(false);
           streamingRef.current = false;
+          if (pendingForkRef.current) {
+            pendingForkRef.current = false;
+            const match = (chats || []).find((c) => c.id === msg.chatId);
+            const rawTitle = match?.title || "Forked Conversation";
+            const displayTitle = rawTitle.startsWith("[Forked]") ? rawTitle : `[Forked] ${rawTitle}`;
+            setForkNotice({ title: displayTitle, chatId: (msg.chatId as string) || "" });
+          }
           setPanel("chat");
           break;
         case "prepend_items": {
@@ -2334,6 +2344,22 @@ export function App() {
             </button>
           ))}
         </nav>
+        {forkNotice && panel === "chat" && (
+          <div className="banner info fork-banner">
+            <IconFork size={14} className="fork-banner-icon" />
+            <span className="fork-banner-text">
+              Switched to forked conversation: <strong>{forkNotice.title}</strong>
+            </span>
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={() => setForkNotice(null)}
+              title="Dismiss notification"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {!hasApiKey && panel === "chat" && (
           <div className="banner warn">
             No provider credential.{" "}
@@ -2620,30 +2646,47 @@ export function App() {
                     {c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""}
                   </div>
                 </button>
-                <div className="chat-actions">
-                  <button
-                    type="button"
-                    className="chat-action-btn"
-                    title="Fork this conversation"
-                    onClick={() => post({ type: "fork_chat", chatId: c.id })}
-                  >
-                    ⑂
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-action-btn danger"
-                    title="Delete this conversation"
-                    onClick={() => {
-                      const title = c.title || c.id;
-                      const ok = window.confirm(
-                        `Delete chat "${title}"?\n\nThis permanently removes the conversation history.`,
-                      );
-                      if (!ok) return;
-                      post({ type: "delete_chat", chatId: c.id });
-                    }}
-                  >
-                    ✕
-                  </button>
+                <div className={`chat-actions ${confirmDeleteId === c.id ? "confirming" : ""}`}>
+                  {confirmDeleteId === c.id ? (
+                    <button
+                      type="button"
+                      className="chat-action-btn danger confirm-btn"
+                      title="Click to confirm permanent deletion"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDeleteId(null);
+                        post({ type: "delete_chat", chatId: c.id });
+                      }}
+                    >
+                      Confirm?
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="chat-action-btn"
+                        title="Fork this conversation"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          pendingForkRef.current = true;
+                          post({ type: "fork_chat", chatId: c.id });
+                        }}
+                      >
+                        <IconFork size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-action-btn danger"
+                        title="Delete this conversation"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(c.id);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </>
+                  )}
                 </div>
               </li>
             ))}
@@ -4423,9 +4466,12 @@ export function App() {
                 className="ghost tiny"
                 disabled={busy || !items.length}
                 title="Fork current conversation into a new chat"
-                onClick={() => post({ type: "fork_chat" })}
+                onClick={() => {
+                  pendingForkRef.current = true;
+                  post({ type: "fork_chat" });
+                }}
               >
-                Fork
+                <IconFork size={12} /> Fork
               </button>
               <button
                 type="button"
@@ -4901,6 +4947,28 @@ function IconStop() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
+function IconFork({ size = 14, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      style={{ display: "inline-block", verticalAlign: "middle" }}
+    >
+      <path d="M 2 8 H 5.5 L 11 2.5 M 5.5 8 L 11 13.5" />
+      <path d="M 7.5 2.5 H 11 V 6" />
+      <path d="M 7.5 13.5 H 11 V 10" />
     </svg>
   );
 }
