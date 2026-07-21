@@ -1,3 +1,9 @@
+## 1.0.128
+
+- Require `clawagents>=6.20.38` — stable OpenAI prompt-cache affinity, incremental
+  token ledger, TTFT/RSS telemetry, Gemini cache-read accounting, and bounded
+  streaming exec head/tail output.
+
 ## 1.0.127
 
 - Install the existing `pty` extra (`pexpect` + `pyte`) in managed sidecars so
