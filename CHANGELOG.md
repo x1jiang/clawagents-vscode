@@ -1,3 +1,13 @@
+## 1.0.137
+
+- Add Fork conversation feature: duplicate current or historical chat session with
+  copied event history and session memory, prefixed with `[Forked]`.
+- Redesign chat history list with hover-visible actions (`IconFork` branch arrow
+  and `✕` delete) and inline confirmation state for Webview sandbox safety.
+- Add visual notification banner when switching to a forked conversation.
+- Add `git-release-workflow` skill enforcing branch-first pushes, mandatory
+  `CHANGELOG.md` updates per commit, and release version tagging on `main`.
+
 ## 1.0.136
 
 - Require `clawagents>=6.20.45` — Mantle Claude uses `AsyncAnthropicBedrockMantle`
