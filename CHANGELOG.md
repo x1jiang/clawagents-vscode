@@ -1,3 +1,24 @@
+## 1.0.132
+
+- Require `clawagents>=6.20.42` for lower-churn patch recovery, explicit refusal
+  of unauthorized unsandboxed execution, sandbox-compatible gcloud guidance,
+  profile-preserving command auto-backgrounding, and retained PTY exit screens.
+
+## 1.0.131
+
+- Require `clawagents>=6.20.41` so repeated same-name skill calls advance the
+  pending load, disallowed tools get accurate boundary guidance, and nonzero
+  `npm audit` reports are classified as security findings without unsafe retry.
+  External-action policy is framework-generic, and reconciliation commands
+  cannot mutate state or repeat the action they are meant to verify.
+
+## 1.0.130
+
+- Require `clawagents>=6.20.40` — external publish/deploy actions now require
+  approved pre-action verification and post-action reconciliation. Attempts
+  consume authorization before execution, so failures, crashes, and timeouts
+  cannot permit unsafe retries or premature completion.
+
 ## 1.0.129
 
 - Require `clawagents>=6.20.39` so Context Mode rejects binary inputs to
