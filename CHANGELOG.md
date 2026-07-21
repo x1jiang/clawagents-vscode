@@ -1,3 +1,9 @@
+## 1.0.129
+
+- Require `clawagents>=6.20.39` so Context Mode rejects binary inputs to
+  `ctx_execute_file` before UTF-8 decoding, gives actionable routing guidance,
+  and avoids duplicating MCP error details in the tool card.
+
 ## 1.0.128
 
 - Require `clawagents>=6.20.38` — stable OpenAI prompt-cache affinity, incremental
