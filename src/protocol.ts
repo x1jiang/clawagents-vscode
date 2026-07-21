@@ -492,6 +492,9 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
+    case "fork_chat":
+      return (value.chatId === undefined || opaqueId(value.chatId))
+        ? value as WebviewToHost : undefined;
     case "search_chats":
       return text(value.query, 10_000) ? value as WebviewToHost : undefined;
     case "set_mode":

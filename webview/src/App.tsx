@@ -2620,28 +2620,31 @@ export function App() {
                     {c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""}
                   </div>
                 </button>
-                <button
-                  type="button"
-                  className="ghost tiny"
-                  title="Fork this conversation"
-                  onClick={() => post({ type: "fork_chat", chatId: c.id })}
-                >
-                  Fork
-                </button>
-                <button
-                  type="button"
-                  className="ghost tiny danger"
-                  onClick={() => {
-                    const title = c.title || c.id;
-                    const ok = window.confirm(
-                      `Delete chat "${title}"?\n\nThis permanently removes the conversation history.`,
-                    );
-                    if (!ok) return;
-                    post({ type: "delete_chat", chatId: c.id });
-                  }}
-                >
-                  Del
-                </button>
+                <div className="chat-actions">
+                  <button
+                    type="button"
+                    className="chat-action-btn"
+                    title="Fork this conversation"
+                    onClick={() => post({ type: "fork_chat", chatId: c.id })}
+                  >
+                    ⑂
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-action-btn danger"
+                    title="Delete this conversation"
+                    onClick={() => {
+                      const title = c.title || c.id;
+                      const ok = window.confirm(
+                        `Delete chat "${title}"?\n\nThis permanently removes the conversation history.`,
+                      );
+                      if (!ok) return;
+                      post({ type: "delete_chat", chatId: c.id });
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
               </li>
             ))}
             {!chats.length && (

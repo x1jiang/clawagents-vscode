@@ -847,14 +847,19 @@ button.send:not(.icon-btn) {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .chat-list li {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px;
-  align-items: center;
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.chat-list li:hover {
+  background: color-mix(in srgb, var(--input-bg) 50%, transparent);
 }
 
 .chat-list li.active .chat-item {
@@ -862,18 +867,69 @@ button.send:not(.icon-btn) {
 }
 
 .chat-item {
+  flex: 1;
+  min-width: 0;
   text-align: left;
   background: color-mix(in srgb, var(--input-bg) 80%, transparent);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 8px;
+  padding: 8px 10px;
   color: var(--fg);
   cursor: pointer;
+}
+
+.chat-item:hover {
+  background: color-mix(in srgb, var(--input-bg) 100%, transparent);
 }
 
 .chat-title {
   font-weight: 600;
   font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Action buttons: fork / delete, shown on hover */
+.chat-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.chat-list li:hover .chat-actions {
+  opacity: 1;
+}
+
+.chat-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  padding: 0;
+  line-height: 1;
+}
+
+.chat-action-btn:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--fg);
+}
+
+.chat-action-btn.danger:hover {
+  background: color-mix(in srgb, #e55 25%, transparent);
+  color: #f77;
 }
 
 .tiny {
