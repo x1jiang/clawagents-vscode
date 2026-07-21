@@ -1,3 +1,9 @@
+## 1.0.133
+
+- Require `clawagents>=6.20.43` — Mantle `xai.grok-4.3` uses `/openai/v1`
+  Responses (fixes Berm `access_denied` on plain `…/v1` chat). Catalog label
+  and `mantleWireApiForModel` mark Grok as openai/v1 + responses.
+
 ## 1.0.132
 
 - Require `clawagents>=6.20.42` for lower-churn patch recovery, explicit refusal

@@ -113,3 +113,10 @@ test("effectiveProviderLabel shows OpenAI for auto + gpt model", () => {
     "Bedrock Mantle",
   );
 });
+
+test("mantle xAI Grok uses openai/v1 Responses wire", () => {
+  assert.equal(mod.isMantleXaiModel("xai.grok-4.3"), true);
+  assert.equal(mod.isMantleXaiModel("openai.gpt-oss-120b"), false);
+  assert.equal(mod.mantleWireApiForModel("xai.grok-4.3"), "responses");
+  assert.equal(mod.mantleWireApiForModel("deepseek.v3.2"), "chat_completions");
+});

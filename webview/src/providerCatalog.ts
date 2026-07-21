@@ -104,7 +104,7 @@ export const MANTLE_FALLBACK_MODELS: Array<{ id: string; label: string }> = [
   { id: "openai.gpt-5.6-luna", label: "GPT-5.6 Luna (Mantle · responses)" },
   { id: "openai.gpt-5.6-terra", label: "GPT-5.6 Terra (Mantle · responses)" },
   { id: "openai.gpt-5.5", label: "GPT-5.5 (Mantle · responses)" },
-  { id: "xai.grok-4.3", label: "xAI Grok 4.3 (Mantle · chat)" },
+  { id: "xai.grok-4.3", label: "xAI Grok 4.3 (Mantle · openai/v1)" },
   { id: "zai.glm-5", label: "Z.ai GLM-5 (Mantle · chat)" },
 ];
 
@@ -138,10 +138,25 @@ export function isMantleOpenAIResponsesModel(id: string): boolean {
   return /gpt-5\.[3456]/.test(m);
 }
 
+/** xAI Grok on Mantle — must use ``…/openai/v1``, not plain ``…/v1``. */
+export function isMantleXaiModel(id: string): boolean {
+  let m = String(id || "")
+    .trim()
+    .toLowerCase();
+  if (m.startsWith("bedrock/")) m = m.slice("bedrock/".length);
+  for (const p of ["us.", "eu.", "apac.", "global."] as const) {
+    if (m.startsWith(p)) {
+      m = m.slice(p.length);
+      break;
+    }
+  }
+  return m.startsWith("xai.") || m.startsWith("grok-");
+}
+
 /** Wire API to save with a Mantle model (Claude Messages ignores wire_api). */
 export function mantleWireApiForModel(id: string): string {
   if (isMantleAnthropicModel(id)) return "auto";
-  if (isMantleOpenAIResponsesModel(id)) return "responses";
+  if (isMantleOpenAIResponsesModel(id) || isMantleXaiModel(id)) return "responses";
   return "chat_completions";
 }
 

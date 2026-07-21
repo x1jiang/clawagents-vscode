@@ -23,7 +23,7 @@ _MANTLE_MODELS: list[dict[str, Any]] = [
     {"id": "openai.gpt-oss-safeguard-120b", "label": "GPT-OSS Safeguard 120B"},
     {"id": "deepseek.v3.2", "label": "DeepSeek V3.2 (Mantle · chat)"},
     {"id": "deepseek.v3.1", "label": "DeepSeek V3.1 (Mantle · chat)"},
-    {"id": "xai.grok-4.3", "label": "xAI Grok 4.3 (Mantle · chat)"},
+    {"id": "xai.grok-4.3", "label": "xAI Grok 4.3 (Mantle · openai/v1)"},
     {"id": "moonshot.kimi-k2.5", "label": "Kimi K2.5 (Mantle · chat)"},
     {"id": "moonshot.kimi-k2-thinking", "label": "Kimi K2 Thinking (Mantle)"},
     {"id": "zai.glm-5", "label": "Z.ai GLM-5 (Mantle · chat)"},
