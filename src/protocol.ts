@@ -296,6 +296,7 @@ export type WebviewToHost =
     }
   | { type: "clear" }
   | { type: "new_chat" }
+  | { type: "fork_chat"; chatId?: string }
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }

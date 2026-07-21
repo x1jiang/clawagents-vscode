@@ -6,6 +6,7 @@ import json
 import inspect
 import os
 import re
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -237,6 +238,56 @@ def delete_chat(chat_id: str) -> None:
         mem.unlink(missing_ok=True)
     except ValueError:
         return
+
+
+def fork_chat(source_chat_id: str, *, title: str | None = None) -> dict[str, Any]:
+    """Fork an existing conversation into a new chat with copied history and session memory."""
+    source_meta = get_chat(source_chat_id)
+    if not source_meta:
+        raise KeyError(source_chat_id)
+
+    new_chat_id = f"chat_{uuid.uuid4().hex[:12]}"
+    from paths import safe_id
+
+    safe_id(new_chat_id, kind="chat_id")
+
+    ts = now_ts()
+    base_title = str(source_meta.get("title") or "Chat").strip()
+    if title:
+        fork_title = title
+    elif base_title.startswith("[Forked] "):
+        fork_title = base_title
+    elif base_title.endswith(" (Fork)"):
+        fork_title = f"[Forked] {base_title[:-7]}"
+    else:
+        fork_title = f"[Forked] {base_title}"
+
+    new_meta = dict(source_meta)
+    new_meta["id"] = new_chat_id
+    new_meta["title"] = fork_title
+    new_meta["created_at"] = ts
+    new_meta["updated_at"] = ts
+
+    # Copy UI log file if present
+    try:
+        src_ui_log = chat_ui_log_path(source_chat_id)
+        if src_ui_log.exists():
+            dst_ui_log = chat_ui_log_path(new_chat_id)
+            shutil.copy2(src_ui_log, dst_ui_log)
+    except (ValueError, OSError):
+        pass
+
+    # Copy session memory file if present
+    try:
+        src_mem = SESSIONS_MEMORY_DIR / f"{source_chat_id}.jsonl"
+        if src_mem.exists():
+            dst_mem = SESSIONS_MEMORY_DIR / f"{new_chat_id}.jsonl"
+            shutil.copy2(src_mem, dst_mem)
+    except (ValueError, OSError):
+        pass
+
+    atomic_write_json(chat_meta_path(new_chat_id), new_meta)
+    return new_meta
 
 
 def append_ui_event(chat_id: str, event: dict[str, Any]) -> None:

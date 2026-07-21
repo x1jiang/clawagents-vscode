@@ -2622,6 +2622,14 @@ export function App() {
                 </button>
                 <button
                   type="button"
+                  className="ghost tiny"
+                  title="Fork this conversation"
+                  onClick={() => post({ type: "fork_chat", chatId: c.id })}
+                >
+                  Fork
+                </button>
+                <button
+                  type="button"
                   className="ghost tiny danger"
                   onClick={() => {
                     const title = c.title || c.id;
@@ -4406,6 +4414,15 @@ export function App() {
                 onClick={() => post({ type: "regenerate" })}
               >
                 Regen
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
+                disabled={busy || !items.length}
+                title="Fork current conversation into a new chat"
+                onClick={() => post({ type: "fork_chat" })}
+              >
+                Fork
               </button>
               <button
                 type="button"
