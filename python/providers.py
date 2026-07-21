@@ -37,7 +37,7 @@ _MANTLE_MODELS: list[dict[str, Any]] = [
     {"id": "anthropic.claude-opus-4-7", "label": "Claude Opus 4.7 (Mantle · messages)"},
     {"id": "anthropic.claude-fable-5", "label": "Claude Fable 5 (Mantle · messages)"},
     # OpenAI Responses path (…/openai/v1/responses)
-    {"id": "openai.gpt-5.6-sol", "label": "GPT-5.6 Sol (Mantle · responses)"},
+    {"id": "openai.gpt-5.6-sol", "label": "GPT-5.6 Sol (Mantle · responses · us-east-1/2)"},
     {"id": "openai.gpt-5.6-luna", "label": "GPT-5.6 Luna (Mantle · responses)"},
     {"id": "openai.gpt-5.6-terra", "label": "GPT-5.6 Terra (Mantle · responses)"},
     {"id": "openai.gpt-5.5", "label": "GPT-5.5 (Mantle · responses)"},

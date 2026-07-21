@@ -1,3 +1,9 @@
+## 1.0.135
+
+- Require `clawagents>=6.20.44` — Mantle frontier models (GPT-5.x / Grok) use
+  base `…/openai/v1` (fixes bare `…/openai` → HTTP 404 on Responses). GPT-5.6
+  Sol is only in `us-east-1` / `us-east-2`.
+
 ## 1.0.134
 
 - Mantle catalog list prices from AWS Bedrock US Standard for Grok, DeepSeek,
