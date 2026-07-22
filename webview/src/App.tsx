@@ -504,6 +504,10 @@ export function App() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
+  const [openChatMenuId, setOpenChatMenuId] = useState<string | undefined>();
+  const [renamingChatId, setRenamingChatId] = useState<string | undefined>();
+  const [renameDraft, setRenameDraft] = useState("");
+  const [pendingDeleteChatId, setPendingDeleteChatId] = useState<string | undefined>();
   const [panel, setPanel] = useState<Panel>("chat");
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [skillsPreview, setSkillsPreview] = useState<SkillsPreview | null>(null);
@@ -1489,6 +1493,8 @@ export function App() {
 
   useEffect(() => {
     if (panel !== "history") {
+      setOpenChatMenuId(undefined);
+      setPendingDeleteChatId(undefined);
       return;
     }
     window.clearTimeout(historySearchTimer.current);
@@ -1499,6 +1505,42 @@ export function App() {
     }, 250);
     return () => window.clearTimeout(historySearchTimer.current);
   }, [historyQuery, panel]);
+
+  const visibleChats = useMemo(
+    () => chats.filter((c) => !c.archived),
+    [chats],
+  );
+  const pinnedChats = useMemo(
+    () => visibleChats.filter((c) => c.pinned),
+    [visibleChats],
+  );
+  const regularChats = useMemo(
+    () => visibleChats.filter((c) => !c.pinned),
+    [visibleChats],
+  );
+  const archivedChats = useMemo(
+    () => chats.filter((c) => c.archived),
+    [chats],
+  );
+
+  const beginRenameChat = (chat: ChatSummary) => {
+    setRenamingChatId(chat.id);
+    setRenameDraft(chat.title || chat.id);
+    setOpenChatMenuId(undefined);
+    setPendingDeleteChatId(undefined);
+  };
+
+  const submitRenameChat = () => {
+    const title = renameDraft.trim();
+    if (!renamingChatId || !title) {
+      setRenamingChatId(undefined);
+      setRenameDraft("");
+      return;
+    }
+    post({ type: "rename_chat", chatId: renamingChatId, title });
+    setRenamingChatId(undefined);
+    setRenameDraft("");
+  };
 
   // Goal / Plan / Act is the primary control.
   // Goal = Act permissions + goal_mode (planner→verify→strategist).
@@ -2104,6 +2146,151 @@ export function App() {
     }
   };
 
+  const renderHistoryChat = (c: ChatSummary) => {
+    const title = c.title || c.id;
+    const isRenaming = renamingChatId === c.id;
+    const menuOpen = openChatMenuId === c.id;
+    const deletePending = pendingDeleteChatId === c.id;
+    const meta = `${c.message_count || 0} msgs${
+      c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""
+    }`;
+
+    return (
+      <li key={c.id} className={c.id === chatId ? "active" : ""}>
+        {isRenaming ? (
+          <div className="chat-item chat-item-edit">
+            <input
+              className="chat-rename-input"
+              value={renameDraft}
+              autoFocus
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitRenameChat();
+                } else if (e.key === "Escape") {
+                  setRenamingChatId(undefined);
+                  setRenameDraft("");
+                }
+              }}
+              onBlur={submitRenameChat}
+            />
+            <div className="muted tiny">{meta}</div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="chat-item"
+            onClick={() => {
+              setOpenChatMenuId(undefined);
+              setPendingDeleteChatId(undefined);
+              post({ type: "select_chat", chatId: c.id });
+            }}
+          >
+            <div className="chat-title" title={title}>
+              {title}
+            </div>
+            <div className="muted tiny">{meta}</div>
+          </button>
+        )}
+        <div className="chat-row-actions">
+          <button
+            type="button"
+            className={`ghost tiny chat-pin ${c.pinned ? "active" : ""}`}
+            title={c.pinned ? "Unpin chat" : "Pin chat"}
+            aria-label={c.pinned ? "Unpin chat" : "Pin chat"}
+            onClick={() => {
+              setOpenChatMenuId(undefined);
+              post({ type: "pin_chat", chatId: c.id, pinned: !c.pinned });
+            }}
+          >
+            {c.pinned ? "★" : "☆"}
+          </button>
+          <div className="chat-menu-wrap">
+            <button
+              type="button"
+              className="ghost tiny chat-menu-trigger"
+              title="Chat options"
+              aria-label="Chat options"
+              aria-expanded={menuOpen}
+              onClick={() => {
+                setPendingDeleteChatId(undefined);
+                setOpenChatMenuId(menuOpen ? undefined : c.id);
+              }}
+            >
+              ⋯
+            </button>
+            {menuOpen ? (
+              <div className="chat-menu" role="menu">
+                {deletePending ? (
+                  <>
+                    <button
+                      type="button"
+                      className="danger"
+                      role="menuitem"
+                      onClick={() => {
+                        post({ type: "delete_chat", chatId: c.id });
+                        setOpenChatMenuId(undefined);
+                        setPendingDeleteChatId(undefined);
+                      }}
+                    >
+                      Delete permanently?
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => setPendingDeleteChatId(undefined)}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" role="menuitem" onClick={() => beginRenameChat(c)}>
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        post({ type: "pin_chat", chatId: c.id, pinned: !c.pinned });
+                        setOpenChatMenuId(undefined);
+                      }}
+                    >
+                      {c.pinned ? "Unpin" : "Pin"}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        post({
+                          type: "archive_chat",
+                          chatId: c.id,
+                          archived: !c.archived,
+                        });
+                        setOpenChatMenuId(undefined);
+                      }}
+                    >
+                      {c.archived ? "Unarchive" : "Archive"}
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      role="menuitem"
+                      onClick={() => setPendingDeleteChatId(c.id)}
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </li>
+    );
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -2610,38 +2797,32 @@ export function App() {
           {historySearching && historyQuery.trim() ? (
             <div className="muted tiny history-hint">Searching…</div>
           ) : null}
-          <ul className="chat-list">
-            {chats.map((c) => (
-              <li key={c.id} className={c.id === chatId ? "active" : ""}>
-                <button type="button" className="chat-item" onClick={() => post({ type: "select_chat", chatId: c.id })}>
-                  <div className="chat-title">{c.title || c.id}</div>
-                  <div className="muted tiny">
-                    {c.message_count || 0} msgs
-                    {c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className="ghost tiny danger"
-                  onClick={() => {
-                    const title = c.title || c.id;
-                    const ok = window.confirm(
-                      `Delete chat "${title}"?\n\nThis permanently removes the conversation history.`,
-                    );
-                    if (!ok) return;
-                    post({ type: "delete_chat", chatId: c.id });
-                  }}
-                >
-                  Del
-                </button>
-              </li>
-            ))}
-            {!chats.length && (
-              <div className="muted">
-                {historyQuery.trim() ? "No chats match that search." : "No chats yet."}
-              </div>
-            )}
-          </ul>
+          {chats.length ? (
+            <div className="chat-sections">
+              {pinnedChats.length ? (
+                <section className="chat-section" aria-label="Pinned chats">
+                  <div className="chat-section-label">Pinned</div>
+                  <ul className="chat-list">{pinnedChats.map(renderHistoryChat)}</ul>
+                </section>
+              ) : null}
+              {regularChats.length ? (
+                <section className="chat-section" aria-label="Recent chats">
+                  <div className="chat-section-label">Recent</div>
+                  <ul className="chat-list">{regularChats.map(renderHistoryChat)}</ul>
+                </section>
+              ) : null}
+              {archivedChats.length ? (
+                <section className="chat-section" aria-label="Archived chats">
+                  <div className="chat-section-label">Archived</div>
+                  <ul className="chat-list archived">{archivedChats.map(renderHistoryChat)}</ul>
+                </section>
+              ) : null}
+            </div>
+          ) : (
+            <div className="muted">
+              {historyQuery.trim() ? "No chats match that search." : "No chats yet."}
+            </div>
+          )}
         </div>
       )}
 

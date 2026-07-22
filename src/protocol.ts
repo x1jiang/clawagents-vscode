@@ -18,6 +18,8 @@ export type ChatSummary = {
   title: string;
   mode?: AgentMode;
   updated_at?: number;
+  pinned?: boolean;
+  archived?: boolean;
   message_count?: number;
   session_cost_usd?: number;
   session_prompt_tokens?: number;
@@ -299,6 +301,9 @@ export type WebviewToHost =
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
+  | { type: "rename_chat"; chatId: string; title: string }
+  | { type: "pin_chat"; chatId: string; pinned: boolean }
+  | { type: "archive_chat"; chatId: string; archived: boolean }
   | { type: "search_chats"; query: string }
   | { type: "regenerate" }
   | { type: "set_mode"; mode: AgentMode }
@@ -491,6 +496,18 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
+    case "rename_chat":
+      return opaqueId(value.chatId) && text(value.title, 200)
+        ? value as WebviewToHost
+        : undefined;
+    case "pin_chat":
+      return opaqueId(value.chatId) && typeof value.pinned === "boolean"
+        ? value as WebviewToHost
+        : undefined;
+    case "archive_chat":
+      return opaqueId(value.chatId) && typeof value.archived === "boolean"
+        ? value as WebviewToHost
+        : undefined;
     case "search_chats":
       return text(value.query, 10_000) ? value as WebviewToHost : undefined;
     case "set_mode":

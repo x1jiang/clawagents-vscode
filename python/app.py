@@ -635,6 +635,8 @@ class CreateChatBody(BaseModel):
 class PatchChatBody(BaseModel):
     title: str | None = None
     mode: Mode | None = None
+    pinned: bool | None = None
+    archived: bool | None = None
 
 
 class RestoreBody(BaseModel):
@@ -1192,7 +1194,13 @@ def create_app() -> FastAPI:
         if denied:
             return denied
         try:
-            return patch_chat(chat_id, title=body.title, mode=body.mode)
+            return patch_chat(
+                chat_id,
+                title=body.title,
+                mode=body.mode,
+                pinned=body.pinned,
+                archived=body.archived,
+            )
         except KeyError:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
 
