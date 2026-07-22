@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.47** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
+- **clawagents ≥ 6.20.48** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
 - A provider credential for at least one model provider
 
 ## Quick start
