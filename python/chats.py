@@ -1644,19 +1644,22 @@ async def run_chat_turn(
                 from clawagents.context_observatory.store import EventStore
 
                 obs_store = EventStore()
-                obs_store.set_session_meta({
-                    "chat_id": chat_id,
-                    "model": effective_model,
-                    "mode": mode,
-                    "workspace": str(WORKSPACE),
-                })
+                obs_store.set_session_meta(
+                    chat_id=chat_id,
+                    model=effective_model,
+                    mode=mode,
+                    workspace=str(WORKSPACE),
+                )
                 obs_hooks = ContextObserverHooks(
                     store=obs_store,
                     model=effective_model,
                 )
                 agent.hooks = obs_hooks
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                on_event(
+                    "warn",
+                    {"message": f"Context Observatory could not start: {exc}"},
+                )
 
         bt = before_tool_factory(mode=mode, grants=GrantStore())
         agent.before_tool = bt
@@ -1716,9 +1719,13 @@ async def run_chat_turn(
         res = await agent.invoke(augmented, **invoke_kwargs)
         if obs_store is not None:
             try:
-                obs_store.auto_save(chat_id=chat_id)
-            except Exception:  # noqa: BLE001
-                pass
+                saved_path = obs_store.auto_save(chat_id=chat_id)
+                if saved_path:
+                    on_event("status", {"text": f"Context Observatory saved to: {saved_path.parent}"})
+                else:
+                    on_event("warn", {"message": "Context Observatory was enabled but no events were captured."})
+            except Exception as e:  # noqa: BLE001
+                on_event("warn", {"message": f"Failed to save Context Observatory: {e}"})
         return res
 
     # Floor is clawagents≥6.20.18 — workspace= is required. No process chdir / turn lock.
