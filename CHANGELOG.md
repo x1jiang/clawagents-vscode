@@ -1,3 +1,8 @@
+## 1.0.138
+
+- Add Context Observatory toggle in Settings → Advanced UI and wire `ContextObserverHooks`
+  to write full LLM context events to `.clawagents/context-observatory/<chat_id>/`.
+
 ## 1.0.137
 
 - Add Fork conversation feature: duplicate current or historical chat session with
