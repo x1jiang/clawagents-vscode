@@ -1215,6 +1215,12 @@ def create_app() -> FastAPI:
             return {"ok": True, "chat": meta, "chat_id": meta["id"]}
         except KeyError:
             return Response(status_code=404, content=json.dumps({"error": "chat not found"}))
+        except RuntimeError as e:
+            return Response(
+                status_code=500,
+                content=json.dumps({"error": str(e)}),
+                media_type="application/json",
+            )
 
     @app.post("/chats/{chat_id}/regenerate")
     async def chats_regenerate(chat_id: str, request: Request):

@@ -240,8 +240,32 @@ def delete_chat(chat_id: str) -> None:
         return
 
 
+def _cleanup_fork_artifacts(chat_id: str) -> None:
+    """Best-effort remove partial fork files after a failed copy."""
+    try:
+        chat_ui_log_path(chat_id).unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass
+    try:
+        from paths import safe_id
+
+        safe_id(chat_id, kind="chat_id")
+        (SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl").unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass
+    try:
+        chat_meta_path(chat_id).unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass
+
+
 def fork_chat(source_chat_id: str, *, title: str | None = None) -> dict[str, Any]:
-    """Fork an existing conversation into a new chat with copied history and session memory."""
+    """Fork an existing conversation into a new chat with copied history and session memory.
+
+    Raises ``RuntimeError`` if a source history/memory file exists but cannot be
+    copied — never returns success with a missing history that still advertises
+    the source ``message_count``.
+    """
     source_meta = get_chat(source_chat_id)
     if not source_meta:
         raise KeyError(source_chat_id)
@@ -268,23 +292,23 @@ def fork_chat(source_chat_id: str, *, title: str | None = None) -> dict[str, Any
     new_meta["created_at"] = ts
     new_meta["updated_at"] = ts
 
-    # Copy UI log file if present
     try:
         src_ui_log = chat_ui_log_path(source_chat_id)
         if src_ui_log.exists():
-            dst_ui_log = chat_ui_log_path(new_chat_id)
-            shutil.copy2(src_ui_log, dst_ui_log)
-    except (ValueError, OSError):
-        pass
+            shutil.copy2(src_ui_log, chat_ui_log_path(new_chat_id))
+        elif int(new_meta.get("message_count") or 0) > 0:
+            # Meta claimed history but the UI log is missing — don't advertise it.
+            new_meta["message_count"] = 0
 
-    # Copy session memory file if present
-    try:
         src_mem = SESSIONS_MEMORY_DIR / f"{source_chat_id}.jsonl"
         if src_mem.exists():
-            dst_mem = SESSIONS_MEMORY_DIR / f"{new_chat_id}.jsonl"
-            shutil.copy2(src_mem, dst_mem)
-    except (ValueError, OSError):
-        pass
+            from paths import safe_id as _safe_id
+
+            _safe_id(source_chat_id, kind="chat_id")
+            shutil.copy2(src_mem, SESSIONS_MEMORY_DIR / f"{new_chat_id}.jsonl")
+    except (ValueError, OSError) as e:
+        _cleanup_fork_artifacts(new_chat_id)
+        raise RuntimeError(f"Failed to copy chat data while forking: {e}") from e
 
     atomic_write_json(chat_meta_path(new_chat_id), new_meta)
     return new_meta

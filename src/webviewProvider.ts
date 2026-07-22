@@ -280,16 +280,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     chatId: string,
     chat: Record<string, unknown>,
     draft = "",
+    chatTitle?: string,
   ): Promise<void> {
     const events = (chat.events as Array<Record<string, unknown>>) || [];
     this.eventsOffset = Number(chat.events_offset ?? 0) || 0;
     this.eventsHasMore = Boolean(chat.events_has_more);
+    const title =
+      (typeof chatTitle === "string" && chatTitle.trim()) ||
+      (typeof chat.title === "string" ? chat.title : undefined);
     this.post({
       type: "restore",
       items: eventsToItems(events),
       draft,
       mode: (chat.mode as AgentMode) || this.mode,
       chatId,
+      chatTitle: title,
       autoApprove: this.autoApprove,
       interaction: this.interaction,
       caveman: this.caveman,
@@ -718,12 +723,23 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.newChat();
           break;
         }
+        if (this.abort) {
+          // Use error so the webview clears pendingForkRef (status would leave it set).
+          this.post({
+            type: "error",
+            message: "Stop the current run before forking.",
+          });
+          break;
+        }
         try {
           const res = await this.gateway.forkChat(targetId);
           this.chatId = res.chat_id;
           await this.persistLocal(this.persistState());
           const chat = await this.gateway.getChat(res.chat_id, { tail: 400 });
-          await this.postChatRestore(res.chat_id, chat);
+          const forkTitle =
+            (typeof res.chat?.title === "string" && res.chat.title) ||
+            (typeof chat.title === "string" ? chat.title : undefined);
+          await this.postChatRestore(res.chat_id, chat, "", forkTitle);
           await this.refreshChats();
         } catch (err) {
           this.post({

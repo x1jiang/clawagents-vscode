@@ -981,8 +981,13 @@ export function App() {
           if (pendingForkRef.current) {
             pendingForkRef.current = false;
             const match = (chats || []).find((c) => c.id === msg.chatId);
-            const rawTitle = match?.title || "Forked Conversation";
-            const displayTitle = rawTitle.startsWith("[Forked]") ? rawTitle : `[Forked] ${rawTitle}`;
+            const rawTitle =
+              (typeof msg.chatTitle === "string" && msg.chatTitle.trim()) ||
+              match?.title ||
+              "Forked Conversation";
+            const displayTitle = rawTitle.startsWith("[Forked]")
+              ? rawTitle
+              : `[Forked] ${rawTitle}`;
             setForkNotice({ title: displayTitle, chatId: (msg.chatId as string) || "" });
           }
           setPanel("chat");
@@ -1295,6 +1300,7 @@ export function App() {
         case "error":
           setBusy(false);
           streamingRef.current = false;
+          pendingForkRef.current = false;
           commitRunCost(runUsageRef.current);
           // A failed settings save posts type:"error" without saveOutcome —
           // clear the sticky pending patch so later Settings edits can save.
@@ -1312,6 +1318,7 @@ export function App() {
         case "cancelled":
           setBusy(false);
           streamingRef.current = false;
+          pendingForkRef.current = false;
           commitRunCost(runUsageRef.current);
           setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
           break;
@@ -2665,9 +2672,15 @@ export function App() {
                       <button
                         type="button"
                         className="chat-action-btn"
-                        title="Fork this conversation"
+                        title={
+                          busy
+                            ? "Stop the current run before forking"
+                            : "Fork this conversation"
+                        }
+                        disabled={busy}
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (busy) return;
                           pendingForkRef.current = true;
                           post({ type: "fork_chat", chatId: c.id });
                         }}
