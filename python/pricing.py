@@ -124,6 +124,7 @@ _PROVIDER_DOT_PREFIXES = (
     "ai21.",
     "xai.",
     "moonshot.",
+    "moonshotai.",
     "zai.",
 )
 

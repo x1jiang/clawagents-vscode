@@ -71,3 +71,51 @@ def test_fork_chat_copies_metadata_events_and_memory(tmp_path: Path, monkeypatch
     forked_mem = mem_dir / f"{new_id}.jsonl"
     assert forked_mem.exists()
     assert "Hello" in forked_mem.read_text(encoding="utf-8")
+
+
+def test_fork_chat_raises_when_ui_log_copy_fails(tmp_path: Path, monkeypatch):
+    source_id = "chat_source_fail"
+    meta_path = tmp_path / f"{source_id}.json"
+    ui_log_path = tmp_path / f"{source_id}.jsonl"
+    mem_dir = tmp_path / "memory"
+    mem_dir.mkdir(parents=True, exist_ok=True)
+
+    meta_path.write_text(
+        json.dumps(
+            {
+                "id": source_id,
+                "title": "Broken Copy",
+                "message_count": 1,
+                "session_cost_usd": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    ui_log_path.write_text(
+        json.dumps({"kind": "user", "text": "Hi"}) + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(chats, "chat_meta_path", lambda cid: tmp_path / f"{cid}.json")
+    monkeypatch.setattr(chats, "chat_ui_log_path", lambda cid: tmp_path / f"{cid}.jsonl")
+    monkeypatch.setattr(chats, "SESSIONS_MEMORY_DIR", mem_dir)
+    monkeypatch.setattr(chats, "ensure_dirs", lambda: None)
+
+    real_copy2 = chats.shutil.copy2
+
+    def boom(src, dst, *args, **kwargs):
+        if str(src).endswith(".jsonl") and "memory" not in str(src):
+            raise OSError("disk full")
+        return real_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(chats.shutil, "copy2", boom)
+
+    try:
+        chats.fork_chat(source_id)
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        assert "Failed to copy chat data" in str(e)
+
+    # No orphan fork meta should remain
+    leftovers = [p for p in tmp_path.glob("chat_*.json") if p.name != f"{source_id}.json"]
+    assert leftovers == []

@@ -134,6 +134,8 @@ export type HostToWebview =
       draft?: string;
       mode: AgentMode;
       chatId?: string;
+      /** Chat title from meta (used for fork banner; may precede chats list refresh). */
+      chatTitle?: string;
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;

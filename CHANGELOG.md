@@ -1,4 +1,13 @@
+## 1.0.138
+
+- Require `clawagents>=6.20.46` — Mantle Grok/Sonnet-5 temperature omit, Kimi `moonshotai.*`, Fable retention hint.
+- Harden Fork conversation: block fork while a run is in flight (host + history buttons).
+- Clear pending fork banner state on error/cancel; show server fork title on success.
+- Fail fork when UI-log / session-memory copy fails instead of returning an empty fork.
+- Mantle catalog: use `moonshotai.kimi-*` ids; label Claude Fable 5 as needing `provider_data_share`.
+
 ## 1.0.137
+
 
 - Add Fork conversation feature: duplicate current or historical chat session with
   copied event history and session memory, prefixed with `[Forked]`.

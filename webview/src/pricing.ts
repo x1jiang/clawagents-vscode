@@ -101,6 +101,7 @@ const PROVIDER_DOT_PREFIXES = [
   "ai21.",
   "xai.",
   "moonshot.",
+  "moonshotai.",
   "zai.",
 ] as const;
 const MANTLE_KEEP_DOT_PREFIXES = ["deepseek."] as const;
