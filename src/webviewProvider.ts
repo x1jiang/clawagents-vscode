@@ -546,8 +546,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     try {
       chats = (await this.gateway.listChats()) as ChatSummary[];
       settings = await this.gateway.getSettings();
-      // One live probe on ready is fine; autosave must NOT probe (see save_settings).
-      providers = await this.gateway.getProviders({ probe: true });
+      // Fast start: fetch without live network probes.
+      providers = await this.gateway.getProviders({ probe: false });
       diagnostics = await this.gateway.getDiagnostics();
       stats = await this.gateway.getStats();
       mcp = await this.gateway.getMcp();
@@ -581,6 +581,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       mcp,
       includeContextByDefault: this.config.includeContextByDefault,
     });
+
+    // Fire-and-forget a live probe so the UI gets remote models (e.g. OpenAI/Mantle) shortly after ready.
+    if (this.sidecar.current) {
+      this.gateway
+        .getProviders({ probe: true })
+        .then((probed) => {
+          if (this.sidecar.current) {
+            void this.postSettingsWithKeyFlags(settings, probed);
+          }
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    }
   }
 
   /** Attach authoritative key flags whenever we push a providers catalog. */

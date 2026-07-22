@@ -2,7 +2,8 @@
 
 - Add Context Observatory toggle in Settings → Advanced UI and wire `ContextObserverHooks`
   to write full LLM context events to `.clawagents/context-observatory/<chat_id>/`.
-- Require `clawagents>=6.20.46` — Mantle Grok/Sonnet-5 temperature omit, Kimi `moonshotai.*`, Fable retention hint.
+- Fix Context Observatory initialization so enabled sessions are saved correctly; surface initialization and save failures in chat instead of silently discarding them.
+- Require `clawagents>=6.20.47` — Context Observatory plus Mantle Grok/Sonnet-5 temperature omit, Kimi `moonshotai.*`, and Fable retention hint.
 - Harden Fork conversation: block fork while a run is in flight (host + history buttons).
 - Clear pending fork banner state on error/cancel; show server fork title on success.
 - Fail fork when UI-log / session-memory copy fails instead of returning an empty fork.
