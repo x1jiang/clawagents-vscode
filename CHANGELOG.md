@@ -1,3 +1,10 @@
+## 1.0.139
+
+- Publish Context Observatory sidecar integration that landed after tagged `v1.0.138`:
+  Settings toggle, `ContextObserverHooks`, session persistence under
+  `.clawagents/context-observatory/<chat_id>/`, and failure surfacing in chat.
+- Require `clawagents>=6.20.47` (already on PyPI / GitHub).
+
 ## 1.0.138
 
 - Add Context Observatory toggle in Settings → Advanced UI and wire `ContextObserverHooks`
