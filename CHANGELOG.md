@@ -1,3 +1,8 @@
+## 1.0.140
+
+- Require `clawagents>=6.20.48` — Observatory HITL SSE kept open across permission/ask-user prompts,
+  session `external_file` reload, gateway/WS context_window accuracy.
+
 ## 1.0.139
 
 - Publish Context Observatory sidecar integration that landed after tagged `v1.0.138`:
