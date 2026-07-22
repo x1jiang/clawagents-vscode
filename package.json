@@ -341,6 +341,11 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically open the latest file the agent writes or edits (debounced; failures stay in the Sidecar output log, not chat)."
+        },
+        "clawagents.advanced.enableContextObservatory": {
+          "type": "boolean",
+          "default": false,
+          "description": "Advanced: Record full LLM context events, tokens, and timelines into .clawagents/context-observatory/<session_id>/ during agent runs for inspection in the Context Observatory UI."
         }
       }
     }

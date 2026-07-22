@@ -4109,6 +4109,20 @@ export function App() {
               />
               Learn (PTRL lessons)
             </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.context_observatory ?? settings.enable_context_observatory)}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    context_observatory: e.target.checked,
+                    enable_context_observatory: e.target.checked,
+                  }))
+                }
+              />
+              Context Observatory
+            </label>
           </section>
 
           <div className="panel-actions">

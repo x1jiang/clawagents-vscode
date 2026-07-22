@@ -1147,6 +1147,7 @@ async def run_chat_turn(
     on_exit_plan_mode: Callable[..., Any] | None = None,
     caveman: bool = True,
     goal: bool = False,
+    enable_context_observatory: bool = False,
     images: list[dict[str, Any]] | None = None,
     files: list[dict[str, Any]] | None = None,
     run_id: str | None = None,
@@ -1630,6 +1631,33 @@ async def run_chat_turn(
         agent = create_claw_agent(
             **{k: v for k, v in kwargs.items() if k in allowed}
         )
+        is_observatory = bool(
+            enable_context_observatory
+            or settings.get("context_observatory")
+            or settings.get("enable_context_observatory")
+        )
+        obs_store = None
+        obs_hooks = None
+        if is_observatory:
+            try:
+                from clawagents.context_observatory.hooks import ContextObserverHooks
+                from clawagents.context_observatory.store import EventStore
+
+                obs_store = EventStore()
+                obs_store.set_session_meta({
+                    "chat_id": chat_id,
+                    "model": effective_model,
+                    "mode": mode,
+                    "workspace": str(WORKSPACE),
+                })
+                obs_hooks = ContextObserverHooks(
+                    store=obs_store,
+                    model=effective_model,
+                )
+                agent.hooks = obs_hooks
+            except Exception:  # noqa: BLE001
+                pass
+
         bt = before_tool_factory(mode=mode, grants=GrantStore())
         agent.before_tool = bt
         # Route declarative permission "ask" into the VS Code approval UI.
@@ -1650,6 +1678,8 @@ async def run_chat_turn(
             "session": session,
             "features": {"session_persistence": True, "file_snapshots": True},
         }
+        if obs_hooks is not None and "hooks" in inspect.signature(agent.invoke).parameters:
+            invoke_kwargs["hooks"] = obs_hooks
         if "run_context" in inspect.signature(agent.invoke).parameters:
             invoke_kwargs["run_context"] = run_context
         # Image attachments require a newer clawagents (invoke(images=…));
@@ -1683,7 +1713,13 @@ async def run_chat_turn(
                 },
             )
 
-        return await agent.invoke(augmented, **invoke_kwargs)
+        res = await agent.invoke(augmented, **invoke_kwargs)
+        if obs_store is not None:
+            try:
+                obs_store.auto_save(chat_id=chat_id)
+            except Exception:  # noqa: BLE001
+                pass
+        return res
 
     # Floor is clawagents≥6.20.18 — workspace= is required. No process chdir / turn lock.
     if not supports_workspace:

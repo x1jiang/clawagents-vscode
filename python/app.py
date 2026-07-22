@@ -508,6 +508,8 @@ class ChatBody(BaseModel):
     caveman: bool = True
     # Goal autopilot (planner→verify→strategist).
     goal: bool = False
+    # Record full LLM context events to Context Observatory UI (.clawagents/context-observatory/)
+    enable_context_observatory: bool = False
     # Image attachments for the first user turn. Each item is
     # {"data": <base64 or data-URL>, "media_type": "image/png"}. The sidecar
     # forwards them to agent.invoke(images=…); ignored on older clawagents.
@@ -1615,6 +1617,7 @@ def create_app() -> FastAPI:
                         on_exit_plan_mode=on_exit_plan_mode,
                         caveman=bool(body.caveman),
                         goal=bool(body.goal),
+                        enable_context_observatory=bool(body.enable_context_observatory),
                         images=body.images,
                         files=body.files,
                         run_id=run_id,

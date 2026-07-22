@@ -302,6 +302,14 @@ export class ExtensionConfig {
     );
   }
 
+  get enableContextObservatory(): boolean {
+    return (
+      vscode.workspace
+        .getConfiguration("clawagents")
+        .get<boolean>("advanced.enableContextObservatory") ?? false
+    );
+  }
+
   async hasAnyApiKey(): Promise<boolean> {
     const env = await this.getApiKeyEnv();
     return this.hasAnyApiKeyFromEnv(env);
