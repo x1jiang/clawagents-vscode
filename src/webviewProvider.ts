@@ -811,6 +811,53 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "rename_chat":
+        try {
+          await this.gateway.patchChat(msg.chatId, { title: msg.title });
+          await this.refreshChats();
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "pin_chat":
+        try {
+          await this.gateway.patchChat(msg.chatId, { pinned: msg.pinned });
+          await this.refreshChats();
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "archive_chat":
+        try {
+          await this.gateway.patchChat(msg.chatId, { archived: msg.archived });
+          if (this.chatId === msg.chatId && msg.archived) {
+            this.chatId = undefined;
+            this.post({
+              type: "restore",
+              items: [],
+              draft: "",
+              mode: this.mode,
+              autoApprove: this.autoApprove,
+              interaction: this.interaction,
+              caveman: this.caveman,
+              goal: this.goalMode,
+              sessionCostUsd: 0,
+            });
+          }
+          await this.refreshChats();
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
       case "search_chats":
         try {
           await this.sidecar.ensureStarted();

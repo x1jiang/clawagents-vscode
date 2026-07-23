@@ -121,8 +121,17 @@ def list_chats() -> list[dict[str, Any]]:
     for path in CHATS_DIR.glob("*.json"):
         meta = read_json(path, None)
         if isinstance(meta, dict) and meta.get("id"):
+            meta.setdefault("pinned", False)
+            meta.setdefault("archived", False)
             chats.append(meta)
-    chats.sort(key=lambda c: float(c.get("updated_at") or 0), reverse=True)
+    chats.sort(
+        key=lambda c: (
+            not bool(c.get("archived")),
+            bool(c.get("pinned")),
+            float(c.get("updated_at") or 0),
+        ),
+        reverse=True,
+    )
     return chats
 
 
@@ -201,6 +210,8 @@ def create_chat(
         "id": chat_id,
         "title": title or "New chat",
         "mode": mode,
+        "pinned": False,
+        "archived": False,
         "created_at": ts,
         "updated_at": ts,
         "message_count": 0,
@@ -217,7 +228,17 @@ def patch_chat(chat_id: str, **fields: Any) -> dict[str, Any]:
     meta = get_chat(chat_id)
     if not meta:
         raise KeyError(chat_id)
-    meta.update({k: v for k, v in fields.items() if v is not None})
+    clean: dict[str, Any] = {}
+    for k, v in fields.items():
+        if v is None:
+            continue
+        if k == "title" and isinstance(v, str):
+            clean[k] = re.sub(r"\s+", " ", v).strip()[:120] or "New chat"
+        elif k in {"pinned", "archived"}:
+            clean[k] = bool(v)
+        else:
+            clean[k] = v
+    meta.update(clean)
     meta["updated_at"] = now_ts()
     atomic_write_json(chat_meta_path(chat_id), meta)
     return meta

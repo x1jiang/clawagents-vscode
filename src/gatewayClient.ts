@@ -306,6 +306,18 @@ export class GatewayClient {
     );
   }
 
+  patchChat(
+    chatId: string,
+    patch: { title?: string; pinned?: boolean; archived?: boolean },
+  ) {
+    return requestJson<Record<string, unknown>>(
+      this.requireHandle(),
+      "PATCH",
+      `/chats/${encodeURIComponent(chatId)}`,
+      patch,
+    );
+  }
+
   deleteChat(chatId: string) {
     return requestJson<{ ok: boolean }>(
       this.requireHandle(),
