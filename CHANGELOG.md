@@ -1,3 +1,7 @@
+## 1.0.143
+
+- Fix Settings **Build graph** / Graphify webview actions to use the sidecar managed Python runtime (they still hit base `pythonPath` in 1.0.142).
+
 ## 1.0.142
 
 - Fix Graphify commands to use the sidecar managed Python runtime instead of the base `pythonPath` interpreter.

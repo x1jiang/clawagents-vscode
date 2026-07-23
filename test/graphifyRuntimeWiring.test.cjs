@@ -7,6 +7,10 @@ const extension = fs.readFileSync(
   path.join(__dirname, "..", "src", "extension.ts"),
   "utf8",
 );
+const webviewProvider = fs.readFileSync(
+  path.join(__dirname, "..", "src", "webviewProvider.ts"),
+  "utf8",
+);
 
 function commandBody(command, nextCommand) {
   const start = extension.indexOf(`vscode.commands.registerCommand("${command}"`);
@@ -37,4 +41,14 @@ test("Graphify commands use the sidecar runtime rather than its base Python", ()
     assert.match(body, /resolveGraphifyPython\(\)/, `${command} bypasses sidecar Python`);
     assert.doesNotMatch(body, /config\.pythonPath/, `${command} uses base Python`);
   }
+});
+
+test("Settings Build graph button uses sidecar runtime (webview graphify_action)", () => {
+  const start = webviewProvider.indexOf("private async handleGraphifyAction(");
+  assert.notEqual(start, -1, "missing handleGraphifyAction");
+  const end = webviewProvider.indexOf("\n  private ", start + 1);
+  assert.notEqual(end, -1, "could not bound handleGraphifyAction");
+  const body = webviewProvider.slice(start, end);
+  assert.match(body, /await this\.sidecar\.resolvePythonRuntime\(\)/);
+  assert.doesNotMatch(body, /this\.config\.pythonPath/);
 });

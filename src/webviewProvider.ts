@@ -245,7 +245,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       | "ensure"
       | "open_folder",
   ): Promise<void> {
-    const python = this.config.pythonPath;
+    // Same interpreter as the sidecar (managed venv), not base pythonPath.
+    const python = await this.sidecar.resolvePythonRuntime();
     const out = this.sidecar.output;
     try {
       if (action === "ensure") {
