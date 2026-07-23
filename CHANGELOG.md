@@ -1,3 +1,8 @@
+## 1.0.141
+
+- Require `clawagents>=6.20.49` — OpenAI `cache_write_tokens` metered for cache-load cost (Chat Completions + Responses).
+- Gateway usage events accept `cache_write_tokens` as an alias for cache-creation billing.
+
 ## 1.0.140
 
 - Require `clawagents>=6.20.48` — Observatory HITL SSE kept open across permission/ask-user prompts,
