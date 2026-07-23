@@ -6,6 +6,7 @@ import json
 import inspect
 import os
 import re
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -258,6 +259,80 @@ def delete_chat(chat_id: str) -> None:
         mem.unlink(missing_ok=True)
     except ValueError:
         return
+
+
+def _cleanup_fork_artifacts(chat_id: str) -> None:
+    """Best-effort remove partial fork files after a failed copy."""
+    try:
+        chat_ui_log_path(chat_id).unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass
+    try:
+        from paths import safe_id
+
+        safe_id(chat_id, kind="chat_id")
+        (SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl").unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass
+    try:
+        chat_meta_path(chat_id).unlink(missing_ok=True)
+    except (ValueError, OSError):
+        pass
+
+
+def fork_chat(source_chat_id: str, *, title: str | None = None) -> dict[str, Any]:
+    """Fork an existing conversation into a new chat with copied history and session memory.
+
+    Raises ``RuntimeError`` if a source history/memory file exists but cannot be
+    copied — never returns success with a missing history that still advertises
+    the source ``message_count``.
+    """
+    source_meta = get_chat(source_chat_id)
+    if not source_meta:
+        raise KeyError(source_chat_id)
+
+    new_chat_id = f"chat_{uuid.uuid4().hex[:12]}"
+    from paths import safe_id
+
+    safe_id(new_chat_id, kind="chat_id")
+
+    ts = now_ts()
+    base_title = str(source_meta.get("title") or "Chat").strip()
+    if title:
+        fork_title = title
+    elif base_title.startswith("[Forked] "):
+        fork_title = base_title
+    elif base_title.endswith(" (Fork)"):
+        fork_title = f"[Forked] {base_title[:-7]}"
+    else:
+        fork_title = f"[Forked] {base_title}"
+
+    new_meta = dict(source_meta)
+    new_meta["id"] = new_chat_id
+    new_meta["title"] = fork_title
+    new_meta["created_at"] = ts
+    new_meta["updated_at"] = ts
+
+    try:
+        src_ui_log = chat_ui_log_path(source_chat_id)
+        if src_ui_log.exists():
+            shutil.copy2(src_ui_log, chat_ui_log_path(new_chat_id))
+        elif int(new_meta.get("message_count") or 0) > 0:
+            # Meta claimed history but the UI log is missing — don't advertise it.
+            new_meta["message_count"] = 0
+
+        src_mem = SESSIONS_MEMORY_DIR / f"{source_chat_id}.jsonl"
+        if src_mem.exists():
+            from paths import safe_id as _safe_id
+
+            _safe_id(source_chat_id, kind="chat_id")
+            shutil.copy2(src_mem, SESSIONS_MEMORY_DIR / f"{new_chat_id}.jsonl")
+    except (ValueError, OSError) as e:
+        _cleanup_fork_artifacts(new_chat_id)
+        raise RuntimeError(f"Failed to copy chat data while forking: {e}") from e
+
+    atomic_write_json(chat_meta_path(new_chat_id), new_meta)
+    return new_meta
 
 
 def append_ui_event(chat_id: str, event: dict[str, Any]) -> None:
@@ -1093,6 +1168,7 @@ async def run_chat_turn(
     on_exit_plan_mode: Callable[..., Any] | None = None,
     caveman: bool = True,
     goal: bool = False,
+    enable_context_observatory: bool = False,
     images: list[dict[str, Any]] | None = None,
     files: list[dict[str, Any]] | None = None,
     run_id: str | None = None,
@@ -1197,6 +1273,17 @@ async def run_chat_turn(
         "a large file sequentially. Once you have the requested facts, stop and "
         "answer; do not re-read the same range or load skills unless required. "
         "Use activate_tool_group for optional web/git/pty tools."
+    )
+    instructions.append(
+        "Failure and credential discipline: classify a failed command before another "
+        "tool attempt. Never source a workspace `.env`, echo credentials, interpolate "
+        "passwords into shell command strings, or pass them as CLI arguments; use a "
+        "literal env-file or a mode-0600 authentication file. If a remote client reports "
+        "NT_STATUS_LOGON_FAILURE, authentication rejected, or access denied, the "
+        "transport reached the service: stop changing clients/runtimes and report the "
+        "exact response so the user can verify the domain-qualified username and rotate "
+        "the credential. If a package is unavailable, do not hop package managers. "
+        "After an apply_patch SEARCH miss, re-read the exact current span before retrying."
     )
     if caveman:
         instructions.append(CAVEMAN_INSTRUCTION)
@@ -1565,6 +1652,36 @@ async def run_chat_turn(
         agent = create_claw_agent(
             **{k: v for k, v in kwargs.items() if k in allowed}
         )
+        is_observatory = bool(
+            enable_context_observatory
+            or settings.get("context_observatory")
+            or settings.get("enable_context_observatory")
+        )
+        obs_store = None
+        obs_hooks = None
+        if is_observatory:
+            try:
+                from clawagents.context_observatory.hooks import ContextObserverHooks
+                from clawagents.context_observatory.store import EventStore
+
+                obs_store = EventStore()
+                obs_store.set_session_meta(
+                    chat_id=chat_id,
+                    model=effective_model,
+                    mode=mode,
+                    workspace=str(WORKSPACE),
+                )
+                obs_hooks = ContextObserverHooks(
+                    store=obs_store,
+                    model=effective_model,
+                )
+                agent.hooks = obs_hooks
+            except Exception as exc:  # noqa: BLE001
+                on_event(
+                    "warn",
+                    {"message": f"Context Observatory could not start: {exc}"},
+                )
+
         bt = before_tool_factory(mode=mode, grants=GrantStore())
         agent.before_tool = bt
         # Route declarative permission "ask" into the VS Code approval UI.
@@ -1585,6 +1702,8 @@ async def run_chat_turn(
             "session": session,
             "features": {"session_persistence": True, "file_snapshots": True},
         }
+        if obs_hooks is not None and "hooks" in inspect.signature(agent.invoke).parameters:
+            invoke_kwargs["hooks"] = obs_hooks
         if "run_context" in inspect.signature(agent.invoke).parameters:
             invoke_kwargs["run_context"] = run_context
         # Image attachments require a newer clawagents (invoke(images=…));
@@ -1618,7 +1737,17 @@ async def run_chat_turn(
                 },
             )
 
-        return await agent.invoke(augmented, **invoke_kwargs)
+        res = await agent.invoke(augmented, **invoke_kwargs)
+        if obs_store is not None:
+            try:
+                saved_path = obs_store.auto_save(chat_id=chat_id)
+                if saved_path:
+                    on_event("status", {"text": f"Context Observatory saved to: {saved_path.parent}"})
+                else:
+                    on_event("warn", {"message": "Context Observatory was enabled but no events were captured."})
+            except Exception as e:  # noqa: BLE001
+                on_event("warn", {"message": f"Failed to save Context Observatory: {e}"})
+        return res
 
     # Floor is clawagents≥6.20.18 — workspace= is required. No process chdir / turn lock.
     if not supports_workspace:

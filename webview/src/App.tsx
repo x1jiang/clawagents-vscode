@@ -509,6 +509,8 @@ export function App() {
   const [renameDraft, setRenameDraft] = useState("");
   const [pendingDeleteChatId, setPendingDeleteChatId] = useState<string | undefined>();
   const [panel, setPanel] = useState<Panel>("chat");
+  const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
+  const pendingForkRef = useRef(false);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [skillsPreview, setSkillsPreview] = useState<SkillsPreview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -979,6 +981,18 @@ export function App() {
           );
           setBusy(false);
           streamingRef.current = false;
+          if (pendingForkRef.current) {
+            pendingForkRef.current = false;
+            const match = (chats || []).find((c) => c.id === msg.chatId);
+            const rawTitle =
+              (typeof msg.chatTitle === "string" && msg.chatTitle.trim()) ||
+              match?.title ||
+              "Forked Conversation";
+            const displayTitle = rawTitle.startsWith("[Forked]")
+              ? rawTitle
+              : `[Forked] ${rawTitle}`;
+            setForkNotice({ title: displayTitle, chatId: (msg.chatId as string) || "" });
+          }
           setPanel("chat");
           break;
         case "prepend_items": {
@@ -1289,6 +1303,7 @@ export function App() {
         case "error":
           setBusy(false);
           streamingRef.current = false;
+          pendingForkRef.current = false;
           commitRunCost(runUsageRef.current);
           // A failed settings save posts type:"error" without saveOutcome —
           // clear the sticky pending patch so later Settings edits can save.
@@ -1306,6 +1321,7 @@ export function App() {
         case "cancelled":
           setBusy(false);
           streamingRef.current = false;
+          pendingForkRef.current = false;
           commitRunCost(runUsageRef.current);
           setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
           break;
@@ -2206,6 +2222,22 @@ export function App() {
           >
             {c.pinned ? "★" : "☆"}
           </button>
+          <button
+            type="button"
+            className="ghost tiny chat-fork"
+            title={busy ? "Stop the current run before forking" : "Fork this conversation"}
+            aria-label="Fork chat"
+            disabled={busy}
+            onClick={() => {
+              if (busy) return;
+              setOpenChatMenuId(undefined);
+              setPendingDeleteChatId(undefined);
+              pendingForkRef.current = true;
+              post({ type: "fork_chat", chatId: c.id });
+            }}
+          >
+            <IconFork size={13} />
+          </button>
           <div className="chat-menu-wrap">
             <button
               type="button"
@@ -2521,6 +2553,22 @@ export function App() {
             </button>
           ))}
         </nav>
+        {forkNotice && panel === "chat" && (
+          <div className="banner info fork-banner">
+            <IconFork size={14} className="fork-banner-icon" />
+            <span className="fork-banner-text">
+              Switched to forked conversation: <strong>{forkNotice.title}</strong>
+            </span>
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={() => setForkNotice(null)}
+              title="Dismiss notification"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {!hasApiKey && panel === "chat" && (
           <div className="banner warn">
             No provider credential.{" "}
@@ -4223,6 +4271,20 @@ export function App() {
               />
               Learn (PTRL lessons)
             </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={Boolean(settings.context_observatory ?? settings.enable_context_observatory)}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    context_observatory: e.target.checked,
+                    enable_context_observatory: e.target.checked,
+                  }))
+                }
+              />
+              Context Observatory
+            </label>
           </section>
 
           <div className="panel-actions">
@@ -4591,6 +4653,18 @@ export function App() {
               <button
                 type="button"
                 className="ghost tiny"
+                disabled={busy || !items.length}
+                title="Fork current conversation into a new chat"
+                onClick={() => {
+                  pendingForkRef.current = true;
+                  post({ type: "fork_chat" });
+                }}
+              >
+                <IconFork size={12} /> Fork
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
                 disabled={busy}
                 title="Start a new chat"
                 onClick={() => post({ type: "new_chat" })}
@@ -4692,6 +4766,28 @@ export function App() {
               }}
             >
               <div className="compose-shell">
+                <div
+                  className="compose-resize-handle"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    const ta = textareaRef.current;
+                    if (!ta) return;
+                    const startY = e.clientY;
+                    const startH = ta.offsetHeight;
+                    const onMove = (ev: PointerEvent) => {
+                      // dragging up (negative delta) → taller
+                      const delta = startY - ev.clientY;
+                      const next = Math.min(Math.max(startH + delta, 52), 320);
+                      ta.style.height = `${next}px`;
+                    };
+                    const onUp = () => {
+                      document.removeEventListener("pointermove", onMove);
+                      document.removeEventListener("pointerup", onUp);
+                    };
+                    document.addEventListener("pointermove", onMove);
+                    document.addEventListener("pointerup", onUp);
+                  }}
+                />
                 <textarea
                   ref={textareaRef}
                   value={draft}
@@ -4710,6 +4806,11 @@ export function App() {
                       beginAttachmentRequest,
                       finishAttachmentRequest,
                     );
+                  }}
+                  onDrop={(e) => {
+                    // Prevent the browser's default path-insertion behavior inside textarea,
+                    // but allow it to bubble up to .compose-row for custom attachment logic.
+                    e.preventDefault();
                   }}
                   placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · mic / ⌃␣ / F8 dictate · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
                   rows={3}
@@ -5039,6 +5140,28 @@ function IconStop() {
   );
 }
 
+function IconFork({ size = 14, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      style={{ display: "inline-block", verticalAlign: "middle" }}
+    >
+      <path d="M 2 8 H 5.5 L 11 2.5 M 5.5 8 L 11 13.5" />
+      <path d="M 7.5 2.5 H 11 V 6" />
+      <path d="M 7.5 13.5 H 11 V 10" />
+    </svg>
+  );
+}
+
 function IconRedirect() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -5320,17 +5443,24 @@ function collectDropUris(dt: DataTransfer): string[] {
     }
     pushLine(data);
   };
-  const types = new Set<string>([
+  const types = [
     "application/vnd.code.uri-list",
     "text/uri-list",
     "ResourceURLs",
     "resourceurls",
-    "text/plain",
-    ...Array.from(dt.types ?? []),
-  ]);
+  ];
   for (const type of types) {
+    if (!dt.types.includes(type)) continue;
     try {
       pushPayload(type, dt.getData(type));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (found.length === 0 && dt.types.includes("text/plain")) {
+    try {
+      pushPayload("text/plain", dt.getData("text/plain"));
     } catch {
       /* ignore */
     }

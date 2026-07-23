@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from chats import (
     create_chat,
     delete_chat,
+    fork_chat,
     get_chat,
     list_chats,
     patch_chat,
@@ -507,6 +508,8 @@ class ChatBody(BaseModel):
     caveman: bool = True
     # Goal autopilot (planner→verify→strategist).
     goal: bool = False
+    # Record full LLM context events to Context Observatory UI (.clawagents/context-observatory/)
+    enable_context_observatory: bool = False
     # Image attachments for the first user turn. Each item is
     # {"data": <base64 or data-URL>, "media_type": "image/png"}. The sidecar
     # forwards them to agent.invoke(images=…); ignored on older clawagents.
@@ -1212,6 +1215,23 @@ def create_app() -> FastAPI:
         delete_chat(chat_id)
         return {"ok": True}
 
+    @app.post("/chats/{chat_id}/fork")
+    async def chats_fork(chat_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            meta = fork_chat(chat_id)
+            return {"ok": True, "chat": meta, "chat_id": meta["id"]}
+        except KeyError:
+            return Response(status_code=404, content=json.dumps({"error": "chat not found"}))
+        except RuntimeError as e:
+            return Response(
+                status_code=500,
+                content=json.dumps({"error": str(e)}),
+                media_type="application/json",
+            )
+
     @app.post("/chats/{chat_id}/regenerate")
     async def chats_regenerate(chat_id: str, request: Request):
         denied = _auth_or_401(request)
@@ -1605,6 +1625,7 @@ def create_app() -> FastAPI:
                         on_exit_plan_mode=on_exit_plan_mode,
                         caveman=bool(body.caveman),
                         goal=bool(body.goal),
+                        enable_context_observatory=bool(body.enable_context_observatory),
                         images=body.images,
                         files=body.files,
                         run_id=run_id,

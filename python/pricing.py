@@ -62,8 +62,10 @@ PRICES: dict[str, PriceTuple] = {
     "gemini-2.5-flash": (0.3, 2.5, 0.03, 0.375),
 }
 
-# Amazon Bedrock / Mantle — commercial us-east-1 Global Standard (OneHUB).
-# OpenAI-on-Bedrock ~+10% vs OpenAI API (including cache tiers).
+# Amazon Bedrock / Mantle — commercial US Standard on-demand
+# (us-east-1 / us-east-2 / us-west-2) from https://aws.amazon.com/bedrock/pricing/
+# OpenAI GPT-5.x-on-Bedrock ~+10% vs OpenAI API (including cache tiers).
+# 2-tuple entries derive cache read/write as 0.1× / 1.25× input at lookup.
 BEDROCK_PRICES: dict[str, PriceTuple] = {
     "claude-opus-4": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-5": (5.0, 25.0, 0.5, 6.25),
@@ -81,6 +83,24 @@ BEDROCK_PRICES: dict[str, PriceTuple] = {
     "gpt-5.6-luna": (1.1, 6.6, 0.11, 1.375),
     "gpt-5.5": (5.5, 33.0, 0.55, 6.875),
     "gpt-5.4": (2.75, 16.5, 0.275, 3.4375),
+    # OpenAI open-weight / safeguard (US Standard)
+    "gpt-oss-20b": (0.07, 0.30, 0.0, 0.0),
+    "gpt-oss-120b": (0.15, 0.60, 0.0, 0.0),
+    "gpt-oss-safeguard-20b": (0.07, 0.20, 0.0, 0.0),
+    "gpt-oss-safeguard-120b": (0.15, 0.60, 0.0, 0.0),
+    # xAI
+    "grok-4.3": (1.25, 2.50, 0.20, 1.5625),
+    # DeepSeek (keep dotted catalog id — stripping ``deepseek.`` → ``v3.2`` is ambiguous)
+    "deepseek.v3.2": (0.62, 1.85, 0.0, 0.0),
+    "deepseek.v3.1": (0.60, 1.73, 0.0, 0.0),
+    # Moonshot
+    "kimi-k2.5": (0.60, 3.00, 0.0, 0.0),
+    "kimi-k2-thinking": (0.60, 2.50, 0.0, 0.0),
+    # Z.AI
+    "glm-5": (1.00, 3.20, 0.0, 0.0),
+    "glm-4.7": (0.60, 2.20, 0.0, 0.0),
+    "glm-4.7-flash": (0.07, 0.40, 0.0, 0.0),
+    "glm-4.6": (0.60, 2.20, 0.0, 0.0),
 }
 
 _GEO_PREFIXES = (
@@ -102,6 +122,16 @@ _PROVIDER_DOT_PREFIXES = (
     "mistral.",
     "cohere.",
     "ai21.",
+    "xai.",
+    "moonshot.",
+    "moonshotai.",
+    "zai.",
+)
+
+# Detect Mantle/Bedrock catalog shape, but do not strip — ``deepseek.v3.2``
+# would collapse to ambiguous ``v3.2``.
+_MANTLE_KEEP_DOT_PREFIXES = (
+    "deepseek.",
 )
 
 
@@ -114,7 +144,7 @@ def _looks_bedrock(model_id: str) -> bool:
         return True
     if m.startswith(_GEO_PREFIXES):
         return True
-    if m.startswith(_PROVIDER_DOT_PREFIXES):
+    if m.startswith(_PROVIDER_DOT_PREFIXES) or m.startswith(_MANTLE_KEEP_DOT_PREFIXES):
         return True
     return False
 
@@ -130,6 +160,11 @@ def normalize_model_id(model_id: str) -> str:
         if key.startswith(prefix):
             key = key[len(prefix) :]
             break
+    # Keep ``deepseek.v3.*`` intact for pricing lookups.
+    if key.startswith(_MANTLE_KEEP_DOT_PREFIXES):
+        if ":" in key:
+            key = key.split(":", 1)[0]
+        return key
     for prefix in _PROVIDER_DOT_PREFIXES:
         if key.startswith(prefix):
             key = key[len(prefix) :]

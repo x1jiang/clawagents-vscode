@@ -136,6 +136,8 @@ export type HostToWebview =
       draft?: string;
       mode: AgentMode;
       chatId?: string;
+      /** Chat title from meta (used for fork banner; may precede chats list refresh). */
+      chatTitle?: string;
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;
@@ -298,6 +300,7 @@ export type WebviewToHost =
     }
   | { type: "clear" }
   | { type: "new_chat" }
+  | { type: "fork_chat"; chatId?: string }
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
@@ -508,6 +511,9 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return opaqueId(value.chatId) && typeof value.archived === "boolean"
         ? value as WebviewToHost
         : undefined;
+    case "fork_chat":
+      return (value.chatId === undefined || opaqueId(value.chatId))
+        ? value as WebviewToHost : undefined;
     case "search_chats":
       return text(value.query, 10_000) ? value as WebviewToHost : undefined;
     case "set_mode":

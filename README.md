@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.8** (artifact security, raw tool archival, workspace-scoped turns)
+- **clawagents ≥ 6.20.48** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -49,6 +49,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 | `clawagents.graphify` | `false` | Graphify knowledge-graph MCP (`graphifyy[mcp]` ≥0.9.20 + workspace graph) |
 | `clawagents.ensureCompanions` | `false` | Offer companion installs on sidecar start after confirmation (`context-mode`, `rtk`, `graphifyy`); default is probe-only |
 | `clawagents.syncPathPythons` | `false` | Offer (with confirmation) to upgrade other PATH Pythons below the floor; default manages only `pythonPath` |
+| `clawagents.advanced.enableContextObservatory` | `false` | Record context events during agent runs to `.clawagents/context-observatory/<chat_id>/`; import `session.json` into the standalone Observatory UI for analysis. |
 
 Sidebar **Settings** cover provider, model, base URL, skills, MCP, Graphify, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
 

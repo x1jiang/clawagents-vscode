@@ -22,6 +22,8 @@ DEFAULTS: dict[str, Any] = {
     "telemetry": False,
     "trajectory": False,
     "learn": False,
+    "context_observatory": False,
+    "enable_context_observatory": False,
     "browser_tools": False,
     "mcp_enabled": False,
     # When False, only ~/.clawagents/mcp.json is loaded (not workspace).

@@ -57,7 +57,7 @@ const PRICES: Record<string, Rates> = {
   "gemini-2.5-flash": withCache(0.3, 2.5),
 };
 
-/** Bedrock / Mantle commercial Global Standard (OneHUB us-east-1). */
+/** Bedrock / Mantle US Standard on-demand (aws.amazon.com/bedrock/pricing/). */
 const BEDROCK_PRICES: Record<string, Rates> = {
   "claude-opus-4": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-5": withCache(5, 25, 0.5, 6.25),
@@ -75,6 +75,19 @@ const BEDROCK_PRICES: Record<string, Rates> = {
   "gpt-5.6-luna": withCache(1.1, 6.6, 0.11, 1.375),
   "gpt-5.5": withCache(5.5, 33, 0.55, 6.875),
   "gpt-5.4": withCache(2.75, 16.5, 0.275, 3.4375),
+  "gpt-oss-20b": withCache(0.07, 0.3),
+  "gpt-oss-120b": withCache(0.15, 0.6),
+  "gpt-oss-safeguard-20b": withCache(0.07, 0.2),
+  "gpt-oss-safeguard-120b": withCache(0.15, 0.6),
+  "grok-4.3": withCache(1.25, 2.5, 0.2, 1.5625),
+  "deepseek.v3.2": withCache(0.62, 1.85),
+  "deepseek.v3.1": withCache(0.6, 1.73),
+  "kimi-k2.5": withCache(0.6, 3),
+  "kimi-k2-thinking": withCache(0.6, 2.5),
+  "glm-5": withCache(1, 3.2),
+  "glm-4.7": withCache(0.6, 2.2),
+  "glm-4.7-flash": withCache(0.07, 0.4),
+  "glm-4.6": withCache(0.6, 2.2),
 };
 
 const GEO_PREFIXES = ["global.", "us.", "eu.", "apac.", "ap.", "af.", "me.", "ca.", "sa."] as const;
@@ -86,7 +99,12 @@ const PROVIDER_DOT_PREFIXES = [
   "mistral.",
   "cohere.",
   "ai21.",
+  "xai.",
+  "moonshot.",
+  "moonshotai.",
+  "zai.",
 ] as const;
+const MANTLE_KEEP_DOT_PREFIXES = ["deepseek."] as const;
 
 export type ModelPrice = {
   input_per_mtok?: number;
@@ -101,6 +119,7 @@ function looksBedrock(modelId: string): boolean {
   if (m.startsWith("bedrock/") || m.startsWith("bedrock.")) return true;
   if (GEO_PREFIXES.some((p) => m.startsWith(p))) return true;
   if (PROVIDER_DOT_PREFIXES.some((p) => m.startsWith(p))) return true;
+  if (MANTLE_KEEP_DOT_PREFIXES.some((p) => m.startsWith(p))) return true;
   return false;
 }
 
@@ -113,6 +132,10 @@ export function normalizeModelId(modelId: string): string {
       key = key.slice(p.length);
       break;
     }
+  }
+  if (MANTLE_KEEP_DOT_PREFIXES.some((p) => key.startsWith(p))) {
+    if (key.includes(":")) key = key.split(":", 1)[0]!;
+    return key;
   }
   for (const p of PROVIDER_DOT_PREFIXES) {
     if (key.startsWith(p)) {

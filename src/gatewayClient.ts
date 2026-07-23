@@ -1,6 +1,7 @@
 import * as http from "http";
+import * as vscode from "vscode";
 import type { SidecarHandle } from "./sidecar";
-import type { AgentMode, AutoApprove, HostToWebview, InteractionStyle } from "./protocol";
+import type { AgentMode, AutoApprove, ChatSummary, HostToWebview, InteractionStyle } from "./protocol";
 
 export type StreamHandlers = {
   onEvent: (msg: HostToWebview) => void;
@@ -322,6 +323,14 @@ export class GatewayClient {
     );
   }
 
+  forkChat(chatId: string) {
+    return requestJson<{ ok: boolean; chat: ChatSummary; chat_id: string }>(
+      this.requireHandle(),
+      "POST",
+      `/chats/${encodeURIComponent(chatId)}/fork`,
+    );
+  }
+
   regenerate(chatId: string) {
     return requestJson<{ ok: boolean; task?: string; chat_id?: string }>(
       this.requireHandle(),
@@ -484,6 +493,8 @@ export class GatewayClient {
     files?: Array<{ data: string; media_type: string; name: string }>,
   ): Promise<string | undefined> {
     const handle = this.requireHandle();
+    const enableContextObservatory =
+      vscode.workspace.getConfiguration("clawagents").get<boolean>("advanced.enableContextObservatory") ?? false;
     const body = JSON.stringify({
       task,
       chat_id: chatId,
@@ -495,6 +506,7 @@ export class GatewayClient {
       interaction: interaction || "interactive",
       caveman: Boolean(caveman),
       goal: Boolean(goal),
+      enable_context_observatory: enableContextObservatory,
       images: images && images.length > 0 ? images : undefined,
       files: files && files.length > 0 ? files : undefined,
     });

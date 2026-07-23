@@ -280,16 +280,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     chatId: string,
     chat: Record<string, unknown>,
     draft = "",
+    chatTitle?: string,
   ): Promise<void> {
     const events = (chat.events as Array<Record<string, unknown>>) || [];
     this.eventsOffset = Number(chat.events_offset ?? 0) || 0;
     this.eventsHasMore = Boolean(chat.events_has_more);
+    const title =
+      (typeof chatTitle === "string" && chatTitle.trim()) ||
+      (typeof chat.title === "string" ? chat.title : undefined);
     this.post({
       type: "restore",
       items: eventsToItems(events),
       draft,
       mode: (chat.mode as AgentMode) || this.mode,
       chatId,
+      chatTitle: title,
       autoApprove: this.autoApprove,
       interaction: this.interaction,
       caveman: this.caveman,
@@ -541,8 +546,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     try {
       chats = (await this.gateway.listChats()) as ChatSummary[];
       settings = await this.gateway.getSettings();
-      // One live probe on ready is fine; autosave must NOT probe (see save_settings).
-      providers = await this.gateway.getProviders({ probe: true });
+      // Fast start: fetch without live network probes.
+      providers = await this.gateway.getProviders({ probe: false });
       diagnostics = await this.gateway.getDiagnostics();
       stats = await this.gateway.getStats();
       mcp = await this.gateway.getMcp();
@@ -576,6 +581,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       mcp,
       includeContextByDefault: this.config.includeContextByDefault,
     });
+
+    // Fire-and-forget a live probe so the UI gets remote models (e.g. OpenAI/Mantle) shortly after ready.
+    if (this.sidecar.current) {
+      this.gateway
+        .getProviders({ probe: true })
+        .then((probed) => {
+          if (this.sidecar.current) {
+            void this.postSettingsWithKeyFlags(settings, probed);
+          }
+        })
+        .catch(() => {
+          /* ignore */
+        });
+    }
   }
 
   /** Attach authoritative key flags whenever we push a providers catalog. */
@@ -712,6 +731,38 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "new_chat":
         await this.newChat();
         break;
+      case "fork_chat": {
+        const targetId = msg.chatId || this.chatId;
+        if (!targetId) {
+          await this.newChat();
+          break;
+        }
+        if (this.abort) {
+          // Use error so the webview clears pendingForkRef (status would leave it set).
+          this.post({
+            type: "error",
+            message: "Stop the current run before forking.",
+          });
+          break;
+        }
+        try {
+          const res = await this.gateway.forkChat(targetId);
+          this.chatId = res.chat_id;
+          await this.persistLocal(this.persistState());
+          const chat = await this.gateway.getChat(res.chat_id, { tail: 400 });
+          const forkTitle =
+            (typeof res.chat?.title === "string" && res.chat.title) ||
+            (typeof chat.title === "string" ? chat.title : undefined);
+          await this.postChatRestore(res.chat_id, chat, "", forkTitle);
+          await this.refreshChats();
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      }
       case "select_chat":
         this.chatId = msg.chatId;
         await this.persistLocal(this.persistState());
@@ -1840,14 +1891,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         message: `Attached ${filesStaged} document${filesStaged === 1 ? "" : "s"}`,
       });
     }
-    if (refs.length) {
-      this.post({ type: "prepend", text: `${refs.join("\n")}\n` });
+    const uniqueRefs = [...new Set(refs)];
+    if (uniqueRefs.length) {
+      this.post({ type: "prepend", text: `${uniqueRefs.join("\n")}\n` });
       this.post({
         type: "status",
         message:
-          refs.length === 1
-            ? `Attached ${refs[0].replace(/^@/, "")}`
-            : `Attached ${refs.length} files`,
+          uniqueRefs.length === 1
+            ? `Attached ${uniqueRefs[0].replace(/^@/, "")}`
+            : `Attached ${uniqueRefs.length} files`,
       });
     } else if (imagesStaged === 0 && filesStaged === 0) {
       this.post({
@@ -1856,7 +1908,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           "Drop workspace files onto the draft (hold Shift), or use +Attach.",
       });
     }
-    if (skipped.length && !refs.length && imagesStaged === 0 && filesStaged === 0) {
+    if (skipped.length && !uniqueRefs.length && imagesStaged === 0 && filesStaged === 0) {
       this.post({
         type: "error",
         message: `Not in workspace: ${skipped.slice(0, 3).join(", ")}`,

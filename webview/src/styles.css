@@ -191,6 +191,40 @@ body,
   color: var(--error);
 }
 
+.banner.fork-banner {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: slideInDown 0.2s ease-out;
+}
+
+.fork-banner-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.fork-banner-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .banner-actions {
   margin-top: 6px;
   color: var(--fg);
@@ -602,12 +636,36 @@ summary {
   overflow: hidden;
 }
 
+.compose-resize-handle {
+  height: 6px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.compose-resize-handle::after {
+  content: "";
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.compose-resize-handle:hover::after {
+  background: var(--muted);
+}
+
 .compose-shell textarea {
   display: block;
   width: 100%;
-  resize: vertical;
+  resize: none;
   min-height: 52px;
-  max-height: 180px;
+  max-height: 320px;
   background: transparent;
   color: var(--input-fg);
   border: none;
@@ -823,7 +881,7 @@ button.send:not(.icon-btn) {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .chat-list li {
@@ -832,6 +890,12 @@ button.send:not(.icon-btn) {
   gap: 6px;
   align-items: center;
   position: relative;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.chat-list li:hover {
+  background: color-mix(in srgb, var(--input-bg) 50%, transparent);
 }
 
 .chat-list li.active .chat-item {
@@ -839,11 +903,13 @@ button.send:not(.icon-btn) {
 }
 
 .chat-item {
+  flex: 1;
+  min-width: 0;
   text-align: left;
   background: color-mix(in srgb, var(--input-bg) 80%, transparent);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 8px;
+  padding: 8px 10px;
   color: var(--fg);
   cursor: pointer;
   min-width: 0;
@@ -851,6 +917,10 @@ button.send:not(.icon-btn) {
 
 .chat-item-edit {
   cursor: default;
+}
+
+.chat-item:hover {
+  background: color-mix(in srgb, var(--input-bg) 100%, transparent);
 }
 
 .chat-title {
@@ -886,17 +956,24 @@ button.send:not(.icon-btn) {
 
 .chat-row-actions {
   display: grid;
-  grid-template-columns: 28px 28px;
+  grid-template-columns: 28px 28px 28px;
   gap: 4px;
   align-items: center;
 }
 
 button.chat-pin,
+button.chat-fork,
 button.chat-menu-trigger {
   width: 28px;
   height: 28px;
   padding: 0;
   line-height: 1;
+}
+
+button.chat-fork {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 button.chat-pin.active {

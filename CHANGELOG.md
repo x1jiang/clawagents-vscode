@@ -1,3 +1,119 @@
+## 1.0.140
+
+- Require `clawagents>=6.20.48` — Observatory HITL SSE kept open across permission/ask-user prompts,
+  session `external_file` reload, gateway/WS context_window accuracy.
+
+## 1.0.139
+
+- Publish Context Observatory sidecar integration that landed after tagged `v1.0.138`:
+  Settings toggle, `ContextObserverHooks`, session persistence under
+  `.clawagents/context-observatory/<chat_id>/`, and failure surfacing in chat.
+- Require `clawagents>=6.20.47` (already on PyPI / GitHub).
+
+## 1.0.138
+
+- Add Context Observatory toggle in Settings → Advanced UI and wire `ContextObserverHooks`
+  to write full LLM context events to `.clawagents/context-observatory/<chat_id>/`.
+- Fix Context Observatory initialization so enabled sessions are saved correctly; surface initialization and save failures in chat instead of silently discarding them.
+- Require `clawagents>=6.20.47` — Context Observatory plus Mantle Grok/Sonnet-5 temperature omit, Kimi `moonshotai.*`, and Fable retention hint.
+- Harden Fork conversation: block fork while a run is in flight (host + history buttons).
+- Clear pending fork banner state on error/cancel; show server fork title on success.
+- Fail fork when UI-log / session-memory copy fails instead of returning an empty fork.
+- Mantle catalog: use `moonshotai.kimi-*` ids; label Claude Fable 5 as needing `provider_data_share`.
+
+## 1.0.137
+
+
+- Add Fork conversation feature: duplicate current or historical chat session with
+  copied event history and session memory, prefixed with `[Forked]`.
+- Redesign chat history list with hover-visible actions (`IconFork` branch arrow
+  and `✕` delete) and inline confirmation state for Webview sandbox safety.
+- Add visual notification banner when switching to a forked conversation.
+- Add `git-release-workflow` skill enforcing branch-first pushes, mandatory
+  `CHANGELOG.md` updates per commit, and release version tagging on `main`.
+
+## 1.0.136
+
+- Require `clawagents>=6.20.45` — Mantle Claude uses `AsyncAnthropicBedrockMantle`
+  (Bearer auth). Plain Anthropic `X-Api-Key` failed on Mantle Messages.
+
+## 1.0.135
+
+- Require `clawagents>=6.20.44` — Mantle frontier models (GPT-5.x / Grok) use
+  base `…/openai/v1` (fixes bare `…/openai` → HTTP 404 on Responses). GPT-5.6
+  Sol is only in `us-east-1` / `us-east-2`.
+
+## 1.0.134
+
+- Mantle catalog list prices from AWS Bedrock US Standard for Grok, DeepSeek,
+  Kimi, GLM, GPT-OSS / Safeguard (dropdown `· $in/$out per 1M` + cost estimates).
+
+## 1.0.133
+
+- Require `clawagents>=6.20.43` — Mantle `xai.grok-4.3` uses `/openai/v1`
+  Responses (fixes Berm `access_denied` on plain `…/v1` chat). Catalog label
+  and `mantleWireApiForModel` mark Grok as openai/v1 + responses.
+
+## 1.0.132
+
+- Require `clawagents>=6.20.42` for lower-churn patch recovery, explicit refusal
+  of unauthorized unsandboxed execution, sandbox-compatible gcloud guidance,
+  profile-preserving command auto-backgrounding, and retained PTY exit screens.
+
+## 1.0.131
+
+- Require `clawagents>=6.20.41` so repeated same-name skill calls advance the
+  pending load, disallowed tools get accurate boundary guidance, and nonzero
+  `npm audit` reports are classified as security findings without unsafe retry.
+  External-action policy is framework-generic, and reconciliation commands
+  cannot mutate state or repeat the action they are meant to verify.
+
+## 1.0.130
+
+- Require `clawagents>=6.20.40` — external publish/deploy actions now require
+  approved pre-action verification and post-action reconciliation. Attempts
+  consume authorization before execution, so failures, crashes, and timeouts
+  cannot permit unsafe retries or premature completion.
+
+## 1.0.129
+
+- Require `clawagents>=6.20.39` so Context Mode rejects binary inputs to
+  `ctx_execute_file` before UTF-8 decoding, gives actionable routing guidance,
+  and avoids duplicating MCP error details in the tool card.
+
+## 1.0.128
+
+- Require `clawagents>=6.20.38` — stable OpenAI prompt-cache affinity, incremental
+  token ledger, TTFT/RSS telemetry, Gemini cache-read accounting, and bounded
+  streaming exec head/tail output.
+
+## 1.0.127
+
+- Install the existing `pty` extra (`pexpect` + `pyte`) in managed sidecars so
+  interactive commands such as `gcloud auth login` can start successfully.
+
+## 1.0.126
+
+- Require `clawagents>=6.20.37` so approved Plan invariants remain enforceable
+  in Act mode: publish/deploy commands now require fresh successful verification
+  gates after the latest edit, with pending/corrupt contracts failing closed.
+
+## 1.0.125
+
+- Require `clawagents>=6.20.36` — permit one literal `/tmp/<name>` cleanup while retaining destructive-delete guards for broad, dynamic, and system paths.
+- Avoid false encoded-Python blocks, normalize empty `grep`/`rg` searches, and add quarantine/missing-file recovery guidance.
+- Distinguish a missing runtime executable (for example `kinit`) from secondary cleanup failures such as a missing `kdestroy`.
+- Report the exact failed SEARCH/REPLACE hunk and reject invalid JSON before `apply_patch` writes it.
+- Show the first differing character for near matches and distinguish Markdown list items from table rows instead of reporting a rounded 100% similarity.
+- Explain empty `&&`-chain failures whose useful output was redirected to a log, without treating advisory safety warnings as the cause.
+- Separate missing-input root causes from empty-JSON cascade errors in shell loops and preserve successful iterations in the diagnosis.
+- Treat `ModuleNotFoundError` as an interpreter/environment mismatch and recommend same-interpreter virtualenv checks before installation.
+
+## 1.0.124
+
+- Add failure discipline for authentication, missing packages, patch rereads, and secret-safe `.env` handling.
+- Require `clawagents>=6.20.35` — default three-failure rethink guard, structured failure classification, shell-secret redaction, and heredoc-safe shell sessions.
+
 ## 1.0.123
 
 - Prefer engine `output` / `ui_output` over short `preview` for tool cards (shows stderr on long execute failures).
