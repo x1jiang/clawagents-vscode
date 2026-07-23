@@ -303,30 +303,36 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("clawagents.graphifyExtract", async () => {
       // Default extract is code-only — bare extract often exits 0 with no graph.json.
       const python = await resolveGraphifyPython();
-      await runGraphifyMode(python, "extract_code", sidecar?.output);
+      const status = await runGraphifyMode(python, "extract_code", sidecar?.output);
+      await provider?.offerEnableGraphifyMcp(status);
       provider?.postGraphifyStatus(
-        getGraphifyStatus(python) as unknown as Record<string, unknown>,
+        status as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyExtractFull", async () => {
       const python = await resolveGraphifyPython();
-      await runGraphifyMode(python, "extract_full", sidecar?.output);
+      const status = await runGraphifyMode(python, "extract_full", sidecar?.output);
+      await provider?.offerEnableGraphifyMcp(status);
       provider?.postGraphifyStatus(
-        getGraphifyStatus(python) as unknown as Record<string, unknown>,
+        status as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyUpdate", async () => {
       const python = await resolveGraphifyPython();
-      await runGraphifyMode(python, "update", sidecar?.output);
+      const status = await runGraphifyMode(python, "update", sidecar?.output);
+      await provider?.offerEnableGraphifyMcp(status);
       provider?.postGraphifyStatus(
-        getGraphifyStatus(python) as unknown as Record<string, unknown>,
+        status as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyAdoptUpstream", async () => {
       const python = await resolveGraphifyPython();
-      await adoptUpstreamGraph(sidecar?.output);
+      const status = await adoptUpstreamGraph(python, sidecar?.output);
+      if (status) {
+        await provider?.offerEnableGraphifyMcp(status);
+      }
       provider?.postGraphifyStatus(
-        getGraphifyStatus(python) as unknown as Record<string, unknown>,
+        (status || getGraphifyStatus(python)) as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyStatus", async () => {

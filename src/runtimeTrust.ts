@@ -5,6 +5,7 @@ export type RuntimeTrust = {
   mcp_trust_workspace: boolean;
   allow_full_access: boolean;
   allow_external_skill_dirs: boolean;
+  trusted_external_graph_path: string;
 };
 
 export const EMPTY_RUNTIME_TRUST: RuntimeTrust = {
@@ -12,6 +13,7 @@ export const EMPTY_RUNTIME_TRUST: RuntimeTrust = {
   mcp_trust_workspace: false,
   allow_full_access: false,
   allow_external_skill_dirs: false,
+  trusted_external_graph_path: "",
 };
 
 export function runtimeTrustStorageKey(canonicalWorkspace: string): string {
@@ -39,6 +41,10 @@ export function parseRuntimeTrust(raw: string | undefined): RuntimeTrust {
     mcp_trust_workspace: value.mcp_trust_workspace === true,
     allow_full_access: value.allow_full_access === true,
     allow_external_skill_dirs: value.allow_external_skill_dirs === true,
+    trusted_external_graph_path:
+      typeof value.trusted_external_graph_path === "string"
+        ? value.trusted_external_graph_path.trim()
+        : "",
   };
 }
 
@@ -54,6 +60,10 @@ export function runtimeTrustFromSettings(settings: Record<string, unknown>): Run
     mcp_trust_workspace: settings.mcp_trust_workspace === true,
     allow_full_access: settings.allow_full_access === true,
     allow_external_skill_dirs: settings.allow_external_skill_dirs === true,
+    trusted_external_graph_path:
+      typeof settings.trusted_external_graph_path === "string"
+        ? settings.trusted_external_graph_path.trim()
+        : "",
   };
 }
 
@@ -77,6 +87,8 @@ export function mergeRuntimeTrust(
     mcp_trust_workspace: derived.mcp_trust_workspace,
     allow_full_access: derived.allow_full_access,
     allow_external_skill_dirs: derived.allow_external_skill_dirs,
+    trusted_external_graph_path:
+      derived.trusted_external_graph_path || previous.trusted_external_graph_path,
     trusted_custom_base_url: options?.revokeGatewayTrust
       ? ""
       : derived.trusted_custom_base_url || previous.trusted_custom_base_url,

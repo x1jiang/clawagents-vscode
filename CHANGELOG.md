@@ -1,3 +1,11 @@
+## 1.0.144
+
+- Graphify: **Choose graph…** and **Merge graphs…** in Settings; merge writes a new graph without modifying sources.
+- Graphify: external `graph.json` paths require a one-time workspace trust confirmation (runtime-only; not persisted as blanket trust).
+- Graphify: refuse to treat a failed extract/update as success (keeps existing graph instead of serving stale data).
+- Graphify: Plan mode allows known Graphify read tools; status payload aliases (`ready`, `nodeCount`, …) for host/UI parity.
+- Graphify: after a successful build/adopt, offer to enable Graphify MCP; adopt copies additional Graphify metadata siblings.
+
 ## 1.0.143
 
 - Fix Settings **Build graph** / Graphify webview actions to use the sidecar managed Python runtime (they still hit base `pythonPath` in 1.0.142).

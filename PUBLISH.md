@@ -1,5 +1,6 @@
-Publisher **`clawagents`** · version **1.0.143**
+Publisher **`clawagents`** · version **1.0.144**
 
+- [x] GitHub release `v1.0.144` + VSIX (Graphify choose/merge + external-path trust)
 - [x] GitHub release `v1.0.143` + VSIX (Graphify Settings Build graph → sidecar Python)
 - [x] clawagents **6.20.50** on GitHub + PyPI (Gemini 3.6 Flash / 3.5 Flash-Lite profiles)
 - [x] GitHub release `v1.0.142` + VSIX

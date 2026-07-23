@@ -35,6 +35,7 @@ test("malformed or weakly typed trust payloads fail closed", () => {
     mcp_trust_workspace: false,
     allow_full_access: false,
     allow_external_skill_dirs: false,
+    trusted_external_graph_path: "",
   });
   assert.equal(parseRuntimeTrust('{"mcp_trust_workspace":"true"}').mcp_trust_workspace, false);
 });
@@ -62,6 +63,7 @@ test("unrelated saves preserve prior gateway approval in SecretStorage merge", (
     mcp_trust_workspace: true,
     allow_full_access: false,
     allow_external_skill_dirs: false,
+    trusted_external_graph_path: "/graphs/approved.json",
   };
   const merged = mergeRuntimeTrust(previous, {
     base_url: "https://swapped.example/v1",
@@ -71,6 +73,7 @@ test("unrelated saves preserve prior gateway approval in SecretStorage merge", (
   });
   assert.equal(merged.trusted_custom_base_url, "https://approved.example/v1");
   assert.equal(merged.mcp_trust_workspace, true);
+  assert.equal(merged.trusted_external_graph_path, "/graphs/approved.json");
 });
 
 test("clearing base_url revokes gateway approval", () => {

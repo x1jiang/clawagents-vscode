@@ -102,6 +102,7 @@ def run_diagnostics() -> dict[str, Any]:
         gf = graphify_status(
             graph_path=str(settings.get("graphify_graph_path") or ""),
             corpus=str(settings.get("graphify_corpus") or "workspace"),
+            allow_external_path=bool(settings.get("allow_external_graph_path")),
         )
         # Soft check: package floor matters when the toggle is on; otherwise report.
         want = bool(settings.get("graphify"))

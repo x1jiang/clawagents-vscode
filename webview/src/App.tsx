@@ -4090,6 +4090,9 @@ export function App() {
                       )
                   : "Status unknown — click Refresh."}
               </div>
+              <div className="muted tiny" style={{ marginBottom: 6 }}>
+                1. Build or choose a graph. 2. Enable MCP. 3. Ask architecture questions in chat.
+              </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
                 <button
                   type="button"
@@ -4128,7 +4131,23 @@ export function App() {
                   onClick={() => post({ type: "graphify_action", action: "adopt_upstream" })}
                   title="Copy existing graphify-out/graph.json into .clawagents/graphify/"
                 >
-                  Use existing graphify-out
+                  Adopt graphify-out
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "choose_graph" })}
+                  title="Choose an existing graph.json; external graphs require a one-time trust confirmation"
+                >
+                  Choose graph…
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => post({ type: "graphify_action", action: "merge_graphs" })}
+                  title="Merge two or more graph.json files into a new graph without modifying the originals"
+                >
+                  Merge graphs…
                 </button>
                 <button
                   type="button"
@@ -4146,8 +4165,8 @@ export function App() {
                   Reveal folder
                 </button>
               </div>
-              <label>
-                Graph source
+                <label>
+                  Active graph source
                 <select
                   value={String(settings.graphify_corpus || "workspace")}
                   onChange={(e) =>
@@ -4155,7 +4174,7 @@ export function App() {
                   }
                 >
                   <option value="workspace">Workspace (.clawagents/graphify or graphify-out)</option>
-                  <option value="path">Custom graph.json path</option>
+                  <option value="path">Chosen/custom graph.json path</option>
                 </select>
               </label>
               {String(settings.graphify_corpus || "workspace") === "path" && (
@@ -4169,6 +4188,7 @@ export function App() {
                     }
                     placeholder="~/.graphify/global-graph.json"
                   />
+                  <span className="muted tiny">Use “Choose graph…” for a file picker and safe external-path confirmation.</span>
                 </label>
               )}
             </div>

@@ -146,6 +146,7 @@ export async function ensureGraphifyPackage(
 
 /** Copy/symlink upstream graphify-out into .clawagents/graphify. */
 export async function adoptUpstreamGraph(
+  python: string,
   output?: { appendLine(s: string): void },
 ): Promise<GraphifyStatus | undefined> {
   const root = workspaceRoot();
@@ -158,7 +159,7 @@ export async function adoptUpstreamGraph(
     void vscode.window.showWarningMessage(
       `No existing graph at ${src}. Build one with Graphify — Build graph (code-only).`,
     );
-    return getGraphifyStatus("python3");
+    return getGraphifyStatus(python);
   }
   const destDir = preferredGraphDir(root);
   const dest = preferredGraphPath(root);
@@ -173,8 +174,15 @@ export async function adoptUpstreamGraph(
   }
   fs.mkdirSync(destDir, { recursive: true });
   fs.copyFileSync(src, dest);
-  // Best-effort: copy report/wiki siblings if present.
-  for (const name of ["GRAPH_REPORT.md", "graph.html"]) {
+  // Best-effort: retain Graphify's adjacent report/metadata so future updates
+  // can keep the same graph context after adoption.
+  for (const name of [
+    "GRAPH_REPORT.md",
+    "graph.html",
+    ".graphify_analysis.json",
+    ".graphify_labels.json",
+    ".graphify_root",
+  ]) {
     const a = path.join(path.dirname(src), name);
     if (fs.existsSync(a)) {
       fs.copyFileSync(a, path.join(destDir, name));
@@ -182,9 +190,7 @@ export async function adoptUpstreamGraph(
   }
   output?.appendLine(`Adopted ${src} → ${dest}`);
   void vscode.window.showInformationMessage(`Graphify: using ${dest}`);
-  return getGraphifyStatus(
-    vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") || "python3",
-  );
+  return getGraphifyStatus(python);
 }
 
 export async function runGraphifyMode(
@@ -258,15 +264,20 @@ export async function runGraphifyMode(
       });
       const graphFile = preferredGraphPath(root);
       const wrote = fs.existsSync(graphFile);
-      if (!wrote) {
+      if (result.code !== 0 || !wrote) {
+        const reason =
+          result.code !== 0
+            ? `Graphify failed (exit ${result.code ?? "unknown"}). The existing graph was left untouched to avoid serving stale data.`
+            : `Graphify finished but did not write ${graphFile}.`;
         void vscode.window.showErrorMessage(
-          `Graphify finished but ${graphFile} was not written. ` +
+          `${reason} ` +
             (mode === "extract_full"
               ? "Full extract needs an LLM backend (openai/etc). Use Build graph (code-only) instead."
               : "See ClawAgents Sidecar output for details."),
         );
         output?.appendLine(
-          `ERROR: graph.json missing after ${mode} (exit ${result.code}).`,
+          `ERROR: graphify ${mode} failed (exit ${result.code}); refusing to serve a possibly stale graph.\n` +
+            result.log.slice(-2_000),
         );
         return;
       }
@@ -276,22 +287,57 @@ export async function runGraphifyMode(
           (stats.links != null ? `, ${stats.links} links` : "") +
           ` → ${graphFile}`,
       );
-      // Offer to enable the companion when a graph exists.
-      const cfg = vscode.workspace.getConfiguration("clawagents");
-      if (cfg.get<boolean>("graphify") !== true) {
-        const enable = await vscode.window.showInformationMessage(
-          "Enable Graphify MCP for this window so the agent can query the graph?",
-          "Enable",
-          "Not now",
-        );
-        if (enable === "Enable") {
-          await cfg.update("graphify", true, vscode.ConfigurationTarget.Workspace);
-        }
-      }
     },
   );
 
   return getGraphifyStatus(python);
+}
+
+/** Merge selected graphs into a new, opt-in graph without touching their sources. */
+export async function mergeGraphifyGraphs(
+  python: string,
+  graphFiles: string[],
+  output?: { appendLine(s: string): void },
+): Promise<string | undefined> {
+  const root = workspaceRoot();
+  if (!root || graphFiles.length < 2) {
+    return undefined;
+  }
+  const outDir = path.join(preferredGraphDir(root), "merged");
+  const outFile = path.join(outDir, "graph.json");
+  const confirm = await vscode.window.showWarningMessage(
+    `Merge ${graphFiles.length} graphs into a new ClawAgents graph?\n\nOutput: ${outFile}\nSource graphs are not modified.`,
+    { modal: true },
+    "Merge",
+    "Cancel",
+  );
+  if (confirm !== "Merge") {
+    return undefined;
+  }
+  fs.mkdirSync(outDir, { recursive: true });
+  const result = await runPython(
+    python,
+    ["-m", "graphify", "merge-graphs", ...graphFiles, "--out", outFile],
+    { cwd: root, output },
+  );
+  if (result.code !== 0 || !fs.existsSync(outFile)) {
+    void vscode.window.showErrorMessage("Graphify could not merge the selected graphs. See Sidecar output.");
+    output?.appendLine(`ERROR: graph merge failed (exit ${result.code}).\n${result.log.slice(-2_000)}`);
+    return undefined;
+  }
+  fs.writeFileSync(
+    path.join(outDir, "merge-manifest.json"),
+    `${JSON.stringify(
+      {
+        createdAt: new Date().toISOString(),
+        sources: graphFiles.map((file) => path.resolve(file)),
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  return outFile;
 }
 
 export async function openGraphifyFolder(): Promise<void> {

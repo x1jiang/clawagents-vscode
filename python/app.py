@@ -32,7 +32,7 @@ from chats import (
 )
 from diagnostics import run_diagnostics
 from grants import GrantStore
-from mcp_loader import list_mcp_config
+from mcp_loader import GRAPHIFY_READ_TOOLS, list_mcp_config
 from paths import GATEWAY_API_KEY, MODEL, WORKSPACE, ensure_dirs, safe_id
 from providers import build_provider_catalog, verify_api_key
 from settings_store import load_settings, save_settings
@@ -584,7 +584,7 @@ _KNOWN_READONLY_TOOLS = frozenset({
     "ctx_status",
     "ctx_list",
     "ctx_info",
-})
+}) | GRAPHIFY_READ_TOOLS
 
 # Plan (read_only) UI: exploration + plan artifact + exit gate (Grok Build).
 # Mutating tools stay blocked except writes targeting .clawagents/plan.md.
@@ -937,6 +937,7 @@ def create_app() -> FastAPI:
             **graphify_status(
                 graph_path=str(settings.get("graphify_graph_path") or ""),
                 corpus=str(settings.get("graphify_corpus") or "workspace"),
+                allow_external_path=bool(settings.get("allow_external_graph_path")),
             ),
         }
 

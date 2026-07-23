@@ -1399,6 +1399,7 @@ async def run_chat_turn(
             gf_server = None if already_gf else create_graphify_server(
                 graph_path=str(settings.get("graphify_graph_path") or ""),
                 corpus=str(settings.get("graphify_corpus") or "workspace"),
+                allow_external_path=bool(settings.get("allow_external_graph_path")),
             )
             if gf_server is not None:
                 mcp_servers.append(gf_server)

@@ -371,6 +371,8 @@ export type WebviewToHost =
         | "extract_full"
         | "update"
         | "adopt_upstream"
+        | "choose_graph"
+        | "merge_graphs"
         | "ensure"
         | "open_folder";
     }
@@ -414,6 +416,8 @@ const GRAPHIFY_ACTIONS = new Set([
   "extract_full",
   "update",
   "adopt_upstream",
+  "choose_graph",
+  "merge_graphs",
   "ensure",
   "open_folder",
 ]);

@@ -30,7 +30,9 @@ import { ensureCompanions } from "./companionDeps";
 import {
   adoptUpstreamGraph,
   getGraphifyStatus,
+  mergeGraphifyGraphs,
   openGraphifyFolder,
+  type GraphifyStatus,
   runGraphifyMode,
 } from "./graphifyOps";
 import { parseWebviewToHost } from "./protocol";
@@ -92,6 +94,23 @@ async function warnUntrustedBaseUrl(settings: Record<string, unknown>): Promise<
   void vscode.window.showWarningMessage(
     `ClawAgents base URL "${baseUrl}" is not localhost — API keys will be sent there. Clear it in Settings if you did not set this.`,
   );
+}
+
+function isExternalGraphPath(graphPath: unknown): boolean {
+  if (typeof graphPath !== "string" || !graphPath.trim()) {
+    return false;
+  }
+  const root = workspaceRoot();
+  if (!root) {
+    return true;
+  }
+  const raw = graphPath.trim();
+  const expanded = raw === "~" || raw.startsWith("~/")
+    ? path.join(os.homedir(), raw.slice(2))
+    : raw;
+  const resolved = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(root, expanded));
+  const canonicalRoot = path.resolve(root);
+  return resolved !== canonicalRoot && !resolved.startsWith(`${canonicalRoot}${path.sep}`);
 }
 
 type PersistedState = {
@@ -235,6 +254,52 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "graphify_status", data });
   }
 
+  /** Enable the persisted sidecar setting after a graph is successfully built. */
+  async offerEnableGraphifyMcp(status: GraphifyStatus): Promise<void> {
+    if (!status.ready) {
+      return;
+    }
+    await this.sidecar.ensureStarted();
+    const settings = await this.gateway.getSettings();
+    if (settings.graphify === true) {
+      return;
+    }
+    const choice = await vscode.window.showInformationMessage(
+      "Graphify graph is ready. Enable its MCP tools for new ClawAgents chats?",
+      "Enable",
+      "Not now",
+    );
+    if (choice !== "Enable") {
+      return;
+    }
+    const updated = await this.gateway.putSettings({ graphify: true });
+    await this.config.storeRuntimeTrust(updated);
+  }
+
+  private async useGraphifySource(graphPath: string): Promise<void> {
+    await this.sidecar.ensureStarted();
+    const external = isExternalGraphPath(graphPath);
+    let trust = false;
+    if (external) {
+      const choice = await vscode.window.showWarningMessage(
+        "This Graphify graph is outside the workspace. Its contents may be returned to the agent. Trust this exact graph for this workspace?",
+        { modal: true },
+        "Trust graph",
+        "Cancel",
+      );
+      if (choice !== "Trust graph") {
+        return;
+      }
+      trust = true;
+    }
+    const updated = await this.gateway.putSettings({
+      graphify_corpus: "path",
+      graphify_graph_path: graphPath,
+      trust_graphify_external_path: trust,
+    });
+    await this.config.storeRuntimeTrust(updated);
+  }
+
   private async handleGraphifyAction(
     action:
       | "status"
@@ -242,25 +307,58 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       | "extract_full"
       | "update"
       | "adopt_upstream"
+      | "choose_graph"
+      | "merge_graphs"
       | "ensure"
       | "open_folder",
   ): Promise<void> {
     // Same interpreter as the sidecar (managed venv), not base pythonPath.
     const python = await this.sidecar.resolvePythonRuntime();
     const out = this.sidecar.output;
+    let graphStatus: GraphifyStatus | undefined;
     try {
       if (action === "ensure") {
         await ensureCompanions(out, { force: true, python });
       } else if (action === "extract_code") {
-        await runGraphifyMode(python, "extract_code", out);
+        graphStatus = await runGraphifyMode(python, "extract_code", out);
       } else if (action === "extract_full") {
-        await runGraphifyMode(python, "extract_full", out);
+        graphStatus = await runGraphifyMode(python, "extract_full", out);
       } else if (action === "update") {
-        await runGraphifyMode(python, "update", out);
+        graphStatus = await runGraphifyMode(python, "update", out);
       } else if (action === "adopt_upstream") {
-        await adoptUpstreamGraph(out);
+        graphStatus = await adoptUpstreamGraph(python, out);
+      } else if (action === "choose_graph") {
+        const picked = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectFolders: false,
+          canSelectMany: false,
+          filters: { "Graphify graph": ["json"] },
+          title: "Choose graph.json for ClawAgents",
+        });
+        if (picked?.[0]) {
+          await this.useGraphifySource(picked[0].fsPath);
+        }
+      } else if (action === "merge_graphs") {
+        const picked = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectFolders: false,
+          canSelectMany: true,
+          filters: { "Graphify graphs": ["json"] },
+          title: "Select two or more graph.json files to merge",
+        });
+        if (picked && picked.length >= 2) {
+          const merged = await mergeGraphifyGraphs(python, picked.map((item) => item.fsPath), out);
+          if (merged) {
+            await this.useGraphifySource(merged);
+          }
+        } else if (picked) {
+          void vscode.window.showWarningMessage("Select at least two graph.json files to merge.");
+        }
       } else if (action === "open_folder") {
         await openGraphifyFolder();
+      }
+      if (graphStatus) {
+        await this.offerEnableGraphifyMcp(graphStatus);
       }
       // Prefer sidecar status when running; fall back to host filesystem probe.
       try {
@@ -1286,6 +1384,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               incoming.trust_custom_base_url = true;
             }
           }
+          // Derived secret-backed values are returned for display, but must
+          // never be echoed back as a workspace-controlled settings patch.
+          delete incoming.allow_external_graph_path;
+          delete incoming.trusted_external_graph_path;
           // Only confirm workspace MCP trust when newly enabling.
           if (incoming.mcp_trust_workspace === true && !previous.mcp_trust_workspace) {
             const choice = await vscode.window.showWarningMessage(
@@ -1297,6 +1399,24 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             if (choice !== "Trust workspace MCP") {
               incoming.mcp_trust_workspace = false;
             }
+          }
+          const usingCustomGraph = incoming.graphify_corpus === "path";
+          const externalGraph = usingCustomGraph && isExternalGraphPath(incoming.graphify_graph_path);
+          const graphPathChanged =
+            String(incoming.graphify_graph_path || "").trim() !==
+            String(previous.graphify_graph_path || "").trim();
+          if (externalGraph && (previous.allow_external_graph_path !== true || graphPathChanged)) {
+            const choice = await vscode.window.showWarningMessage(
+              "This Graphify graph is outside the workspace. Its contents may be returned to the agent. Trust this exact external graph path for this workspace?",
+              { modal: true },
+              "Trust graph",
+              "Keep blocked",
+            );
+            incoming.trust_graphify_external_path = choice === "Trust graph";
+          } else if (!externalGraph) {
+            incoming.trust_graphify_external_path = false;
+          } else {
+            incoming.trust_graphify_external_path = true;
           }
           const settings = await this.gateway.putSettings(incoming);
           // Trust approvals must never live in the repository-controlled

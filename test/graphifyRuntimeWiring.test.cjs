@@ -11,6 +11,14 @@ const webviewProvider = fs.readFileSync(
   path.join(__dirname, "..", "src", "webviewProvider.ts"),
   "utf8",
 );
+const sidecarApp = fs.readFileSync(
+  path.join(__dirname, "..", "python", "app.py"),
+  "utf8",
+);
+const graphifyOps = fs.readFileSync(
+  path.join(__dirname, "..", "src", "graphifyOps.ts"),
+  "utf8",
+);
 
 function commandBody(command, nextCommand) {
   const start = extension.indexOf(`vscode.commands.registerCommand("${command}"`);
@@ -51,4 +59,15 @@ test("Settings Build graph button uses sidecar runtime (webview graphify_action)
   const body = webviewProvider.slice(start, end);
   assert.match(body, /await this\.sidecar\.resolvePythonRuntime\(\)/);
   assert.doesNotMatch(body, /this\.config\.pythonPath/);
+});
+
+test("Graphify query tools are included in the sidecar read-only permission contract", () => {
+  assert.match(sidecarApp, /from mcp_loader import GRAPHIFY_READ_TOOLS, list_mcp_config/);
+  assert.match(sidecarApp, /_KNOWN_READONLY_TOOLS[\s\S]*?\| GRAPHIFY_READ_TOOLS/);
+});
+
+test("Graphify refuses stale output after a failed run and keeps merges non-destructive", () => {
+  assert.match(graphifyOps, /if \(result\.code !== 0 \|\| !wrote\)/);
+  assert.match(graphifyOps, /"merge-graphs", \.\.\.graphFiles, "--out", outFile/);
+  assert.match(graphifyOps, /Source graphs are not modified/);
 });

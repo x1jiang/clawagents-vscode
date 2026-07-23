@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import mcp_loader
+import settings_store
 
 
 def test_resolve_graphify_prefers_clawagents_layout(tmp_path: Path):
@@ -50,6 +51,51 @@ def test_resolve_graphify_directory_appends_graph_json(tmp_path: Path):
         workspace=tmp_path,
     )
     assert got == (d / "graph.json").resolve()
+
+
+def test_resolve_graphify_blocks_untrusted_external_path(tmp_path: Path):
+    external = tmp_path.parent / "external-graph.json"
+    external.write_text("{}", encoding="utf-8")
+    assert mcp_loader.resolve_graphify_graph_path(
+        graph_path=str(external), corpus="path", workspace=tmp_path
+    ) is None
+    assert mcp_loader.resolve_graphify_graph_path(
+        graph_path=str(external),
+        corpus="path",
+        workspace=tmp_path,
+        allow_external_path=True,
+    ) == external.resolve()
+
+
+def test_external_graph_trust_is_bound_to_the_exact_canonical_path(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(
+        settings_store,
+        "_runtime_trust",
+        {
+            "trusted_custom_base_url": "",
+            "mcp_trust_workspace": False,
+            "allow_full_access": False,
+            "allow_external_skill_dirs": False,
+            "trusted_external_graph_path": "",
+        },
+    )
+    approved = tmp_path / "approved" / "graph.json"
+    different = tmp_path / "different" / "graph.json"
+    settings_store.set_runtime_trust(
+        {"trust_graphify_external_path": True}, graph_path=str(approved)
+    )
+    assert settings_store.runtime_trust_snapshot()["trusted_external_graph_path"] == str(
+        approved.resolve()
+    )
+    assert settings_store._normalized_graph_path(str(approved)) == str(approved.resolve())
+    assert settings_store._normalized_graph_path(str(different)) != settings_store.runtime_trust_snapshot()[
+        "trusted_external_graph_path"
+    ]
+    clean, dropped = settings_store.sanitize_patch({"allow_external_graph_path": True})
+    assert "allow_external_graph_path" not in clean
+    assert dropped == ["allow_external_graph_path"]
 
 
 def test_probe_graphify_package_light_without_clawagents(monkeypatch):
@@ -113,3 +159,6 @@ def test_graphify_status_counts_nodes(tmp_path: Path, monkeypatch):
     assert status["graph_path"] == str(g.resolve())
     assert status["package_ok"] is True
     assert status["ok"] is True
+    assert status["ready"] is True
+    assert status["nodeCount"] == 2
+    assert status["linkCount"] == 0

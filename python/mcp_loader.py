@@ -37,7 +37,20 @@ CONTEXT_MODE_WRITE_TOOLS = frozenset({
 })
 
 # Graphify MCP tools are query-only today; extract/update is an extension
-# command. Keep this set for future mutate tools / permission parity.
+# command. Keep separate sets so the permission layer can allow known graph
+# reads in Plan mode without implicitly trusting future mutation tools.
+GRAPHIFY_READ_TOOLS: frozenset[str] = frozenset({
+    "query_graph",
+    "get_neighbors",
+    "get_node",
+    "get_community",
+    "god_nodes",
+    "graph_stats",
+    "shortest_path",
+    "get_pr_impact",
+    "list_prs",
+    "triage_prs",
+})
 GRAPHIFY_WRITE_TOOLS: frozenset[str] = frozenset()
 
 CONTEXT_MODE_ROUTING_INSTRUCTION = (
@@ -170,11 +183,13 @@ def resolve_graphify_graph_path(
     graph_path: str | None = None,
     corpus: str | None = None,
     workspace: Path | None = None,
+    allow_external_path: bool = False,
 ) -> Path | None:
     """Resolve which graph.json to serve.
 
     Order:
-    1. Explicit ``graph_path`` (absolute or workspace-relative) when set
+    1. Explicit workspace-relative ``graph_path`` when set (external paths
+       require a runtime approval held outside repository settings)
     2. ``{workspace}/.clawagents/graphify/graph.json``
     3. ``{workspace}/graphify-out/graph.json`` if present
     """
@@ -188,6 +203,11 @@ def resolve_graphify_graph_path(
             candidate = (root / candidate).resolve()
         else:
             candidate = candidate.resolve()
+        if not allow_external_path:
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                return None
         if candidate.is_dir():
             nested = candidate / GRAPHIFY_GRAPH_NAME
             return nested
@@ -248,6 +268,7 @@ def graphify_status(
     graph_path: str | None = None,
     corpus: str | None = None,
     workspace: Path | None = None,
+    allow_external_path: bool = False,
 ) -> dict[str, Any]:
     """Version + graph path status for doctor / diagnostics."""
     package: dict[str, Any]
@@ -271,15 +292,20 @@ def graphify_status(
         graph_path=graph_path,
         corpus=corpus,
         workspace=workspace,
+        allow_external_path=allow_external_path,
     )
     graph_exists = bool(resolved and resolved.is_file())
     node_count: int | None = None
+    link_count: int | None = None
     if graph_exists and resolved is not None:
         try:
             data = json.loads(resolved.read_text(encoding="utf-8"))
             nodes = data.get("nodes") if isinstance(data, dict) else None
+            links = data.get("links") if isinstance(data, dict) else None
             if isinstance(nodes, list):
                 node_count = len(nodes)
+            if isinstance(links, list):
+                link_count = len(links)
         except (OSError, json.JSONDecodeError, TypeError):
             node_count = None
 
@@ -293,6 +319,8 @@ def graphify_status(
     elif node_count is not None:
         summary += f" — graph {node_count} nodes @ {resolved}"
 
+    # Keep the snake_case fields for the bridge/API, and include the host/UI
+    # aliases so every caller can consume one canonical readiness contract.
     return {
         "found": bool(package.get("found")),
         "version": package.get("version"),
@@ -305,6 +333,15 @@ def graphify_status(
         "graph_path": str(resolved) if resolved else None,
         "graph_exists": graph_exists,
         "node_count": node_count,
+        "link_count": link_count,
+        "ready": ok,
+        "packageOk": bool(package.get("ok")),
+        "packageDetail": summary,
+        "packageVersion": package.get("version"),
+        "graphPath": str(resolved) if resolved else "",
+        "graphExists": graph_exists,
+        "nodeCount": node_count,
+        "linkCount": link_count,
     }
 
 
@@ -313,12 +350,14 @@ def create_graphify_server(
     graph_path: str | None = None,
     corpus: str | None = None,
     workspace: Path | None = None,
+    allow_external_path: bool = False,
 ) -> Any | None:
     """Build MCPServerStdio for Graphify, or None if package/graph unavailable."""
     status = graphify_status(
         graph_path=graph_path,
         corpus=corpus,
         workspace=workspace,
+        allow_external_path=allow_external_path,
     )
     if not status.get("package_ok"):
         return None

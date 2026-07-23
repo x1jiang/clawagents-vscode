@@ -7,9 +7,17 @@ import os
 import json
 import re
 import threading
+from pathlib import Path
 from typing import Any
 
-from paths import SETTINGS_FILE, atomic_write_json, read_json, under_workspace, workspace_rel
+from paths import (
+    SETTINGS_FILE,
+    WORKSPACE,
+    atomic_write_json,
+    read_json,
+    under_workspace,
+    workspace_rel,
+)
 from url_trust import is_trusted_base_url
 
 logger = logging.getLogger(__name__)
@@ -49,6 +57,7 @@ DEFAULTS: dict[str, Any] = {
     "allow_full_access": False,
     # Opt-in: load skill_dirs that resolve outside the workspace.
     "allow_external_skill_dirs": False,
+    "trust_graphify_external_path": False,
     # Load ~/.codex/skills, ~/.claude/skills, ~/.agents/skills automatically.
     "skill_user_homes": True,
     # Set by the extension after the user confirms a non-localhost base_url.
@@ -82,6 +91,7 @@ RUNTIME_ONLY_KEYS: frozenset[str] = frozenset(
         "mcp_trust_workspace",
         "allow_full_access",
         "allow_external_skill_dirs",
+        "trust_graphify_external_path",
     }
 )
 PERSISTED_KEYS: frozenset[str] = KNOWN_KEYS - RUNTIME_ONLY_KEYS
@@ -91,6 +101,7 @@ _runtime_trust: dict[str, Any] = {
     "mcp_trust_workspace": False,
     "allow_full_access": False,
     "allow_external_skill_dirs": False,
+    "trusted_external_graph_path": "",
 }
 
 
@@ -98,10 +109,24 @@ def _normalize_base_url(raw: Any) -> str:
     return str(raw or "").strip().rstrip("/")
 
 
+def _normalized_graph_path(raw: Any) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        candidate = Path(text).expanduser()
+        if not candidate.is_absolute():
+            candidate = WORKSPACE / candidate
+        return str(candidate.resolve())
+    except OSError:
+        return ""
+
+
 def set_runtime_trust(
     patch: dict[str, Any] | None,
     *,
     base_url: str | None = None,
+    graph_path: str = "",
 ) -> None:
     """Update authenticated, process-local approvals.
 
@@ -122,7 +147,16 @@ def set_runtime_trust(
                 # Explicit clear only when base_url is empty. A mismatched /
                 # untrusted committed URL must not wipe a prior URL-bound grant.
                 _runtime_trust["trusted_custom_base_url"] = ""
-        for key in RUNTIME_ONLY_KEYS - {"trust_custom_base_url"}:
+        if "trusted_external_graph_path" in patch:
+            _runtime_trust["trusted_external_graph_path"] = _normalized_graph_path(
+                patch.get("trusted_external_graph_path")
+            )
+        if "trust_graphify_external_path" in patch:
+            if bool(patch.get("trust_graphify_external_path")):
+                _runtime_trust["trusted_external_graph_path"] = _normalized_graph_path(graph_path)
+            elif not graph_path:
+                _runtime_trust["trusted_external_graph_path"] = ""
+        for key in RUNTIME_ONLY_KEYS - {"trust_custom_base_url", "trust_graphify_external_path"}:
             if key in patch:
                 _runtime_trust[key] = bool(patch.get(key))
 
@@ -269,7 +303,18 @@ def load_settings() -> dict[str, Any]:
         base_url
         and base_url == _normalize_base_url(trust.get("trusted_custom_base_url"))
     )
-    for key in RUNTIME_ONLY_KEYS - {"trust_custom_base_url"}:
+    graph_path = _normalized_graph_path(merged.get("graphify_graph_path"))
+    merged["allow_external_graph_path"] = bool(
+        graph_path and graph_path == str(trust.get("trusted_external_graph_path") or "")
+    )
+    merged["trusted_external_graph_path"] = str(
+        trust.get("trusted_external_graph_path") or ""
+    )
+    for key in RUNTIME_ONLY_KEYS - {
+        "trust_custom_base_url",
+        "allow_external_graph_path",
+        "trust_graphify_external_path",
+    }:
         merged[key] = bool(trust.get(key, False))
     merged, healed = heal_incompatible_model(merged)
     if healed:
@@ -285,7 +330,11 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
 
     current = load_settings()
     effective_base_url = str(clean.get("base_url", current.get("base_url", "")) or "")
-    set_runtime_trust(clean, base_url=effective_base_url)
+    set_runtime_trust(
+        clean,
+        base_url=effective_base_url,
+        graph_path=str(clean.get("graphify_graph_path", current.get("graphify_graph_path", "")) or ""),
+    )
     current = load_settings()
     current.update({k: v for k, v in clean.items() if k in PERSISTED_KEYS})
     current, _healed = heal_incompatible_model(current)
