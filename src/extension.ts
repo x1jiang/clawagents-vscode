@@ -122,6 +122,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider("clawagents.sidebarActivity", provider, webviewOpts),
   );
 
+  // Graphify must use the same interpreter as the sidecar. In managed mode,
+  // pythonPath is only the base Python used to create that environment.
+  const resolveGraphifyPython = async (): Promise<string> => {
+    if (sidecar) {
+      return sidecar.resolvePythonRuntime();
+    }
+    return config.pythonPath;
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand("clawagents.openChat", async () => {
       await provider?.openChat();
@@ -278,7 +287,7 @@ export function activate(context: vscode.ExtensionContext): void {
       out.show(true);
       const results = await ensureCompanions(out, {
         force: true,
-        python: config.pythonPath,
+        python: await resolveGraphifyPython(),
       });
       const ok = results.every((r) => r.ok);
       if (ok) {
@@ -293,31 +302,35 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("clawagents.graphifyExtract", async () => {
       // Default extract is code-only — bare extract often exits 0 with no graph.json.
-      await runGraphifyMode(config.pythonPath, "extract_code", sidecar?.output);
+      const python = await resolveGraphifyPython();
+      await runGraphifyMode(python, "extract_code", sidecar?.output);
       provider?.postGraphifyStatus(
-        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+        getGraphifyStatus(python) as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyExtractFull", async () => {
-      await runGraphifyMode(config.pythonPath, "extract_full", sidecar?.output);
+      const python = await resolveGraphifyPython();
+      await runGraphifyMode(python, "extract_full", sidecar?.output);
       provider?.postGraphifyStatus(
-        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+        getGraphifyStatus(python) as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyUpdate", async () => {
-      await runGraphifyMode(config.pythonPath, "update", sidecar?.output);
+      const python = await resolveGraphifyPython();
+      await runGraphifyMode(python, "update", sidecar?.output);
       provider?.postGraphifyStatus(
-        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+        getGraphifyStatus(python) as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyAdoptUpstream", async () => {
+      const python = await resolveGraphifyPython();
       await adoptUpstreamGraph(sidecar?.output);
       provider?.postGraphifyStatus(
-        getGraphifyStatus(config.pythonPath) as unknown as Record<string, unknown>,
+        getGraphifyStatus(python) as unknown as Record<string, unknown>,
       );
     }),
     vscode.commands.registerCommand("clawagents.graphifyStatus", async () => {
-      const st = getGraphifyStatus(config.pythonPath);
+      const st = getGraphifyStatus(await resolveGraphifyPython());
       provider?.postGraphifyStatus(st as unknown as Record<string, unknown>);
       void vscode.window.showInformationMessage(
         st.ready

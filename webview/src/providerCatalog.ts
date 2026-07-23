@@ -55,7 +55,9 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     id: "gemini",
     name: "Google Gemini",
     models: [
+      { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
       { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+      { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
       { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
     ],
   },

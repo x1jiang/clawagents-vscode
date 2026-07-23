@@ -15,6 +15,7 @@ const WINDOWS: Array<[string, number]> = [
   ["claude-opus-4", 200_000],
   ["claude-sonnet-4", 200_000],
   ["claude-haiku-4", 200_000],
+  ["gemini-3.6", 1_000_000],
   ["gemini-3.5", 1_000_000],
   ["gemini-3", 1_000_000],
   ["gemini-2.5", 1_000_000],

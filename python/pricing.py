@@ -54,7 +54,9 @@ PRICES: dict[str, PriceTuple] = {
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
     "claude-haiku-4-5-20251001": (1.0, 5.0, 0.1, 1.25),
     # Gemini (approx; standard paid tier — cache rates when reported)
+    "gemini-3.6-flash": (1.5, 7.5, 0.15, 1.875),
     "gemini-3.5-flash": (1.5, 9.0, 0.15, 1.875),
+    "gemini-3.5-flash-lite": (0.3, 2.5, 0.03, 0.375),
     "gemini-3.1-pro-preview": (2.0, 12.0, 0.2, 2.5),
     "gemini-3.1-flash-lite": (0.25, 1.5, 0.025, 0.3125),
     "gemini-3-flash-preview": (0.5, 3.0, 0.05, 0.625),

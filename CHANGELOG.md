@@ -1,3 +1,9 @@
+## 1.0.142
+
+- Fix Graphify commands to use the sidecar managed Python runtime instead of the base `pythonPath` interpreter.
+- Add Gemini 3.6 Flash (`gemini-3.6-flash`) and Gemini 3.5 Flash-Lite (`gemini-3.5-flash-lite`) to the model picker.
+- Require `clawagents>=6.20.50` — Gemini 3.6 / 3.5 Flash-Lite model profiles.
+
 ## 1.0.141
 
 - Require `clawagents>=6.20.49` — OpenAI `cache_write_tokens` metered for cache-load cost (Chat Completions + Responses).
