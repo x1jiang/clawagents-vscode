@@ -541,6 +541,12 @@ export function App() {
   const [hunksOpen, setHunksOpen] = useState(false);
   const [rewindSnaps, setRewindSnaps] = useState<Array<Record<string, unknown>>>([]);
   const [rewindOpen, setRewindOpen] = useState(false);
+  // Host list requests are asynchronous. Keep the user's latest open/close
+  // intent outside React state so a late response cannot reopen a panel they
+  // just dismissed.
+  const checkpointsIntentRef = useRef(false);
+  const hunksIntentRef = useRef(false);
+  const rewindIntentRef = useRef(false);
   const [dictating, setDictating] = useState(false);
   /** Forces relative checkpoint labels ("2m ago") to refresh while the panel is open. */
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -666,6 +672,54 @@ export function App() {
     runUsageRef.current = {};
     setSessionCostUsd(seed);
     runCommittedRef.current = false;
+  };
+
+  const openCheckpoints = () => {
+    checkpointsIntentRef.current = true;
+    post({ type: "list_checkpoints", open: true });
+  };
+  const closeCheckpoints = () => {
+    checkpointsIntentRef.current = false;
+    setCheckpointsOpen(false);
+  };
+  const toggleCheckpoints = () => {
+    if (checkpointsIntentRef.current) {
+      closeCheckpoints();
+    } else {
+      openCheckpoints();
+    }
+  };
+
+  const openHunks = () => {
+    hunksIntentRef.current = true;
+    post({ type: "list_hunks", open: true });
+  };
+  const closeHunks = () => {
+    hunksIntentRef.current = false;
+    setHunksOpen(false);
+  };
+  const toggleHunks = () => {
+    if (hunksIntentRef.current) {
+      closeHunks();
+    } else {
+      openHunks();
+    }
+  };
+
+  const openRewind = () => {
+    rewindIntentRef.current = true;
+    post({ type: "list_rewind", open: true });
+  };
+  const closeRewind = () => {
+    rewindIntentRef.current = false;
+    setRewindOpen(false);
+  };
+  const toggleRewind = () => {
+    if (rewindIntentRef.current) {
+      closeRewind();
+    } else {
+      openRewind();
+    }
   };
 
   const workspaceName = useMemo(
@@ -1225,19 +1279,19 @@ export function App() {
         }
         case "checkpoints": {
           setCheckpoints(msg.checkpoints || []);
-          if (msg.open !== false) {
+          if (msg.open !== false && checkpointsIntentRef.current) {
             setCheckpointsOpen(true);
           }
           break;
         }
         case "hunks": {
           setHunks(msg.hunks || []);
-          if (msg.open !== false) setHunksOpen(true);
+          if (msg.open !== false && hunksIntentRef.current) setHunksOpen(true);
           break;
         }
         case "rewind": {
           setRewindSnaps(msg.snapshots || []);
-          if (msg.open !== false) setRewindOpen(true);
+          if (msg.open !== false && rewindIntentRef.current) setRewindOpen(true);
           break;
         }
         case "done": {
@@ -2092,17 +2146,17 @@ export function App() {
     }
     if (value === "/checkpoints") {
       setDraft("");
-      post({ type: "list_checkpoints", open: true });
+      openCheckpoints();
       return;
     }
     if (value === "/hunks" || value === "/review") {
       setDraft("");
-      post({ type: "list_hunks", open: true });
+      openHunks();
       return;
     }
     if (value === "/rewind") {
       setDraft("");
-      post({ type: "list_rewind", open: true });
+      openRewind();
       return;
     }
     setDraft("");
@@ -2464,7 +2518,7 @@ export function App() {
                   ? `Last checkpoint ${lastCheckpointLabel} — open restore panel (/checkpoints)`
                   : "Shadow-git checkpoints (/checkpoints)"
               }
-              onClick={() => post({ type: "list_checkpoints", open: true })}
+              onClick={toggleCheckpoints}
             >
               Checkpoints
               {lastCheckpointLabel ? (
@@ -2475,7 +2529,7 @@ export function App() {
               type="button"
               className={`tool-chip${hunksOpen ? " active" : ""}`}
               title="Attributed hunk accept/reject (/hunks)"
-              onClick={() => post({ type: "list_hunks", open: true })}
+              onClick={toggleHunks}
             >
               Review
               {hunks.length ? (
@@ -2486,7 +2540,7 @@ export function App() {
               type="button"
               className={`tool-chip${rewindOpen ? " active" : ""}`}
               title="Rewind workspace files to a prior prompt (/rewind)"
-              onClick={() => post({ type: "list_rewind", open: true })}
+              onClick={toggleRewind}
             >
               Rewind
               {rewindSnaps.length ? (
@@ -2627,7 +2681,7 @@ export function App() {
             <button
               type="button"
               className="tool-chip"
-              onClick={() => setCheckpointsOpen(false)}
+              onClick={closeCheckpoints}
             >
               Close
             </button>
@@ -2716,7 +2770,7 @@ export function App() {
             <button
               type="button"
               className="tool-chip"
-              onClick={() => setHunksOpen(false)}
+              onClick={closeHunks}
             >
               Close
             </button>
@@ -2783,7 +2837,7 @@ export function App() {
               <strong>Session rewind</strong>
               <span className="checkpoint-sub">Restore workspace files to a prior prompt</span>
             </div>
-            <button type="button" className="tool-chip" onClick={() => setRewindOpen(false)}>
+            <button type="button" className="tool-chip" onClick={closeRewind}>
               Close
             </button>
           </div>
