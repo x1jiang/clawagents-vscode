@@ -1,3 +1,7 @@
+## Unreleased
+
+- Fix Checkpoints, Review, and Rewind panels: their toolbar chips now toggle closed, and delayed sidecar list responses cannot reopen a panel the user dismissed.
+
 ## 1.0.144
 
 - Graphify: **Choose graph…** and **Merge graphs…** in Settings; merge writes a new graph without modifying sources.
