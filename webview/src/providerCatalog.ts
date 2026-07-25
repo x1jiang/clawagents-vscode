@@ -62,6 +62,18 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     ],
   },
   {
+    id: "xai",
+    name: "xAI (Grok)",
+    models: [
+      { id: "grok-4.5", label: "Grok 4.5" },
+      { id: "grok-4.3", label: "Grok 4.3" },
+      { id: "grok-4.20-0309-reasoning", label: "Grok 4.20 Reasoning" },
+      { id: "grok-4.20-0309-non-reasoning", label: "Grok 4.20 Non-reasoning" },
+      { id: "grok-4.20-multi-agent-0309", label: "Grok 4.20 Multi-agent" },
+      { id: "grok-build-0.1", label: "Grok Build 0.1" },
+    ],
+  },
+  {
     id: "ollama",
     name: "Ollama (local)",
     models: [{ id: "llama3.1", label: "Llama 3.1" }],

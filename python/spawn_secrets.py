@@ -14,6 +14,8 @@ _SPAWN_SECRET_KEYS = (
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
+    "XAI_API_KEY",
+    "GROK_API_KEY",
     "BEDROCK_API_KEY",
     "TAVILY_API_KEY",
     "AWS_ACCESS_KEY_ID",
@@ -66,6 +68,11 @@ def resolve_api_key(provider: str, model: str | None = None) -> str | None:
     if p == "gemini":
         key = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
         return key or None
+    if p == "xai":
+        # xAI is OpenAI-wire-compatible but the OpenAI key is not valid there;
+        # never fall back to it (401 against api.x.ai).
+        key = get_secret("XAI_API_KEY") or get_secret("GROK_API_KEY")
+        return key or None
     if p in ("openai", "ollama"):
         key = get_secret("OPENAI_API_KEY")
         return key or None
@@ -89,6 +96,9 @@ def resolve_api_key(provider: str, model: str | None = None) -> str | None:
         return key or None
     if m.startswith("gemini"):
         key = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
+        return key or None
+    if m.startswith("grok") or m.startswith(("xai/", "grok/")):
+        key = get_secret("XAI_API_KEY") or get_secret("GROK_API_KEY")
         return key or None
     key = get_secret("OPENAI_API_KEY")
     return key or None

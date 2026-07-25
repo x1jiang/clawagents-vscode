@@ -494,6 +494,7 @@ export function App() {
   const [hasOpenAIKey, setHasOpenAIKey] = useState(false);
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
+  const [hasXaiKey, setHasXaiKey] = useState(false);
   const [providerKeyDraft, setProviderKeyDraft] = useState("");
   const [providerSetupMsg, setProviderSetupMsg] = useState("");
   const [sidecar, setSidecar] = useState<"stopped" | "starting" | "running" | "error">(
@@ -765,6 +766,9 @@ export function App() {
           if (typeof msg.hasAnthropicKey === "boolean") {
             setHasAnthropicKey(msg.hasAnthropicKey);
           }
+          if (typeof msg.hasXaiKey === "boolean") {
+            setHasXaiKey(msg.hasXaiKey);
+          }
           if (typeof msg.hasGeminiKey === "boolean") {
             setHasGeminiKey(msg.hasGeminiKey);
           }
@@ -849,6 +853,7 @@ export function App() {
             setHasAnthropicKey(msg.hasAnthropicKey);
           }
           if (typeof msg.hasGeminiKey === "boolean") setHasGeminiKey(msg.hasGeminiKey);
+          if (typeof msg.hasXaiKey === "boolean") setHasXaiKey(msg.hasXaiKey);
           const applySettingsSnapshot = (status: string) => {
             pendingSettingsPatch.current = null;
             inflightSettingsKey.current = "";
@@ -996,6 +1001,7 @@ export function App() {
             setHasAnthropicKey(msg.hasAnthropicKey);
           }
           if (typeof msg.hasGeminiKey === "boolean") setHasGeminiKey(msg.hasGeminiKey);
+          if (typeof msg.hasXaiKey === "boolean") setHasXaiKey(msg.hasXaiKey);
           break;
         case "diagnostics":
           setDiagnostics(msg.data);
@@ -3648,6 +3654,73 @@ export function App() {
                 <p className="settings-hint">
                   Key: {hasGeminiKey ? "saved" : "not set"}
                   {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
+                </p>
+              </div>
+            )}
+            {selectedProvider === "xai" && (
+              <div className="provider-setup">
+                <h4 className="provider-setup-title">xAI (Grok)</h4>
+                <p className="settings-hint">
+                  Native xAI API at https://api.x.ai/v1 (OpenAI-compatible wire).
+                  Leave Base URL empty unless you front it with a proxy.
+                </p>
+                <label>
+                  xAI API key
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={providerKeyDraft}
+                    onChange={(e) => setProviderKeyDraft(e.target.value)}
+                    placeholder={
+                      hasXaiKey
+                        ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022  (saved \u2014 paste to replace)"
+                        : "xai-\u2026 from console.x.ai"
+                    }
+                  />
+                </label>
+                <div className="provider-actions">
+                  <button
+                    type="button"
+                    className="primary tiny"
+                    disabled={!providerKeyDraft.trim()}
+                    onClick={() => {
+                      setProviderSetupMsg("Saving xAI key\u2026");
+                      post({
+                        type: "set_provider_key",
+                        provider: "xai",
+                        apiKey: providerKeyDraft.trim(),
+                      });
+                      setProviderKeyDraft("");
+                    }}
+                  >
+                    Save API key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => {
+                      setProviderSetupMsg("Verifying xAI key\u2026");
+                      post({ type: "verify_key", provider: "xai" });
+                    }}
+                  >
+                    Verify key
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    disabled={!hasXaiKey}
+                    onClick={() => {
+                      setProviderSetupMsg("Clearing xAI key\u2026");
+                      post({ type: "clear_provider_key", provider: "xai" });
+                    }}
+                  >
+                    Clear key
+                  </button>
+                </div>
+                <p className="settings-hint">
+                  Key: {hasXaiKey ? "saved" : "not set"}
+                  {" \u00b7 or set XAI_API_KEY in the workspace .env"}
+                  {providerSetupMsg ? ` \u00b7 ${providerSetupMsg}` : ""}
                 </p>
               </div>
             )}

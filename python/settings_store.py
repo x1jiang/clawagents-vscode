@@ -237,6 +237,8 @@ def _default_model_for_provider(provider: str) -> str:
         return "claude-sonnet-4-5"
     if p == "ollama":
         return "llama3.1"
+    if p == "xai":
+        return "grok-4.5"
     if p == "bedrock":
         return "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
     return "gpt-5.6-luna"
@@ -251,11 +253,13 @@ def _model_fits_provider(model: str, provider: str) -> bool:
     if p == "openai":
         if _looks_like_ollama_local_id(m):
             return False
-        if ml.startswith("claude") or "gemini" in ml:
+        if ml.startswith("claude") or "gemini" in ml or ml.startswith("grok"):
             return False
         if ml.startswith(("us.", "eu.", "apac.", "global.", "amazon.", "meta.")):
             return False
         return True
+    if p == "xai":
+        return ml.startswith("grok")
     if p == "anthropic":
         return "claude" in ml or ml.startswith("anthropic.")
     if p == "gemini":
@@ -310,9 +314,13 @@ def load_settings() -> dict[str, Any]:
     merged["trusted_external_graph_path"] = str(
         trust.get("trusted_external_graph_path") or ""
     )
+    # The grant is path-bound (see set_runtime_trust), so "is this path trusted"
+    # IS the echoed approval state — mirroring how trust_custom_base_url is
+    # derived from base_url above. Without this the key stayed at its False
+    # default forever, so a granted approval never round-tripped to the webview.
+    merged["trust_graphify_external_path"] = merged["allow_external_graph_path"]
     for key in RUNTIME_ONLY_KEYS - {
         "trust_custom_base_url",
-        "allow_external_graph_path",
         "trust_graphify_external_path",
     }:
         merged[key] = bool(trust.get(key, False))

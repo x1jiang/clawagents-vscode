@@ -10,6 +10,7 @@ import {
   buildTerminalContext,
   ExtensionConfig,
   formatFileRef,
+  isExternalGraphPath,
   isSafeId,
   isTrustedBaseUrl,
   pathUnderRoot,
@@ -49,6 +50,23 @@ import { SidecarManager } from "./sidecar";
 
 export const SIDEBAR_ID = "clawagents.sidebar";
 export const SIDEBAR_ACTIVITY_ID = "clawagents.sidebarActivity";
+/** True when a (possibly `~`-prefixed) graph path points at a file on disk. */
+function graphTargetExists(graphPath: unknown): boolean {
+  if (typeof graphPath !== "string" || !graphPath.trim()) {
+    return false;
+  }
+  const raw = graphPath.trim();
+  const expanded =
+    raw === "~" || raw.startsWith("~/")
+      ? path.join(os.homedir(), raw.slice(2))
+      : raw;
+  try {
+    return fs.existsSync(expanded);
+  } catch {
+    return false;
+  }
+}
+
 const STATE_KEY = "clawagents.chatState.v2";
 
 const DEFAULT_AUTO_APPROVE: AutoApprove = {
@@ -94,23 +112,6 @@ async function warnUntrustedBaseUrl(settings: Record<string, unknown>): Promise<
   void vscode.window.showWarningMessage(
     `ClawAgents base URL "${baseUrl}" is not localhost — API keys will be sent there. Clear it in Settings if you did not set this.`,
   );
-}
-
-function isExternalGraphPath(graphPath: unknown): boolean {
-  if (typeof graphPath !== "string" || !graphPath.trim()) {
-    return false;
-  }
-  const root = workspaceRoot();
-  if (!root) {
-    return true;
-  }
-  const raw = graphPath.trim();
-  const expanded = raw === "~" || raw.startsWith("~/")
-    ? path.join(os.homedir(), raw.slice(2))
-    : raw;
-  const resolved = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(root, expanded));
-  const canonicalRoot = path.resolve(root);
-  return resolved !== canonicalRoot && !resolved.startsWith(`${canonicalRoot}${path.sep}`);
 }
 
 type PersistedState = {
@@ -1400,12 +1401,29 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               incoming.mcp_trust_workspace = false;
             }
           }
+          // Only reason about graph trust when this payload actually carries
+          // the graph fields — a partial save must not look like "cleared".
+          const graphFieldsProvided =
+            Object.prototype.hasOwnProperty.call(incoming, "graphify_corpus") ||
+            Object.prototype.hasOwnProperty.call(incoming, "graphify_graph_path");
           const usingCustomGraph = incoming.graphify_corpus === "path";
           const externalGraph = usingCustomGraph && isExternalGraphPath(incoming.graphify_graph_path);
           const graphPathChanged =
             String(incoming.graphify_graph_path || "").trim() !==
             String(previous.graphify_graph_path || "").trim();
-          if (externalGraph && (previous.allow_external_graph_path !== true || graphPathChanged)) {
+          // Revoke the stored grant when the user turns it down or moves off the
+          // external path. Without this the grant is permanent: SecretStorage
+          // keeps the stale path and re-injects it via CLAW_RUNTIME_TRUST on the
+          // next start, so a committed vscode_settings.json could re-point at an
+          // already-approved path and be served with no prompt.
+          let revokeGraphTrust = false;
+          if (externalGraph && !graphTargetExists(incoming.graphify_graph_path)) {
+            // The custom-path field feeds the 500ms autosave debounce, so a
+            // half-typed path used to pop a blocking modal on every tick. A
+            // path that does not exist yet cannot be served to the agent, so
+            // there is nothing to approve — stay silent until it resolves.
+            incoming.trust_graphify_external_path = false;
+          } else if (externalGraph && (previous.allow_external_graph_path !== true || graphPathChanged)) {
             const choice = await vscode.window.showWarningMessage(
               "This Graphify graph is outside the workspace. Its contents may be returned to the agent. Trust this exact external graph path for this workspace?",
               { modal: true },
@@ -1413,8 +1431,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               "Keep blocked",
             );
             incoming.trust_graphify_external_path = choice === "Trust graph";
+            revokeGraphTrust = choice !== "Trust graph";
           } else if (!externalGraph) {
             incoming.trust_graphify_external_path = false;
+            revokeGraphTrust = graphFieldsProvided;
           } else {
             incoming.trust_graphify_external_path = true;
           }
@@ -1422,7 +1442,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           // Trust approvals must never live in the repository-controlled
           // .clawagents/vscode_settings.json. Persist the effective grants in
           // workspace-scoped VS Code SecretStorage for sidecar restarts.
-          await this.config.storeRuntimeTrust(settings, { revokeGatewayTrust });
+          await this.config.storeRuntimeTrust(settings, {
+            revokeGatewayTrust,
+            revokeGraphTrust,
+          });
           const skillKeys = [
             "skill_dirs",
             "skill_ignore_dirs",
@@ -1603,6 +1626,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             anthropic: "Anthropic",
             gemini: "Gemini",
             bedrock: "Bedrock Access Gateway",
+            xai: "xAI (Grok)",
             tavily: "Tavily",
           };
           const keyFlags = await this.config.collectKeyFlags();
@@ -1638,6 +1662,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             anthropic: "Anthropic",
             gemini: "Gemini",
             bedrock: "Bedrock Access Gateway",
+            xai: "xAI (Grok)",
             tavily: "Tavily",
           };
           // After clear, flags still true if workspace .env / shell still has a key.

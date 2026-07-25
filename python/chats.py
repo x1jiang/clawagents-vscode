@@ -27,7 +27,7 @@ from paths import (
     read_project_instructions,
 )
 from settings_store import load_settings
-from pricing import estimate_usd
+from pricing import estimate_usd, long_context_multipliers
 
 OnEvent = Callable[[str, dict[str, Any]], None]
 
@@ -974,7 +974,9 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     provider = str(settings.get("provider") or "auto").strip().lower()
     base_url = (settings.get("base_url") or "").strip() or None
     mode = str(settings.get("bedrock_mode") or "iam").strip().lower()
-    non_bedrock = provider in {"openai", "anthropic", "gemini", "ollama"}
+    # xAI rides the OpenAI-compatible wire; the engine supplies
+    # https://api.x.ai/v1 and the key comes via resolve_api_key below.
+    non_bedrock = provider in {"openai", "anthropic", "gemini", "ollama", "xai"}
     # Stale Mantle/BAG after Provider switch must not ride along.
     if base_url and non_bedrock:
         bag_like = (
@@ -1608,7 +1610,7 @@ async def run_chat_turn(
             usage_totals["max_input_tokens"] = max(
                 int(usage_totals["max_input_tokens"]), inp
             )
-            if inp > 272_000:
+            if long_context_multipliers(model_id_for_cost, inp) is not None:
                 usage_totals["long_context_request_count"] = (
                     int(usage_totals["long_context_request_count"]) + 1
                 )

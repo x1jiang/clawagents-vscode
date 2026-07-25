@@ -70,7 +70,7 @@ def _mantle_base_from_settings(settings_base: str, settings: dict[str, Any]) -> 
     Bedrock row on Mantle or cause OpenAI ``use_custom`` to probe Mantle.
     """
     provider = str(settings.get("provider") or "auto").strip().lower()
-    if provider in {"openai", "anthropic", "gemini", "ollama"}:
+    if provider in {"openai", "anthropic", "gemini", "ollama", "xai"}:
         return ""
     if settings_base and _is_mantle_base_url(settings_base):
         # Leftover Mantle URL under non-Bedrock already excluded above.
@@ -129,6 +129,23 @@ _CATALOG: list[dict[str, Any]] = [
             {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash (preview)"},
             {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
             {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+        ],
+    },
+    {
+        # xAI serves Grok over an OpenAI-compatible wire, so the engine routes
+        # it through the OpenAI client with this base_url.
+        "id": "xai",
+        "name": "xAI (Grok)",
+        "env_key": "XAI_API_KEY",
+        "base_url": "https://api.x.ai/v1",
+        # List prices: https://docs.x.ai/developers/pricing (attached via pricing.py)
+        "models": [
+            {"id": "grok-4.5", "label": "Grok 4.5"},
+            {"id": "grok-4.3", "label": "Grok 4.3"},
+            {"id": "grok-4.20-0309-reasoning", "label": "Grok 4.20 Reasoning"},
+            {"id": "grok-4.20-0309-non-reasoning", "label": "Grok 4.20 Non-reasoning"},
+            {"id": "grok-4.20-multi-agent-0309", "label": "Grok 4.20 Multi-agent"},
+            {"id": "grok-build-0.1", "label": "Grok Build 0.1"},
         ],
     },
     {
@@ -628,6 +645,7 @@ def verify_api_key(provider: str, *, probe: bool = False) -> dict[str, Any]:
         "anthropic": "ANTHROPIC_API_KEY",
         "gemini": "GEMINI_API_KEY",
         "bedrock": "BEDROCK_API_KEY",
+        "xai": "XAI_API_KEY",
         "ollama": None,
     }
     key_name = mapping.get(provider)

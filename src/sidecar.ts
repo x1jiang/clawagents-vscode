@@ -240,6 +240,7 @@ export class SidecarManager {
       anthropic: ["ANTHROPIC_API_KEY"],
       gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
       bedrock: ["BEDROCK_API_KEY", "MANTLE_API_KEY"],
+      xai: ["XAI_API_KEY"],
       tavily: ["TAVILY_API_KEY"],
       aws: [...AWS_ENV_KEYS],
     };

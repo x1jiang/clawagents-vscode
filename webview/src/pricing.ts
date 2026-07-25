@@ -57,6 +57,15 @@ const PRICES: Record<string, Rates> = {
   "gemini-3-flash-preview": withCache(0.5, 3),
   "gemini-2.5-pro": withCache(1.25, 10),
   "gemini-2.5-flash": withCache(0.3, 2.5),
+  // xAI Grok — short-context (<200K) from https://docs.x.ai/developers/pricing
+  "grok-4.5": withCache(2, 6, 0.3, 2.5),
+  "grok-4.3": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20-0309-reasoning": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20-0309-non-reasoning": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20-multi-agent-0309": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-build-0.1": withCache(1, 2, 0.2, 1.25),
+  "grok-build": withCache(1, 2, 0.2, 1.25),
 };
 
 /** Bedrock / Mantle US Standard on-demand (aws.amazon.com/bedrock/pricing/). */
@@ -81,7 +90,14 @@ const BEDROCK_PRICES: Record<string, Rates> = {
   "gpt-oss-120b": withCache(0.15, 0.6),
   "gpt-oss-safeguard-20b": withCache(0.07, 0.2),
   "gpt-oss-safeguard-120b": withCache(0.15, 0.6),
+  "grok-4.5": withCache(2, 6, 0.3, 2.5),
   "grok-4.3": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20-0309-reasoning": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20-0309-non-reasoning": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20-multi-agent-0309": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-4.20": withCache(1.25, 2.5, 0.2, 1.5625),
+  "grok-build-0.1": withCache(1, 2, 0.2, 1.25),
+  "grok-build": withCache(1, 2, 0.2, 1.25),
   "deepseek.v3.2": withCache(0.62, 1.85),
   "deepseek.v3.1": withCache(0.6, 1.73),
   "kimi-k2.5": withCache(0.6, 3),
@@ -200,14 +216,34 @@ function lookup(
   return lookupTable(other, key);
 }
 
-/** GPT-5.6: >272K input → 2× input-side rates, 1.5× output (full request). */
-const LONG_CONTEXT_THRESHOLD = 272_000;
+/** GPT-5.6: >272K → 2× input-side, 1.5× output. xAI Grok: ≥200K → 2× all rates. */
+const LONG_CONTEXT_THRESHOLD_GPT56 = 272_000;
+const LONG_CONTEXT_THRESHOLD_GROK = 200_000;
 const LONG_CONTEXT_INPUT_MULT = 2;
-const LONG_CONTEXT_OUTPUT_MULT = 1.5;
+const LONG_CONTEXT_OUTPUT_MULT_GPT56 = 1.5;
+const LONG_CONTEXT_OUTPUT_MULT_GROK = 2;
 
 function isGpt56Family(modelId: string): boolean {
   const key = normalizeModelId(modelId);
   return key.startsWith("gpt-5.6") || key.includes("gpt-5.6");
+}
+
+function isGrokFamily(modelId: string): boolean {
+  return normalizeModelId(modelId).startsWith("grok");
+}
+
+function longContextMultipliers(
+  modelId: string,
+  promptTokens: number,
+): { input: number; output: number } | null {
+  const prompt = Math.max(0, promptTokens || 0);
+  if (isGpt56Family(modelId) && prompt > LONG_CONTEXT_THRESHOLD_GPT56) {
+    return { input: LONG_CONTEXT_INPUT_MULT, output: LONG_CONTEXT_OUTPUT_MULT_GPT56 };
+  }
+  if (isGrokFamily(modelId) && prompt >= LONG_CONTEXT_THRESHOLD_GROK) {
+    return { input: LONG_CONTEXT_INPUT_MULT, output: LONG_CONTEXT_OUTPUT_MULT_GROK };
+  }
+  return null;
 }
 
 export function estimateCostUsd(
@@ -232,11 +268,12 @@ export function estimateCostUsd(
   let out = rates.output;
   let cachedRate = rates.cachedInput;
   let writeRate = rates.cacheWrite;
-  if (prompt > LONG_CONTEXT_THRESHOLD && isGpt56Family(modelId)) {
-    inp *= LONG_CONTEXT_INPUT_MULT;
-    cachedRate *= LONG_CONTEXT_INPUT_MULT;
-    writeRate *= LONG_CONTEXT_INPUT_MULT;
-    out *= LONG_CONTEXT_OUTPUT_MULT;
+  const mults = longContextMultipliers(modelId, prompt);
+  if (mults) {
+    inp *= mults.input;
+    cachedRate *= mults.input;
+    writeRate *= mults.input;
+    out *= mults.output;
   }
   const writePremium = Math.max(0, writeRate - inp);
   return (

@@ -1,6 +1,14 @@
+<<<<<<< HEAD
 ## Unreleased
 
 - Fix Checkpoints, Review, and Rewind panels: their toolbar chips now toggle closed, and delayed sidecar list responses cannot reopen a panel the user dismissed.
+=======
+## 1.0.145
+
+- Add xAI (Grok) provider models: `grok-4.5`, `grok-4.3`, `grok-4.20-*`, `grok-build-0.1`.
+- Cost estimates from [xAI pricing](https://docs.x.ai/developers/pricing): short-context list rates + ≥200K prompt → 2× all token rates.
+- Require `clawagents>=6.20.51` — Grok provider routing, effort clamp, and context profiles.
+>>>>>>> cc2f282 (Release v1.0.145: xAI Grok catalog and docs.x.ai pricing estimates.)
 
 ## 1.0.144
 

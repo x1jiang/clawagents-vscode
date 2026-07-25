@@ -8,7 +8,8 @@ import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
-import { workspaceRoot } from "./config";
+import { isExternalGraphPath, workspaceRoot } from "./config";
+import { curatedProcessEnv } from "./envCurate";
 import { ensureCompanions, probeGraphify } from "./companionDeps";
 
 export type GraphifyMode = "extract_code" | "extract_full" | "update";
@@ -41,8 +42,19 @@ function upstreamGraphPath(root: string): string {
   return path.join(root, "graphify-out", "graph.json");
 }
 
+/**
+ * Node/link counts are cosmetic, but this runs synchronously on the extension
+ * host from `getGraphifyStatus`. Reading and parsing a multi-megabyte graph
+ * there freezes the UI thread, so skip the parse past a size the main thread
+ * can absorb — the counts are optional and the caller renders without them.
+ */
+const MAX_GRAPH_STAT_BYTES = 8 * 1024 * 1024;
+
 function readGraphStats(graphFile: string): { nodes?: number; links?: number } {
   try {
+    if (fs.statSync(graphFile).size > MAX_GRAPH_STAT_BYTES) {
+      return {};
+    }
     const raw = JSON.parse(fs.readFileSync(graphFile, "utf8")) as {
       nodes?: unknown;
       links?: unknown;
@@ -92,6 +104,31 @@ export function getGraphifyStatus(python: string): GraphifyStatus {
   };
 }
 
+/**
+ * Provider credentials for the LLM-backed full extract only.
+ *
+ * `curatedProcessEnv()` deliberately strips API keys, so the one graphify mode
+ * that documents "needs LLM API keys in the environment" re-adds just those —
+ * rather than handing every key to every subprocess.
+ */
+function llmProviderEnv(): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const k of [
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+  ]) {
+    const v = process.env[k];
+    if (v) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 function runPython(
   python: string,
   args: string[],
@@ -103,10 +140,15 @@ function runPython(
 ): Promise<{ code: number | null; log: string }> {
   return new Promise((resolve) => {
     opts.output?.appendLine(`$ ${python} ${args.join(" ")}`);
+    // Curated env only: raw process.env forwards PYTHONPATH / PYTHONSTARTUP /
+    // LD_PRELOAD (and every provider API key) into the graphify interpreter,
+    // which is code injection into a subprocess we control — see envCurate.ts.
+    // No `shell`: spawn() with an argv array needs none, and cmd.exe would both
+    // split interpreter paths containing spaces and treat `>=` / `&` in args as
+    // redirects and command separators.
     const child = spawn(python, args, {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.env },
-      shell: process.platform === "win32",
+      env: { ...curatedProcessEnv(), ...opts.env },
     });
     let log = "";
     const onData = (buf: Buffer) => {
@@ -259,7 +301,12 @@ export async function runGraphifyMode(
       output?.appendLine(`=== graphify ${mode} @ ${root} ===`);
       const result = await runPython(python, args, {
         cwd: root,
-        env: { GRAPHIFY_OUT: graphOut },
+        // Only the LLM-backed `extract_full` gets provider keys; `--code-only`
+        // and `update` are pure-AST and must not see credentials at all.
+        env: {
+          GRAPHIFY_OUT: graphOut,
+          ...(mode === "extract_full" ? llmProviderEnv() : {}),
+        },
         output,
       });
       const graphFile = preferredGraphPath(root);
@@ -305,6 +352,28 @@ export async function mergeGraphifyGraphs(
   }
   const outDir = path.join(preferredGraphDir(root), "merged");
   const outFile = path.join(outDir, "graph.json");
+  // The merged output lands inside the workspace, so the external-graph prompt
+  // in useGraphifySource() will see a local path and stay silent. Warn here
+  // instead — otherwise picking one outside graph launders its contents into a
+  // "trusted internal" path with no prompt ever shown.
+  const externalSources = graphFiles.filter((file) => isExternalGraphPath(file));
+  if (externalSources.length > 0) {
+    const shown = externalSources.slice(0, 5).map((f) => `  • ${f}`).join("\n");
+    const more =
+      externalSources.length > 5
+        ? `\n  …and ${externalSources.length - 5} more`
+        : "";
+    const trust = await vscode.window.showWarningMessage(
+      `${externalSources.length} of ${graphFiles.length} selected graphs are outside this workspace. ` +
+        `Their contents will be merged into a workspace graph and may be returned to the agent.\n\n${shown}${more}`,
+      { modal: true },
+      "Merge anyway",
+      "Cancel",
+    );
+    if (trust !== "Merge anyway") {
+      return undefined;
+    }
+  }
   const confirm = await vscode.window.showWarningMessage(
     `Merge ${graphFiles.length} graphs into a new ClawAgents graph?\n\nOutput: ${outFile}\nSource graphs are not modified.`,
     { modal: true },

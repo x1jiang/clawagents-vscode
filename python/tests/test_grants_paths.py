@@ -262,6 +262,52 @@ class GrantPathTests(unittest.TestCase):
         )
         self.assertAlmostEqual(claude or 0, 0.90, places=4)  # 300k @ $3/M
 
+    def test_pricing_xai_grok_direct_and_long_context(self) -> None:
+        for mod in ("pricing",):
+            sys.modules.pop(mod, None)
+        import pricing as pricing_mod  # noqa: WPS433
+
+        # Direct API catalog (docs.x.ai/developers/pricing).
+        self.assertEqual(pricing_mod.price_for("grok-4.5"), (2.0, 6.0))
+        self.assertEqual(pricing_mod.price_for("grok-4.3"), (1.25, 2.5))
+        self.assertEqual(
+            pricing_mod.price_for("grok-4.20-0309-reasoning"), (1.25, 2.5)
+        )
+        self.assertEqual(pricing_mod.price_for("grok-build-0.1"), (1.0, 2.0))
+        full = pricing_mod.price_for_full("grok-4.5")
+        assert full is not None
+        self.assertEqual(full[2], 0.30)  # cached input
+
+        # Short context: 100k @ $2/M = $0.20
+        short = pricing_mod.estimate_usd(
+            "grok-4.5", prompt_tokens=100_000, completion_tokens=0
+        )
+        self.assertAlmostEqual(short or 0, 0.20, places=4)
+        # ≥200K cliff: 2× all rates → 200k @ $4/M = $0.80
+        long_in = pricing_mod.estimate_usd(
+            "grok-4.5", prompt_tokens=200_000, completion_tokens=0
+        )
+        self.assertAlmostEqual(long_in or 0, 0.80, places=4)
+        # Output also 2×: 200k in @ $4 + 50k out @ $12 = $0.80 + $0.60
+        long_both = pricing_mod.estimate_usd(
+            "grok-4.5", prompt_tokens=200_000, completion_tokens=50_000
+        )
+        self.assertAlmostEqual(long_both or 0, 1.40, places=4)
+        # Cached long-context: 200k @ $0.60/M = $0.12
+        long_cached = pricing_mod.estimate_usd(
+            "grok-4.5",
+            prompt_tokens=200_000,
+            completion_tokens=0,
+            cached_input_tokens=200_000,
+        )
+        self.assertAlmostEqual(long_cached or 0, 0.12, places=4)
+        self.assertIsNotNone(
+            pricing_mod.long_context_multipliers("grok-4.5", 200_000)
+        )
+        self.assertIsNone(
+            pricing_mod.long_context_multipliers("grok-4.5", 199_999)
+        )
+
     def test_pricing_per_request_not_cumulative(self) -> None:
         """Two 150K requests must NOT trigger the 272K cliff via summing."""
         for mod in ("pricing",):

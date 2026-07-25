@@ -184,10 +184,20 @@ export function probeCompanions(python?: string): CompanionProbe[] {
   return [probeContextMode(), probeRtk(), probeGraphify(python)];
 }
 
+/**
+ * @param useShell Opt-in, Windows-only. `spawn(..., {shell:true})` joins argv
+ *   with spaces and no quoting, so cmd.exe reinterprets shell metacharacters:
+ *   `graphifyy[mcp]>=0.9.20` becomes a redirect that silently drops the version
+ *   floor, swallows all subprocess output into a stray `=0.9.20` file, and
+ *   writes it into the extension-host cwd. Only pass this for bare command
+ *   names that genuinely need PATHEXT resolution (`npm` -> `npm.cmd`); anything
+ *   spawned by absolute path must leave it off.
+ */
 function runCommand(
   command: string,
   args: string[],
   output: { appendLine(s: string): void },
+  useShell = false,
 ): Promise<{ ok: boolean; detail: string }> {
   return new Promise((resolve) => {
     output.appendLine(`Running: ${command} ${args.join(" ")}`);
@@ -203,7 +213,7 @@ function runCommand(
         TEMP: process.env.TEMP,
         npm_config_yes: "true",
       },
-      shell: process.platform === "win32",
+      shell: useShell && process.platform === "win32",
     });
     let log = "";
     const onData = (buf: Buffer) => {
@@ -269,7 +279,8 @@ async function ensureContextMode(
       title: "ClawAgents: installing context-mode…",
       cancellable: false,
     },
-    async () => runCommand(npm, ["install", "-g", "context-mode@latest"], output),
+    // `npm` is a bare name resolved via PATHEXT to npm.cmd on Windows.
+    async () => runCommand(npm, ["install", "-g", "context-mode@latest"], output, true),
   );
   if (!result.ok) {
     output.appendLine(`context-mode install failed: ${result.detail}`);

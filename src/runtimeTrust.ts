@@ -76,19 +76,30 @@ export function runtimeTrustFromSettings(settings: Record<string, unknown>): Run
  * case process memory / SecretStorage must keep the prior approval so the
  * user can restore the original endpoint without re-prompting — unless they
  * explicitly cleared base_url (`revokeGatewayTrust`).
+ *
+ * `trusted_external_graph_path` needs the same escape hatch (`revokeGraphTrust`).
+ * Without it the sticky fallback made an external-graph grant permanent: the
+ * sidecar correctly clears its process-local grant when the user clears the
+ * path, but the empty `derived` value then fell back to `previous` and the
+ * stale path was written straight back into SecretStorage, to be re-injected as
+ * `CLAW_RUNTIME_TRUST` on the next start. That matters more here than for the
+ * gateway URL because `graphify_graph_path` is persisted in the repo-visible
+ * `.clawagents/vscode_settings.json`, so a committed settings file could
+ * re-point at an already-approved path and be served with no prompt.
  */
 export function mergeRuntimeTrust(
   previous: RuntimeTrust,
   settings: Record<string, unknown>,
-  options?: { revokeGatewayTrust?: boolean },
+  options?: { revokeGatewayTrust?: boolean; revokeGraphTrust?: boolean },
 ): RuntimeTrust {
   const derived = runtimeTrustFromSettings(settings);
   return {
     mcp_trust_workspace: derived.mcp_trust_workspace,
     allow_full_access: derived.allow_full_access,
     allow_external_skill_dirs: derived.allow_external_skill_dirs,
-    trusted_external_graph_path:
-      derived.trusted_external_graph_path || previous.trusted_external_graph_path,
+    trusted_external_graph_path: options?.revokeGraphTrust
+      ? ""
+      : derived.trusted_external_graph_path || previous.trusted_external_graph_path,
     trusted_custom_base_url: options?.revokeGatewayTrust
       ? ""
       : derived.trusted_custom_base_url || previous.trusted_custom_base_url,

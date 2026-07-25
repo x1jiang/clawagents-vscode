@@ -1,5 +1,6 @@
 import { spawnSync } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import {
@@ -15,6 +16,7 @@ const SECRET_KEYS = {
   anthropic: "clawagents.anthropicApiKey",
   gemini: "clawagents.geminiApiKey",
   bedrock: "clawagents.bedrockApiKey",
+  xai: "clawagents.xaiApiKey",
 } as const;
 
 /** Search key — separate from LLM providers so it never appears as a chat provider. */
@@ -141,6 +143,7 @@ export const DOTENV_ALLOWLIST = new Set([
   "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
+  "XAI_API_KEY",
   "GOOGLE_GENAI_API_KEY",
   "BEDROCK_API_KEY",
   // Alias used by AWS Mantle / OneHUB docs; mapped to BEDROCK_API_KEY at spawn.
@@ -248,7 +251,7 @@ export class ExtensionConfig {
 
   async storeRuntimeTrust(
     settings: Record<string, unknown>,
-    options?: { revokeGatewayTrust?: boolean },
+    options?: { revokeGatewayTrust?: boolean; revokeGraphTrust?: boolean },
   ): Promise<void> {
     const previous = await this.getRuntimeTrust();
     const trust = mergeRuntimeTrust(previous, settings, options);
@@ -333,7 +336,7 @@ export class ExtensionConfig {
    */
   hasProviderKeyFromEnv(
     env: Record<string, string>,
-    provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily",
+    provider: "openai" | "anthropic" | "gemini" | "bedrock" | "xai" | "tavily",
   ): boolean {
     const dotenv = this.loadWorkspaceDotenv();
     const pick = (...keys: string[]) =>
@@ -349,6 +352,9 @@ export class ExtensionConfig {
     }
     if (provider === "bedrock") {
       return pick("BEDROCK_API_KEY", "MANTLE_API_KEY");
+    }
+    if (provider === "xai") {
+      return pick("XAI_API_KEY");
     }
     return pick("TAVILY_API_KEY");
   }
@@ -396,6 +402,7 @@ export class ExtensionConfig {
     const anthropic = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.anthropic)) || "");
     const gemini = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.gemini)) || "");
     const bedrock = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.bedrock)) || "");
+    const xai = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.xai)) || "");
     const tavily = sanitizeApiKey((await this.secrets.get(TAVILY_SECRET_KEY)) || "");
     if (openai) {
       env.OPENAI_API_KEY = openai;
@@ -410,6 +417,9 @@ export class ExtensionConfig {
     if (bedrock) {
       env.BEDROCK_API_KEY = bedrock;
     }
+    if (xai) {
+      env.XAI_API_KEY = xai;
+    }
     if (tavily) {
       env.TAVILY_API_KEY = tavily;
     }
@@ -421,7 +431,7 @@ export class ExtensionConfig {
    * SecretStorage → workspace ``.env`` → shell ``process.env``.
    */
   async resolveProviderApiKey(
-    provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily",
+    provider: "openai" | "anthropic" | "gemini" | "bedrock" | "xai" | "tavily",
   ): Promise<string> {
     const secrets = await this.getApiKeyEnv();
     const dotenv = this.loadWorkspaceDotenv();
@@ -446,6 +456,9 @@ export class ExtensionConfig {
     if (provider === "bedrock") {
       return first("BEDROCK_API_KEY", "MANTLE_API_KEY");
     }
+    if (provider === "xai") {
+      return first("XAI_API_KEY");
+    }
     return first("TAVILY_API_KEY");
   }
 
@@ -458,6 +471,7 @@ export class ExtensionConfig {
     hasOpenAIKey: boolean;
     hasAnthropicKey: boolean;
     hasGeminiKey: boolean;
+    hasXaiKey: boolean;
   }> {
     const keyEnv = await this.getApiKeyEnv();
     return {
@@ -468,6 +482,7 @@ export class ExtensionConfig {
       hasOpenAIKey: this.hasProviderKeyFromEnv(keyEnv, "openai"),
       hasAnthropicKey: this.hasProviderKeyFromEnv(keyEnv, "anthropic"),
       hasGeminiKey: this.hasProviderKeyFromEnv(keyEnv, "gemini"),
+      hasXaiKey: this.hasProviderKeyFromEnv(keyEnv, "xai"),
     };
   }
 
@@ -712,6 +727,35 @@ export function workspaceRoot(): string | undefined {
     ? vscode.workspace.getWorkspaceFolder(activeUri)?.uri.fsPath
     : undefined;
   return chooseWorkspaceRoot(roots, _preferredWorkspaceRoot, active);
+}
+
+/**
+ * True when a Graphify graph path resolves outside the workspace.
+ *
+ * Lives here (not in webviewProvider) so the merge flow in graphifyOps can use
+ * the same definition without a circular import — merging an outside graph into
+ * an in-workspace output otherwise laundered the external-content warning.
+ */
+export function isExternalGraphPath(graphPath: unknown): boolean {
+  if (typeof graphPath !== "string" || !graphPath.trim()) {
+    return false;
+  }
+  const root = workspaceRoot();
+  if (!root) {
+    return true;
+  }
+  const raw = graphPath.trim();
+  const expanded =
+    raw === "~" || raw.startsWith("~/")
+      ? path.join(os.homedir(), raw.slice(2))
+      : raw;
+  const resolved = path.resolve(
+    path.isAbsolute(expanded) ? expanded : path.join(root, expanded),
+  );
+  const canonicalRoot = path.resolve(root);
+  return (
+    resolved !== canonicalRoot && !resolved.startsWith(`${canonicalRoot}${path.sep}`)
+  );
 }
 
 /** Last focused editor/terminal — webview clicks clear `activeTextEditor`. */

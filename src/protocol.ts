@@ -43,6 +43,7 @@ export type HostToWebview =
       hasOpenAIKey?: boolean;
       hasAnthropicKey?: boolean;
       hasGeminiKey?: boolean;
+      hasXaiKey?: boolean;
       sidecar: "stopped" | "running";
       chatId?: string;
       chats?: ChatSummary[];
@@ -172,6 +173,7 @@ export type HostToWebview =
       hasOpenAIKey?: boolean;
       hasAnthropicKey?: boolean;
       hasGeminiKey?: boolean;
+      hasXaiKey?: boolean;
     }
   | {
       type: "skills_preview";
@@ -213,6 +215,7 @@ export type HostToWebview =
       hasOpenAIKey?: boolean;
       hasAnthropicKey?: boolean;
       hasGeminiKey?: boolean;
+      hasXaiKey?: boolean;
     }
   | { type: "diagnostics"; data: unknown }
   | { type: "graphify_status"; data: Record<string, unknown> }
@@ -346,12 +349,12 @@ export type WebviewToHost =
   | { type: "set_bedrock_key"; apiKey: string }
   | {
       type: "set_provider_key";
-      provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily";
+      provider: "openai" | "anthropic" | "gemini" | "bedrock" | "xai" | "tavily";
       apiKey: string;
     }
   | {
       type: "clear_provider_key";
-      provider: "openai" | "anthropic" | "gemini" | "bedrock" | "tavily";
+      provider: "openai" | "anthropic" | "gemini" | "bedrock" | "xai" | "tavily";
     }
   | { type: "test_bedrock_gateway"; baseUrl: string; apiKey?: string }
   | {

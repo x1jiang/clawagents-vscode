@@ -15,6 +15,9 @@ Bedrock / Mantle defaults = commercial us-east-1 **Global** Standard
 ($6/$30 Opus) — that is not OneHUB/Mantle. Regional is typically +10%.
 See aws_management/BEDROCK_COST_COMPARISON.md and
 https://aws.amazon.com/bedrock/pricing/
+
+xAI Grok text rates: https://docs.x.ai/developers/pricing
+(≥200K prompt tokens → 2× input / cached / output for the full request).
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from __future__ import annotations
 # cached/write of 0 → derive as 0.1× / 1.25× input at lookup time.
 PriceTuple = tuple[float, float, float, float]
 
-# Direct API list prices (Anthropic / OpenAI / Gemini)
+# Direct API list prices (Anthropic / OpenAI / Gemini / xAI)
 PRICES: dict[str, PriceTuple] = {
     # OpenAI GPT-5.6 family (Sol / Terra / Luna) — cached read = 10%, write = 1.25×
     "gpt-5.6": (5.0, 30.0, 0.5, 6.25),
@@ -62,6 +65,16 @@ PRICES: dict[str, PriceTuple] = {
     "gemini-3-flash-preview": (0.5, 3.0, 0.05, 0.625),
     "gemini-2.5-pro": (1.25, 10.0, 0.125, 1.5625),
     "gemini-2.5-flash": (0.3, 2.5, 0.03, 0.375),
+    # xAI Grok — short-context (<200K prompt) list prices
+    # https://docs.x.ai/developers/pricing
+    "grok-4.5": (2.0, 6.0, 0.30, 2.5),
+    "grok-4.3": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20-0309-reasoning": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20-0309-non-reasoning": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20-multi-agent-0309": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20": (1.25, 2.50, 0.20, 1.5625),
+    "grok-build-0.1": (1.0, 2.0, 0.20, 1.25),
+    "grok-build": (1.0, 2.0, 0.20, 1.25),
 }
 
 # Amazon Bedrock / Mantle — commercial US Standard on-demand
@@ -90,8 +103,15 @@ BEDROCK_PRICES: dict[str, PriceTuple] = {
     "gpt-oss-120b": (0.15, 0.60, 0.0, 0.0),
     "gpt-oss-safeguard-20b": (0.07, 0.20, 0.0, 0.0),
     "gpt-oss-safeguard-120b": (0.15, 0.60, 0.0, 0.0),
-    # xAI
+    # xAI (Mantle) — same short-context list as direct API
+    "grok-4.5": (2.0, 6.0, 0.30, 2.5),
     "grok-4.3": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20-0309-reasoning": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20-0309-non-reasoning": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20-multi-agent-0309": (1.25, 2.50, 0.20, 1.5625),
+    "grok-4.20": (1.25, 2.50, 0.20, 1.5625),
+    "grok-build-0.1": (1.0, 2.0, 0.20, 1.25),
+    "grok-build": (1.0, 2.0, 0.20, 1.25),
     # DeepSeek (keep dotted catalog id — stripping ``deepseek.`` → ``v3.2`` is ambiguous)
     "deepseek.v3.2": (0.62, 1.85, 0.0, 0.0),
     "deepseek.v3.1": (0.60, 1.73, 0.0, 0.0),
@@ -239,14 +259,34 @@ def price_for_full(
 
 # GPT-5.6 family: prompts with >272K input tokens are priced at 2× input
 # (including cached read / cache write) and 1.5× output for the full request.
-_LONG_CONTEXT_THRESHOLD = 272_000
+# xAI Grok: prompts that reach ≥200K use 2× all token rates (docs.x.ai/pricing).
+_LONG_CONTEXT_THRESHOLD_GPT56 = 272_000
+_LONG_CONTEXT_THRESHOLD_GROK = 200_000
 _LONG_CONTEXT_INPUT_MULT = 2.0
-_LONG_CONTEXT_OUTPUT_MULT = 1.5
+_LONG_CONTEXT_OUTPUT_MULT_GPT56 = 1.5
+_LONG_CONTEXT_OUTPUT_MULT_GROK = 2.0
 
 
 def _is_gpt56_family(model_id: str) -> bool:
     key = normalize_model_id(model_id)
     return key.startswith("gpt-5.6") or "gpt-5.6" in key
+
+
+def _is_grok_family(model_id: str) -> bool:
+    key = normalize_model_id(model_id)
+    return key.startswith("grok")
+
+
+def long_context_multipliers(
+    model_id: str, prompt_tokens: int
+) -> tuple[float, float] | None:
+    """Return ``(input_mult, output_mult)`` when ``prompt_tokens`` crosses a cliff."""
+    prompt = max(0, int(prompt_tokens or 0))
+    if _is_gpt56_family(model_id) and prompt > _LONG_CONTEXT_THRESHOLD_GPT56:
+        return (_LONG_CONTEXT_INPUT_MULT, _LONG_CONTEXT_OUTPUT_MULT_GPT56)
+    if _is_grok_family(model_id) and prompt >= _LONG_CONTEXT_THRESHOLD_GROK:
+        return (_LONG_CONTEXT_INPUT_MULT, _LONG_CONTEXT_OUTPUT_MULT_GROK)
+    return None
 
 
 def estimate_usd(
@@ -276,8 +316,9 @@ def estimate_usd(
     The ``creation×(write−input)`` term charges only the write *premium* so we
     do not double-count tokens already in ``prompt_tokens``.
 
-    For GPT-5.6 (Sol/Terra/Luna), when ``prompt_tokens`` > 272K the full request
-    uses long-context rates: 2× all input-side rates and 1.5× output.
+    Long-context cliffs:
+    - GPT-5.6 (Sol/Terra/Luna): ``prompt_tokens`` > 272K → 2× input-side, 1.5× out
+    - xAI Grok: ``prompt_tokens`` ≥ 200K → 2× all token rates
     """
     rates = price_for_full(model_id, provider=provider)
     if rates is None:
@@ -288,11 +329,13 @@ def estimate_usd(
     cached = min(max(0, int(cached_input_tokens or 0)), prompt)
     uncached = prompt - cached
     creation = max(0, int(cache_creation_tokens or 0))
-    if prompt > _LONG_CONTEXT_THRESHOLD and _is_gpt56_family(model_id):
-        inp *= _LONG_CONTEXT_INPUT_MULT
-        cached_rate *= _LONG_CONTEXT_INPUT_MULT
-        write_rate *= _LONG_CONTEXT_INPUT_MULT
-        out *= _LONG_CONTEXT_OUTPUT_MULT
+    mults = long_context_multipliers(model_id, prompt)
+    if mults:
+        in_m, out_m = mults
+        inp *= in_m
+        cached_rate *= in_m
+        write_rate *= in_m
+        out *= out_m
     write_premium = max(0.0, write_rate - inp)
     return (
         (uncached / 1_000_000.0) * inp
