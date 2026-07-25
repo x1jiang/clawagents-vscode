@@ -138,11 +138,37 @@ export function probeRtk(): CompanionProbe {
   };
 }
 
+/**
+ * Short-lived probe cache.
+ *
+ * `probeGraphify` is a **synchronous** 15s-timeout subprocess and
+ * `getGraphifyStatus` calls it on the extension host (UI thread) on every
+ * status refresh — opening Settings, finishing a build, each webview poll.
+ * The installed version cannot change without going through this module, so
+ * an install invalidates the entry and everything else reuses it.
+ */
+const GRAPHIFY_PROBE_TTL_MS = 30_000;
+const graphifyProbeCache = new Map<string, { at: number; probe: CompanionProbe }>();
+
+/** Drop cached probes after an install/upgrade changes what is on disk. */
+export function invalidateGraphifyProbe(): void {
+  graphifyProbeCache.clear();
+}
+
+function cacheGraphifyProbe(py: string, probe: CompanionProbe): CompanionProbe {
+  graphifyProbeCache.set(py, { at: Date.now(), probe });
+  return probe;
+}
+
 export function probeGraphify(python?: string): CompanionProbe {
   const py =
     python ||
     vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
     "python3";
+  const cached = graphifyProbeCache.get(py);
+  if (cached && Date.now() - cached.at < GRAPHIFY_PROBE_TTL_MS) {
+    return cached.probe;
+  }
   const result = spawnSync(
     py,
     [
@@ -157,18 +183,18 @@ export function probeGraphify(python?: string): CompanionProbe {
   );
   if (result.status !== 0) {
     const floor = MIN_GRAPHIFY_VERSION.join(".");
-    return {
+    return cacheGraphifyProbe(py, {
       name: "graphify",
       found: false,
       ok: false,
       path: py,
       detail: `missing — pip install '${GRAPHIFY_PIP_SPEC}' (need >=${floor})`,
-    };
+    });
   }
   const version = (result.stdout || "").trim().split(/\r?\n/).find(Boolean);
   const ok = versionAtLeast(version, MIN_GRAPHIFY_VERSION);
   const floor = MIN_GRAPHIFY_VERSION.join(".");
-  return {
+  return cacheGraphifyProbe(py, {
     name: "graphify",
     found: true,
     version,
@@ -177,7 +203,7 @@ export function probeGraphify(python?: string): CompanionProbe {
     detail: ok
       ? `${version || "?"} >= ${floor}`
       : `have ${version || "?"}, need >=${floor} — pip install -U '${GRAPHIFY_PIP_SPEC}'`,
-  };
+  });
 }
 
 export function probeCompanions(python?: string): CompanionProbe[] {
@@ -392,6 +418,9 @@ async function ensureGraphify(
     async () =>
       runCommand(python, ["-m", "pip", "install", "-U", GRAPHIFY_PIP_SPEC], output),
   );
+  // What is on disk just changed — a stale cached probe would report the
+  // pre-install version (or "missing") for the rest of the TTL.
+  invalidateGraphifyProbe();
   if (!result.ok) {
     output.appendLine(`graphify install failed: ${result.detail}`);
     return probeGraphify(python);

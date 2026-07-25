@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.145**
+Publisher **`clawagents`** · version **1.0.146**
 
+- [ ] GitHub release `v1.0.146` + VSIX (deferred tools + changelog fix + rewind branch summary)
+- [ ] clawagents **6.20.52** on GitHub + PyPI (deferred tools, background notices, guardrails)
 - [x] GitHub release `v1.0.145` + VSIX (xAI Grok catalog + docs.x.ai pricing)
 - [x] clawagents **6.20.51** on GitHub + PyPI (Grok API provider + profiles)
 - [x] GitHub release `v1.0.144` + VSIX (Graphify choose/merge + external-path trust)

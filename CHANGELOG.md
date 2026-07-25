@@ -1,14 +1,17 @@
-<<<<<<< HEAD
-## Unreleased
+## 1.0.146
 
-- Fix Checkpoints, Review, and Rewind panels: their toolbar chips now toggle closed, and delayed sidecar list responses cannot reopen a panel the user dismissed.
-=======
+- Fix: the 1.0.145 changelog shipped with unresolved merge markers — cleaned up.
+- Rewind now carries a short extractive summary of the abandoned branch (asked / result / FAILED) into the surviving transcript so the agent does not re-derive or re-attempt what already failed.
+- Graphify probe is cached (30s TTL) so opening Settings / finishing a build no longer runs a synchronous 15s subprocess on every status refresh; the cache is invalidated on install/upgrade.
+- Graph path input commits on blur/Enter instead of per keystroke, avoiding a blocking external-path modal on every debounce.
+- Require `clawagents>=6.20.52` — deferred tools, background completion notices, quota classification, and compaction reduction guard.
+
 ## 1.0.145
 
 - Add xAI (Grok) provider models: `grok-4.5`, `grok-4.3`, `grok-4.20-*`, `grok-build-0.1`.
 - Cost estimates from [xAI pricing](https://docs.x.ai/developers/pricing): short-context list rates + ≥200K prompt → 2× all token rates.
 - Require `clawagents>=6.20.51` — Grok provider routing, effort clamp, and context profiles.
->>>>>>> cc2f282 (Release v1.0.145: xAI Grok catalog and docs.x.ai pricing estimates.)
+- Fix Checkpoints, Review, and Rewind panels: their toolbar chips now toggle closed, and delayed sidecar list responses cannot reopen a panel the user dismissed.
 
 ## 1.0.144
 

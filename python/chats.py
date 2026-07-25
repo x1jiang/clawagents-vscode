@@ -532,6 +532,58 @@ def _truncate_session_after_last_user(chat_id: str) -> None:
     mem.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
 
 
+# Cap so a long abandoned branch cannot dominate the restored context.
+_BRANCH_SUMMARY_MAX_ITEMS = 6
+_BRANCH_SUMMARY_SNIPPET = 240
+
+
+def summarize_abandoned_branch(dropped: list[dict[str, Any]]) -> str:
+    """One note describing the attempt a rewind is throwing away.
+
+    Rewind restores files and truncates the transcript, so everything the
+    failed attempt learned is lost — the agent then re-derives it and often
+    re-attempts the same thing. A short "tried X, it failed because Y" note
+    carried back into the surviving branch removes that loop.
+
+    Deliberately extractive rather than LLM-summarized: a rewind should be
+    instant and free, and must not acquire a new failure mode (or cost) in a
+    recovery path. Returns "" when there is nothing worth saying.
+    """
+    asks: list[str] = []
+    outcomes: list[str] = []
+    failures: list[str] = []
+    for ev in dropped:
+        kind = str(ev.get("kind") or "")
+        text = str(ev.get("text") or "").strip()
+        if not text:
+            continue
+        snippet = " ".join(text.split())[:_BRANCH_SUMMARY_SNIPPET]
+        if kind == "user":
+            asks.append(snippet)
+        elif kind == "assistant":
+            outcomes.append(snippet)
+        elif kind == "error":
+            failures.append(snippet)
+
+    if not (asks or outcomes or failures):
+        return ""
+
+    lines = ["Rewound past an earlier attempt. What it already established:"]
+    if asks:
+        lines.append(f"- Asked: {asks[0]}")
+        if len(asks) > 1:
+            lines.append(f"  (plus {len(asks) - 1} follow-up request(s))")
+    for outcome in outcomes[-_BRANCH_SUMMARY_MAX_ITEMS:]:
+        lines.append(f"- Result: {outcome}")
+    for failure in failures[-_BRANCH_SUMMARY_MAX_ITEMS:]:
+        lines.append(f"- FAILED: {failure}")
+    lines.append(
+        "Do not repeat the failed approach above without changing something; "
+        "the files themselves have been restored."
+    )
+    return "\n".join(lines)
+
+
 def truncate_to_prompt_index(
     chat_id: str,
     prompt_index: int,
@@ -558,7 +610,14 @@ def truncate_to_prompt_index(
             if user_seen >= message_count:
                 kept_events = events[: i + 1]
                 break
+    branch_note = ""
     if kept_events:
+        # Carry forward what the discarded attempt learned before dropping it.
+        branch_note = summarize_abandoned_branch(events[len(kept_events):])
+        if branch_note:
+            kept_events = kept_events + [
+                {"kind": "status", "text": branch_note, "branch_summary": True}
+            ]
         path = chat_ui_log_path(chat_id)
         with path.open("w", encoding="utf-8") as f:
             for ev in kept_events:
@@ -569,6 +628,7 @@ def truncate_to_prompt_index(
         "chat_id": chat_id,
         "prompt_index": prompt_index,
         "kept_events": len(kept_events),
+        "branch_summary": branch_note,
     }
 
 

@@ -495,6 +495,10 @@ export function App() {
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [hasXaiKey, setHasXaiKey] = useState(false);
+  // Typed graph path is held locally and only committed on blur/Enter: the
+  // settings autosave debounce fires a *blocking* modal for external paths,
+  // so committing per keystroke stacks one modal per 500ms pause.
+  const [graphPathDraft, setGraphPathDraft] = useState<string | null>(null);
   const [providerKeyDraft, setProviderKeyDraft] = useState("");
   const [providerSetupMsg, setProviderSetupMsg] = useState("");
   const [sidecar, setSidecar] = useState<"stopped" | "starting" | "running" | "error">(
@@ -4309,10 +4313,27 @@ export function App() {
                   Custom graph path
                   <input
                     type="text"
-                    value={String(settings.graphify_graph_path || "")}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, graphify_graph_path: e.target.value }))
+                    value={
+                      graphPathDraft ?? String(settings.graphify_graph_path || "")
                     }
+                    onChange={(e) => setGraphPathDraft(e.target.value)}
+                    onBlur={() => {
+                      if (graphPathDraft === null) {
+                        return;
+                      }
+                      const next = graphPathDraft;
+                      setGraphPathDraft(null);
+                      if (next !== String(settings.graphify_graph_path || "")) {
+                        setSettings((s) => ({ ...s, graphify_graph_path: next }));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      } else if (e.key === "Escape") {
+                        setGraphPathDraft(null);
+                      }
+                    }}
                     placeholder="~/.graphify/global-graph.json"
                   />
                   <span className="muted tiny">Use “Choose graph…” for a file picker and safe external-path confirmation.</span>
