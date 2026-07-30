@@ -1,6 +1,6 @@
 Publisher **`clawagents`** · version **1.0.148**
 
-- [ ] GitHub release `v1.0.148` + VSIX (reject chat/error paste as API key)
+- [x] GitHub release `v1.0.148` + VSIX (reject chat/error paste as API key)
 - [x] GitHub release `v1.0.147` + VSIX (reject path-as-API-key / auto-purge python.exe paste)
 - [x] GitHub release `v1.0.146` + VSIX (deferred tools + changelog fix + rewind branch summary)
 - [x] clawagents **6.20.52** on GitHub + PyPI (deferred tools, background notices, guardrails)
