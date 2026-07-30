@@ -1,3 +1,7 @@
+## 1.0.147
+
+- **Windows API-key paste guard:** reject filesystem paths (`C:\…\python.exe`, `/usr/bin/python3`, etc.) as provider keys. SecretStorage path mistakes are auto-purged so a real key in workspace `.env` / shell wins without manual Clear. Save/verify shows a clear hint to use `clawagents.pythonPath` for the interpreter.
+
 ## 1.0.146
 
 - Fix: the 1.0.145 changelog shipped with unresolved merge markers — cleaned up.

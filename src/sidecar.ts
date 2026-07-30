@@ -4,7 +4,7 @@ import * as http from "http";
 import * as net from "net";
 import * as path from "path";
 import * as vscode from "vscode";
-import { AWS_ENV_KEYS, ExtensionConfig, workspaceRoot } from "./config";
+import { AWS_ENV_KEYS, ExtensionConfig, sanitizeApiKey, workspaceRoot } from "./config";
 import { curatedProcessEnv } from "./envCurate";
 import { ensureCompanions } from "./companionDeps";
 import { ensureSidecarDeps } from "./pythonDeps";
@@ -249,7 +249,7 @@ export class SidecarManager {
         keySources[prov] = "VS Code SecretStorage";
       } else if (vars.some((v) => dotenvEnv[v])) {
         keySources[prov] = "workspace .env";
-      } else if (vars.some((v) => process.env[v])) {
+      } else if (vars.some((v) => sanitizeApiKey(process.env[v] || ""))) {
         keySources[prov] = "shell environment (check your shell profile)";
       }
     }
@@ -257,8 +257,9 @@ export class SidecarManager {
     const shellKeys: NodeJS.ProcessEnv = {};
     for (const vars of Object.values(keyVars)) {
       for (const v of vars) {
-        if (process.env[v]) {
-          shellKeys[v] = process.env[v];
+        const cleaned = sanitizeApiKey(process.env[v] || "");
+        if (cleaned) {
+          shellKeys[v] = cleaned;
         }
       }
     }

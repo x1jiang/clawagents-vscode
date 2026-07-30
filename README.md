@@ -79,7 +79,7 @@ Command Palette → **ClawAgents: Ensure Companions** forces a re-probe/upgrade.
 ## Troubleshooting
 
 - **Sidecar health check timed out** — open *ClawAgents Sidecar* output. Usually missing pip packages or a bad `clawagents.pythonPath`.
-- **provider_auth** — invalid credential; workspace env overrides SecretStorage when both are set.
+- **provider_auth** — invalid credential. Precedence: SecretStorage → workspace `.env` → shell. Path-like values (`python.exe`) are ignored/purged so a real key elsewhere can win.
 - **Gemini** — set the Gemini/Google provider credential; `pip install 'clawagents[gemini]'`.
 - **MCP** — enable MCP in Settings, optionally trust workspace config, and check `~/.clawagents/mcp.json`.
 - **Restart** — Command Palette → **ClawAgents: Restart Sidecar**.

@@ -555,7 +555,12 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
 
 
 def _sanitize_api_key(raw: str | None) -> str:
-    """Normalize pasted keys so HTTP header encoding cannot fail."""
+    """Normalize pasted keys so HTTP header encoding cannot fail.
+
+    Path-like values (``C:\\…\\python.exe``, ``/usr/bin/python3``) are treated
+    as empty — a common Windows install mistake when the interpreter path is
+    pasted into the API-key field.
+    """
     text = (raw or "").replace("\ufeff", "").replace("\r", "").replace("\n", "").strip()
     for ch in ("\u200b", "\u200c", "\u200d", "\u2060"):
         text = text.replace(ch, "")
@@ -572,7 +577,31 @@ def _sanitize_api_key(raw: str | None) -> str:
     text = "".join(
         ch for ch in text if ord(ch) < 128 and ch not in ("\r", "\n")
     ).strip()
+    if _looks_like_filesystem_path(text):
+        return ""
     return text
+
+
+def _looks_like_filesystem_path(text: str) -> bool:
+    """True when ``text`` is almost certainly an interpreter/file path, not a key."""
+    if not text:
+        return False
+    if len(text) >= 3 and text[1] == ":" and text[2] in "\\/" and text[0].isalpha():
+        return True
+    if text.startswith("\\\\") and len(text) > 2 and text[2] not in "\\/ \t":
+        return True
+    lower = text.lower()
+    if lower.endswith((".exe", ".bat", ".cmd", ".com", ".msi", ".ps1")):
+        return True
+    import re
+
+    if text.startswith("/") and re.search(
+        r"(?:^|/)(pythonw?|node|deno)(\d+(\.\d+)*)?$", text, re.I
+    ):
+        return True
+    if re.search(r"[\\/](pythonw?|node|deno)(\d+(\.\d+)*)?(\.exe)?$", text, re.I):
+        return True
+    return False
 
 
 def _key_source(provider: str) -> str:

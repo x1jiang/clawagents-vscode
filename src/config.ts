@@ -22,6 +22,37 @@ const SECRET_KEYS = {
 /** Search key — separate from LLM providers so it never appears as a chat provider. */
 const TAVILY_SECRET_KEY = "clawagents.tavilyApiKey";
 
+/**
+ * True when a value is almost certainly a filesystem path (e.g. python.exe)
+ * pasted into an API-key field — common on Windows during install.
+ */
+export function looksLikeFilesystemPath(raw: string): boolean {
+  const text = (raw || "").trim();
+  if (!text) {
+    return false;
+  }
+  // Windows drive or UNC.
+  if (/^[A-Za-z]:[\\/]/.test(text) || /^\\\\[^\\/\s]/.test(text)) {
+    return true;
+  }
+  // Executable / installer extensions.
+  if (/\.(exe|bat|cmd|com|msi|ps1)$/i.test(text)) {
+    return true;
+  }
+  // Absolute unix interpreter paths (…/python3.12, /usr/bin/python).
+  if (
+    text.startsWith("/") &&
+    /(?:^|\/)(pythonw?|node|deno)(\d+(\.\d+)*)?$/i.test(text)
+  ) {
+    return true;
+  }
+  // Relative or mixed separators ending in a common interpreter name.
+  if (/[\\/](pythonw?|node|deno)(\d+(\.\d+)*)?(\.exe)?$/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
 /** Strip paste junk so keys are safe for HTTP headers (latin-1) and env. */
 export function sanitizeApiKey(raw: string): string {
   let text = (raw || "")
@@ -48,8 +79,21 @@ export function sanitizeApiKey(raw: string): string {
     })
     .join("")
     .trim();
+  // Path pasted as a key (python.exe, C:\Users\…\python.exe) → treat as unset
+  // so SecretStorage / .env / shell can fall through to a real key.
+  if (looksLikeFilesystemPath(text)) {
+    return "";
+  }
   return text;
 }
+
+const PATH_AS_KEY_HINT =
+  "That looks like a file path (e.g. python.exe), not an API key. " +
+  "Paste the provider key (sk-… / sk-ant-… / AIza…) instead. " +
+  "Set the interpreter under Settings → clawagents.pythonPath.";
+
+/** SecretStorage keys we already auto-cleared this session (avoid warn spam). */
+const _purgedPathSecrets = new Set<string>();
 
 export type ProviderKind = keyof typeof SECRET_KEYS | "auto";
 export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
@@ -340,7 +384,13 @@ export class ExtensionConfig {
   ): boolean {
     const dotenv = this.loadWorkspaceDotenv();
     const pick = (...keys: string[]) =>
-      keys.some((k) => Boolean((env[k] || dotenv[k] || process.env[k] || "").trim()));
+      keys.some((k) =>
+        Boolean(
+          sanitizeApiKey(env[k] || "") ||
+            sanitizeApiKey(dotenv[k] || "") ||
+            sanitizeApiKey(process.env[k] || ""),
+        ),
+      );
     if (provider === "openai") {
       return pick("OPENAI_API_KEY");
     }
@@ -361,14 +411,14 @@ export class ExtensionConfig {
 
   /** Sync Tavily check using cached env + dotenv/process fallbacks. */
   hasTavilyKeyFromEnv(env: Record<string, string>): boolean {
-    if (env.TAVILY_API_KEY) {
+    if (sanitizeApiKey(env.TAVILY_API_KEY || "")) {
       return true;
     }
     const dotenv = this.loadWorkspaceDotenv();
-    if (dotenv.TAVILY_API_KEY) {
+    if (sanitizeApiKey(dotenv.TAVILY_API_KEY || "")) {
       return true;
     }
-    return Boolean(process.env.TAVILY_API_KEY);
+    return Boolean(sanitizeApiKey(process.env.TAVILY_API_KEY || ""));
   }
 
   /** Native Bedrock can run without BEDROCK_API_KEY when AWS creds exist.
@@ -396,14 +446,39 @@ export class ExtensionConfig {
     return false;
   }
 
+  /**
+   * Read + sanitize a SecretStorage value. Path-like mistakes (python.exe)
+   * are deleted so a real key in workspace ``.env`` / shell can win without
+   * the user manually clearing SecretStorage.
+   */
+  private async readSecretKey(storageKey: string): Promise<string> {
+    const raw = (await this.secrets.get(storageKey)) || "";
+    if (!raw) {
+      return "";
+    }
+    if (looksLikeFilesystemPath(raw)) {
+      await this.secrets.delete(storageKey);
+      if (!_purgedPathSecrets.has(storageKey)) {
+        _purgedPathSecrets.add(storageKey);
+        void vscode.window.showWarningMessage(
+          "ClawAgents removed a file path that was stored as an API key " +
+            "(often python.exe from Windows setup). Using workspace .env / " +
+            "shell keys if present — re-set the provider key if chat still fails.",
+        );
+      }
+      return "";
+    }
+    return sanitizeApiKey(raw);
+  }
+
   async getApiKeyEnv(): Promise<Record<string, string>> {
     const env: Record<string, string> = {};
-    const openai = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.openai)) || "");
-    const anthropic = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.anthropic)) || "");
-    const gemini = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.gemini)) || "");
-    const bedrock = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.bedrock)) || "");
-    const xai = sanitizeApiKey((await this.secrets.get(SECRET_KEYS.xai)) || "");
-    const tavily = sanitizeApiKey((await this.secrets.get(TAVILY_SECRET_KEY)) || "");
+    const openai = await this.readSecretKey(SECRET_KEYS.openai);
+    const anthropic = await this.readSecretKey(SECRET_KEYS.anthropic);
+    const gemini = await this.readSecretKey(SECRET_KEYS.gemini);
+    const bedrock = await this.readSecretKey(SECRET_KEYS.bedrock);
+    const xai = await this.readSecretKey(SECRET_KEYS.xai);
+    const tavily = await this.readSecretKey(TAVILY_SECRET_KEY);
     if (openai) {
       env.OPENAI_API_KEY = openai;
     }
@@ -429,6 +504,8 @@ export class ExtensionConfig {
   /**
    * Resolve a probe/chat key the same way the sidecar spawn does:
    * SecretStorage → workspace ``.env`` → shell ``process.env``.
+   * Each source is sanitized independently so a path in SecretStorage
+   * does not block a real key in ``.env``.
    */
   async resolveProviderApiKey(
     provider: "openai" | "anthropic" | "gemini" | "bedrock" | "xai" | "tavily",
@@ -437,9 +514,11 @@ export class ExtensionConfig {
     const dotenv = this.loadWorkspaceDotenv();
     const first = (...keys: string[]) => {
       for (const k of keys) {
-        const v = sanitizeApiKey(secrets[k] || dotenv[k] || process.env[k] || "");
-        if (v) {
-          return v;
+        for (const src of [secrets[k], dotenv[k], process.env[k]]) {
+          const v = sanitizeApiKey(src || "");
+          if (v) {
+            return v;
+          }
         }
       }
       return "";
@@ -487,15 +566,15 @@ export class ExtensionConfig {
   }
 
   async hasTavilyKey(): Promise<boolean> {
-    const fromSecret = sanitizeApiKey((await this.secrets.get(TAVILY_SECRET_KEY)) || "");
+    const fromSecret = await this.readSecretKey(TAVILY_SECRET_KEY);
     if (fromSecret) {
       return true;
     }
     const dotenv = this.loadWorkspaceDotenv();
-    if (dotenv.TAVILY_API_KEY) {
+    if (sanitizeApiKey(dotenv.TAVILY_API_KEY || "")) {
       return true;
     }
-    return Boolean(process.env.TAVILY_API_KEY);
+    return Boolean(sanitizeApiKey(process.env.TAVILY_API_KEY || ""));
   }
 
   /**
@@ -537,21 +616,33 @@ export class ExtensionConfig {
       ) {
         val = val.slice(1, -1);
       }
-      // Allowlisted keys are credentials — strip CR/LF paste junk.
-      out[key] = sanitizeApiKey(val) || val.replace(/[\r\n]+/g, "").trim();
+      // Drop path-like mistakes; do not fall back to the raw path when sanitize empties.
+      const cleaned = sanitizeApiKey(val);
+      if (cleaned) {
+        out[key] = cleaned;
+      }
     }
     return out;
   }
 
   async setApiKey(provider: keyof typeof SECRET_KEYS, value: string): Promise<void> {
+    if (looksLikeFilesystemPath(value) || looksLikeFilesystemPath(value.trim())) {
+      throw new Error(PATH_AS_KEY_HINT);
+    }
     const cleaned = sanitizeApiKey(value);
     if (!cleaned) {
+      if (looksLikeFilesystemPath((value || "").replace(/[\r\n]+/g, "").trim())) {
+        throw new Error(PATH_AS_KEY_HINT);
+      }
       throw new Error("API key is empty after removing whitespace/non-ASCII characters.");
     }
     await this.secrets.store(SECRET_KEYS[provider], cleaned);
   }
 
   async setTavilyApiKey(value: string): Promise<void> {
+    if (looksLikeFilesystemPath(value) || looksLikeFilesystemPath(value.trim())) {
+      throw new Error(PATH_AS_KEY_HINT);
+    }
     const cleaned = sanitizeApiKey(value);
     if (!cleaned) {
       throw new Error("API key is empty after removing whitespace/non-ASCII characters.");

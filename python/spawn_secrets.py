@@ -31,11 +31,36 @@ def normalize_provider_aliases() -> None:
         os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
 
 
+def _looks_like_filesystem_path(text: str) -> bool:
+    if not text:
+        return False
+    if len(text) >= 3 and text[1] == ":" and text[2] in "\\/" and text[0].isalpha():
+        return True
+    if text.startswith("\\\\") and len(text) > 2 and text[2] not in "\\/ \t":
+        return True
+    lower = text.lower()
+    if lower.endswith((".exe", ".bat", ".cmd", ".com", ".msi", ".ps1")):
+        return True
+    import re
+
+    if text.startswith("/") and re.search(
+        r"(?:^|/)(pythonw?|node|deno)(\d+(\.\d+)*)?$", text, re.I
+    ):
+        return True
+    if re.search(r"[\\/](pythonw?|node|deno)(\d+(\.\d+)*)?(\.exe)?$", text, re.I):
+        return True
+    return False
+
+
 def snapshot_spawn_secrets() -> None:
     """Freeze provider secrets from the spawn environment (call once at start)."""
     _SPAWN_SECRETS.clear()
     for key in _SPAWN_SECRET_KEYS:
         val = (os.environ.get(key) or "").strip()
+        if val and _looks_like_filesystem_path(val):
+            # Drop so live os.environ reads (catalog / verify) cannot send a path.
+            os.environ.pop(key, None)
+            continue
         if val:
             _SPAWN_SECRETS[key] = val
     # Keep GEMINI alias in the snapshot too.
