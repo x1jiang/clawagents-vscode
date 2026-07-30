@@ -1,6 +1,6 @@
 Publisher **`clawagents`** · version **1.0.147**
 
-- [ ] GitHub release `v1.0.147` + VSIX (reject path-as-API-key / auto-purge python.exe paste)
+- [x] GitHub release `v1.0.147` + VSIX (reject path-as-API-key / auto-purge python.exe paste)
 - [x] GitHub release `v1.0.146` + VSIX (deferred tools + changelog fix + rewind branch summary)
 - [x] clawagents **6.20.52** on GitHub + PyPI (deferred tools, background notices, guardrails)
 - [x] GitHub release `v1.0.145` + VSIX (xAI Grok catalog + docs.x.ai pricing)
