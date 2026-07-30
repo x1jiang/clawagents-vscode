@@ -52,13 +52,41 @@ def _looks_like_filesystem_path(text: str) -> bool:
     return False
 
 
+def _looks_like_pasted_junk(text: str) -> bool:
+    if not text or not text.strip():
+        return False
+    if any(ch.isspace() for ch in text.strip()):
+        return True
+    if len(text.strip()) > 512:
+        return True
+    import re
+
+    if re.search(
+        r"incorrect\s+api\s+key|provider_auth|you can find your api key|invalid_api_key",
+        text,
+        re.I,
+    ):
+        return True
+    if re.match(r"error\s*code\s*:", text.strip(), re.I):
+        return True
+    if re.match(r"^(you|clawagents)\b", text.strip(), re.I) and re.search(
+        r"copy", text, re.I
+    ):
+        return True
+    return False
+
+
+def _looks_like_bad_api_key(text: str) -> bool:
+    return _looks_like_filesystem_path(text) or _looks_like_pasted_junk(text)
+
+
 def snapshot_spawn_secrets() -> None:
     """Freeze provider secrets from the spawn environment (call once at start)."""
     _SPAWN_SECRETS.clear()
     for key in _SPAWN_SECRET_KEYS:
         val = (os.environ.get(key) or "").strip()
-        if val and _looks_like_filesystem_path(val):
-            # Drop so live os.environ reads (catalog / verify) cannot send a path.
+        if val and _looks_like_bad_api_key(val):
+            # Drop so live os.environ reads (catalog / verify) cannot send junk.
             os.environ.pop(key, None)
             continue
         if val:

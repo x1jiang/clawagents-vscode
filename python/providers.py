@@ -557,11 +557,10 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
 def _sanitize_api_key(raw: str | None) -> str:
     """Normalize pasted keys so HTTP header encoding cannot fail.
 
-    Path-like values (``C:\\…\\python.exe``, ``/usr/bin/python3``) are treated
-    as empty — a common Windows install mistake when the interpreter path is
-    pasted into the API-key field.
+    Path-like values and chat/error pastes are treated as empty.
     """
-    text = (raw or "").replace("\ufeff", "").replace("\r", "").replace("\n", "").strip()
+    original = raw or ""
+    text = original.replace("\ufeff", "").replace("\r", "").replace("\n", "").strip()
     for ch in ("\u200b", "\u200c", "\u200d", "\u2060"):
         text = text.replace(ch, "")
     if (text.startswith('"') and text.endswith('"')) or (
@@ -577,7 +576,7 @@ def _sanitize_api_key(raw: str | None) -> str:
     text = "".join(
         ch for ch in text if ord(ch) < 128 and ch not in ("\r", "\n")
     ).strip()
-    if _looks_like_filesystem_path(text):
+    if _looks_like_bad_api_key(text) or _looks_like_bad_api_key(original):
         return ""
     return text
 
@@ -602,6 +601,35 @@ def _looks_like_filesystem_path(text: str) -> bool:
     if re.search(r"[\\/](pythonw?|node|deno)(\d+(\.\d+)*)?(\.exe)?$", text, re.I):
         return True
     return False
+
+
+def _looks_like_pasted_junk(text: str) -> bool:
+    """Chat UI / error dumps pasted as keys (spaces, huge length, known phrases)."""
+    if not text or not text.strip():
+        return False
+    if any(ch.isspace() for ch in text.strip()):
+        return True
+    if len(text.strip()) > 512:
+        return True
+    import re
+
+    if re.search(
+        r"incorrect\s+api\s+key|provider_auth|you can find your api key|invalid_api_key",
+        text,
+        re.I,
+    ):
+        return True
+    if re.match(r"error\s*code\s*:", text.strip(), re.I):
+        return True
+    if re.match(r"^(you|clawagents)\b", text.strip(), re.I) and re.search(
+        r"copy", text, re.I
+    ):
+        return True
+    return False
+
+
+def _looks_like_bad_api_key(text: str) -> bool:
+    return _looks_like_filesystem_path(text) or _looks_like_pasted_junk(text)
 
 
 def _key_source(provider: str) -> str:

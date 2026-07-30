@@ -53,6 +53,45 @@ export function looksLikeFilesystemPath(raw: string): boolean {
   return false;
 }
 
+/**
+ * True when a value looks like chat UI / error text pasted as a key.
+ * Seen on Windows: selecting "You" + "Copy" + transcript/error into the key field.
+ */
+export function looksLikePastedJunk(raw: string): boolean {
+  const text = (raw || "").trim();
+  if (!text) {
+    return false;
+  }
+  // Provider keys are single tokens — internal whitespace means a bad paste.
+  if (/\s/.test(text)) {
+    return true;
+  }
+  // Chat transcript / full error dumps are far longer than any real key.
+  if (text.length > 512) {
+    return true;
+  }
+  if (
+    /incorrect\s+api\s+key|provider_auth|you can find your api key|invalid_api_key/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  if (/^error\s*code\s*:/i.test(text)) {
+    return true;
+  }
+  // Chat chrome labels ("You" / "ClawAgents" + "Copy") selected with the bubble.
+  if (/^(you|clawagents)\b/i.test(text) && /copy/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+/** True when SecretStorage / env should treat this as unset (path or junk paste). */
+export function looksLikeBadApiKey(raw: string): boolean {
+  return looksLikeFilesystemPath(raw) || looksLikePastedJunk(raw);
+}
+
 /** Strip paste junk so keys are safe for HTTP headers (latin-1) and env. */
 export function sanitizeApiKey(raw: string): string {
   let text = (raw || "")
@@ -79,9 +118,8 @@ export function sanitizeApiKey(raw: string): string {
     })
     .join("")
     .trim();
-  // Path pasted as a key (python.exe, C:\Users\…\python.exe) → treat as unset
-  // so SecretStorage / .env / shell can fall through to a real key.
-  if (looksLikeFilesystemPath(text)) {
+  // Path or chat/error paste → treat as unset so a real key elsewhere can win.
+  if (looksLikeBadApiKey(text) || looksLikeBadApiKey(raw || "")) {
     return "";
   }
   return text;
@@ -91,6 +129,11 @@ const PATH_AS_KEY_HINT =
   "That looks like a file path (e.g. python.exe), not an API key. " +
   "Paste the provider key (sk-… / sk-ant-… / AIza…) instead. " +
   "Set the interpreter under Settings → clawagents.pythonPath.";
+
+const JUNK_AS_KEY_HINT =
+  "That does not look like an API key (chat text, error dump, or spaces). " +
+  "Paste only the key from the provider dashboard (usually starts with sk-… / sk-ant-… / AIza…). " +
+  "Do not paste ClawAgents chat bubbles or prior 401 errors.";
 
 /** SecretStorage keys we already auto-cleared this session (avoid warn spam). */
 const _purgedPathSecrets = new Set<string>();
@@ -456,14 +499,15 @@ export class ExtensionConfig {
     if (!raw) {
       return "";
     }
-    if (looksLikeFilesystemPath(raw)) {
+    if (looksLikeBadApiKey(raw)) {
       await this.secrets.delete(storageKey);
       if (!_purgedPathSecrets.has(storageKey)) {
         _purgedPathSecrets.add(storageKey);
         void vscode.window.showWarningMessage(
-          "ClawAgents removed a file path that was stored as an API key " +
-            "(often python.exe from Windows setup). Using workspace .env / " +
-            "shell keys if present — re-set the provider key if chat still fails.",
+          "ClawAgents removed a bad value stored as an API key " +
+            "(file path, chat text, or error dump — common on Windows paste). " +
+            "Using workspace .env / shell keys if present — paste only the real " +
+            "sk-… / sk-ant-… / AIza… key in Settings.",
         );
       }
       return "";
@@ -629,10 +673,15 @@ export class ExtensionConfig {
     if (looksLikeFilesystemPath(value) || looksLikeFilesystemPath(value.trim())) {
       throw new Error(PATH_AS_KEY_HINT);
     }
+    if (looksLikePastedJunk(value) || looksLikePastedJunk(value.trim())) {
+      throw new Error(JUNK_AS_KEY_HINT);
+    }
     const cleaned = sanitizeApiKey(value);
     if (!cleaned) {
-      if (looksLikeFilesystemPath((value || "").replace(/[\r\n]+/g, "").trim())) {
-        throw new Error(PATH_AS_KEY_HINT);
+      if (looksLikeBadApiKey((value || "").replace(/[\r\n]+/g, " ").trim())) {
+        throw new Error(
+          looksLikeFilesystemPath(value.trim()) ? PATH_AS_KEY_HINT : JUNK_AS_KEY_HINT,
+        );
       }
       throw new Error("API key is empty after removing whitespace/non-ASCII characters.");
     }
@@ -640,8 +689,10 @@ export class ExtensionConfig {
   }
 
   async setTavilyApiKey(value: string): Promise<void> {
-    if (looksLikeFilesystemPath(value) || looksLikeFilesystemPath(value.trim())) {
-      throw new Error(PATH_AS_KEY_HINT);
+    if (looksLikeBadApiKey(value) || looksLikeBadApiKey(value.trim())) {
+      throw new Error(
+        looksLikeFilesystemPath(value.trim()) ? PATH_AS_KEY_HINT : JUNK_AS_KEY_HINT,
+      );
     }
     const cleaned = sanitizeApiKey(value);
     if (!cleaned) {

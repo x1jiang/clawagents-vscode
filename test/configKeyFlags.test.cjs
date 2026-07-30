@@ -88,6 +88,21 @@ test("sanitizeApiKey rejects Windows python.exe paths", () => {
   assert.equal(looksLikeFilesystemPath("sk-proj-realkey123"), false);
 });
 
+test("sanitizeApiKey rejects chat UI / error pastes", () => {
+  const { sanitizeApiKey, looksLikePastedJunk } = require(outputFile);
+  const chatPaste = "You\nCopy\nhi\nClawAgents\nCopy\n[provider_auth] Authentication failed";
+  assert.equal(looksLikePastedJunk(chatPaste), true);
+  assert.equal(sanitizeApiKey(chatPaste), "");
+  assert.equal(sanitizeApiKey("You Copy sk-should-not-matter"), "");
+  assert.equal(
+    sanitizeApiKey(
+      "Error code: 401 - {'error': {'message': 'Incorrect API key provided: x'}}",
+    ),
+    "",
+  );
+  assert.equal(sanitizeApiKey("sk-proj-realkey123"), "sk-proj-realkey123");
+});
+
 test("resolveProviderApiKey skips path in SecretStorage and uses dotenv", async () => {
   const cfg = makeConfig();
   cfg.getApiKeyEnv = async () => ({}); // purged / empty after path reject

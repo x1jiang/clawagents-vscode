@@ -1,3 +1,7 @@
+## 1.0.148
+
+- **API-key paste guard (Windows):** also reject chat UI / error dumps pasted as keys (spaces, >512 chars, `You`/`Copy` chrome, `provider_auth` / `Incorrect API key` text). Auto-purge those from SecretStorage like path mistakes so a real `.env` key can win.
+
 ## 1.0.147
 
 - **Windows API-key paste guard:** reject filesystem paths (`C:\…\python.exe`, `/usr/bin/python3`, etc.) as provider keys. SecretStorage path mistakes are auto-purged so a real key in workspace `.env` / shell wins without manual Clear. Save/verify shows a clear hint to use `clawagents.pythonPath` for the interpreter.
