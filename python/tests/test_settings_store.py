@@ -204,5 +204,37 @@ class TestSettingsRoundTrip(unittest.TestCase):
         )
 
 
+class TestDefaultModelForProvider(unittest.TestCase):
+    """This resolver decides what a fresh install talks to, and what a
+    vendor-mismatched model gets healed to. It has to agree with the webview's
+    ``PREFERRED_OPENAI_MODEL`` or the two layers fight over the saved value."""
+
+    def test_openai_defaults_to_terra(self):
+        self.assertEqual(
+            settings_store._default_model_for_provider("openai"), "gpt-5.6-terra"
+        )
+
+    def test_the_unknown_provider_fallback_matches_openai(self):
+        """The catch-all is an OpenAI id, so it must not lag behind the
+        OpenAI branch when the default moves."""
+        self.assertEqual(
+            settings_store._default_model_for_provider("something-else"),
+            settings_store._default_model_for_provider("openai"),
+        )
+
+    def test_the_default_is_a_real_openai_model(self):
+        """A default that fails its own vendor check would be healed away
+        immediately, looping the user back to a different model."""
+        default = settings_store._default_model_for_provider("openai")
+        self.assertTrue(settings_store._model_fits_provider(default, "openai"))
+
+    def test_healing_a_mismatched_model_lands_on_the_default(self):
+        healed, changed = settings_store.heal_incompatible_model(
+            {"provider": "openai", "model": "llama3.1"}
+        )
+        self.assertTrue(changed)
+        self.assertEqual(healed["model"], "gpt-5.6-terra")
+
+
 if __name__ == "__main__":
     unittest.main()

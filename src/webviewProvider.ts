@@ -43,6 +43,7 @@ import type {
   ChatSummary,
   HostToWebview,
   InteractionStyle,
+  JobSummary,
   WebviewToHost,
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
@@ -96,6 +97,10 @@ const DOC_MIME: Record<string, string> = {
 };
 const MAX_PENDING_FILES = 4;
 const MAX_FILE_ATTACH_BYTES = 10 * 1024 * 1024;
+
+/** Background jobs run for minutes, so a slow poll is enough; it also only
+ *  runs while at least one job is alive. */
+const JOB_POLL_INTERVAL_MS = 3000;
 
 /** Warn once per session about a non-local base_url from workspace settings. */
 let warnedUntrustedBaseUrl = false;
@@ -153,6 +158,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   /** File attachments (PDF/DOCX) staged for the next send — same contract. */
   private pendingFiles: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   private readonly gateway: GatewayClient;
+  /** Background jobs are polled, not pushed: they outlive the run whose SSE
+   *  stream would have carried them, so there is no stream to listen on once
+   *  the turn that started them has ended. */
+  private jobPollTimer?: ReturnType<typeof setInterval>;
+  /** Jobs already announced in the transcript, so a finish is reported once. */
+  private readonly announcedJobs = new Set<string>();
+  private lastRunningJobs = 0;
   /** Serialize settings saves — concurrent autosaves + live /providers probes
    *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
   private saveSettingsChain: Promise<void> = Promise.resolve();
@@ -618,6 +630,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     // reload while the attachments stay staged host-side (and would still send).
     this.postImagesPending();
     this.postFilesPending();
+    // A reload must not hide a job that is still running, and pinned context
+    // lives on disk rather than in webview state.
+    try {
+      const pinned = await this.gateway.getPinnedContext();
+      this.post({ type: "pinned", text: pinned.text ?? "" });
+    } catch {
+      /* sidecar may still be starting */
+    }
+    await this.refreshJobs();
     if (!this.chatId) {
       return;
     }
@@ -789,6 +810,47 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "cancel":
         await this.cancelTask();
+        break;
+      case "list_jobs":
+        await this.refreshJobs();
+        break;
+      case "job_output":
+        try {
+          const res = await this.gateway.jobOutput(msg.jobId);
+          if (res.ok && res.job) this.post({ type: "job_output", job: res.job });
+          else this.post({ type: "error", message: res.error ?? "Job not found." });
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
+      case "stop_job":
+        try {
+          await this.gateway.stopJob(msg.jobId);
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        await this.refreshJobs();
+        break;
+      case "report_job":
+        await this.reportJob(msg.jobId);
+        break;
+      case "load_pinned":
+        try {
+          const res = await this.gateway.getPinnedContext();
+          this.post({ type: "pinned", text: res.text ?? "" });
+        } catch {
+          /* sidecar not up yet; the webview keeps its local copy */
+        }
+        break;
+      case "save_pinned":
+        try {
+          const res = await this.gateway.setPinnedContext(msg.text);
+          // Echo the stored value: the sidecar trims and may truncate it.
+          this.post({ type: "pinned", text: res.text ?? "" });
+          if (!res.ok && res.error) this.post({ type: "error", message: res.error });
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
         break;
       case "permission":
         try {
@@ -2361,6 +2423,114 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this.autoOpen.dispose();
+    this.stopJobPolling();
+  }
+
+  // ─── background jobs ────────────────────────────────────────────────────
+  //
+  // A command that outlives its foreground wait keeps running as a detached
+  // job, and the turn that started it normally ends first. The agent side is
+  // handled by job ownership carrying across turns; this side exists so the
+  // *user* can see the job without having to ask, and can pull its result
+  // back into the conversation once it lands.
+
+  private startJobPolling(): void {
+    if (this.jobPollTimer) return;
+    this.jobPollTimer = setInterval(() => {
+      void this.refreshJobs();
+    }, JOB_POLL_INTERVAL_MS);
+  }
+
+  private stopJobPolling(): void {
+    if (!this.jobPollTimer) return;
+    clearInterval(this.jobPollTimer);
+    this.jobPollTimer = undefined;
+  }
+
+  private async refreshJobs(): Promise<void> {
+    if (!this.view) return;
+    let jobs: JobSummary[] = [];
+    let running = 0;
+    try {
+      const res = await this.gateway.listJobs(this.chatId);
+      if (!res.ok) return;
+      jobs = res.jobs ?? [];
+      running = res.running ?? 0;
+    } catch {
+      // Sidecar restarting takes every job with it; stop burning polls.
+      this.stopJobPolling();
+      return;
+    }
+    this.post({ type: "jobs", jobs, running });
+
+    for (const job of jobs) {
+      if (job.running || this.announcedJobs.has(job.job_id)) continue;
+      this.announcedJobs.add(job.job_id);
+      const verdict = job.cancelled
+        ? "stopped"
+        : job.exit_code === 0
+          ? "finished"
+          : `failed (exit ${job.exit_code})`;
+      this.post({
+        type: "status",
+        message: `Background job ${verdict}: ${job.command}`,
+      });
+    }
+
+    // Nothing left to watch — idle out rather than polling a static list.
+    if (running === 0 && this.lastRunningJobs === 0) this.stopJobPolling();
+    else if (running > 0) this.startJobPolling();
+    this.lastRunningJobs = running;
+  }
+
+  /**
+   * Feed a finished job's result back to the agent.
+   *
+   * Redirects into the live run when there is one, so the agent picks it up in
+   * the same turn; otherwise it queues as the next turn's prompt. Either way
+   * the outcome reaches the model instead of dying in the sidecar.
+   */
+  private async reportJob(jobId: string): Promise<void> {
+    let detail: (JobSummary & { stdout: string; stderr: string }) | undefined;
+    try {
+      const res = await this.gateway.jobOutput(jobId);
+      detail = res.ok ? res.job : undefined;
+    } catch {
+      detail = undefined;
+    }
+    if (!detail) {
+      this.post({ type: "error", message: "That background job is no longer available." });
+      return;
+    }
+    const state = detail.running
+      ? "is still running"
+      : detail.cancelled
+        ? "was stopped"
+        : `exited with code ${detail.exit_code}`;
+    const tail = (text: string, limit = 4000): string =>
+      text.length <= limit ? text : `[…truncated]\n${text.slice(-limit)}`;
+    const prompt = [
+      `Background job \`${detail.job_id}\` ${state}.`,
+      `Command: \`${detail.command}\``,
+      detail.stdout.trim() ? `stdout:\n\`\`\`\n${tail(detail.stdout)}\n\`\`\`` : "",
+      detail.stderr.trim() ? `stderr:\n\`\`\`\n${tail(detail.stderr)}\n\`\`\`` : "",
+      "Continue from this result.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    try {
+      const res = await this.gateway.interject(prompt, this.chatId);
+      if (res.ok && (res.applied ?? 0) > 0) {
+        this.post({ type: "status", message: "Job result sent to the running agent" });
+        return;
+      }
+    } catch {
+      /* fall through to queueing */
+    }
+    this.queue.push(prompt);
+    this.post({ type: "status", message: "Job result queued for the next turn" });
+    this.drainQueueIfIdle(false);
   }
 
   private async diffSnapshot(
@@ -2555,6 +2725,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     } finally {
       this.abort = undefined;
+      // A job the turn detached is now unattended: the run's event stream is
+      // closed, so polling is the only thing that will notice it finishing.
+      void this.refreshJobs();
       // cancelTask owns queue drain while Stop is in flight.
       if (this.cancelling) {
         return;

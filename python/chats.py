@@ -1298,7 +1298,7 @@ async def run_chat_turn(
         msg = (
             f"Model '{effective_model}' looks like an Ollama id, but Provider "
             "is OpenAI (api.openai.com). Pick an OpenAI model in Settings "
-            "(e.g. gpt-5.6-luna), or switch Provider to Ollama."
+            "(e.g. gpt-5.6-terra), or switch Provider to Ollama."
         )
         on_event({"kind": "error", "text": msg})
         append_ui_event(chat_id, {"kind": "error", "text": msg})
@@ -1759,6 +1759,16 @@ async def run_chat_turn(
             # Sidecar has no stdin — replace CLI ask_user with webview HITL.
             agent.tools.register(ask_user_factory())
 
+        # A new registry per turn means background jobs started earlier are no
+        # longer recognised as this chat's, so their completion would never be
+        # announced. Re-claim them before the first tool call.
+        try:
+            import jobs as _jobs
+
+            _jobs.attach_registry(agent.tools, chat_id)
+        except Exception:  # noqa: BLE001 - never fail a turn over job bookkeeping
+            pass
+
         invoke_kwargs: dict[str, Any] = {
             "on_event": _on_legacy_event,
             "on_stream_event": _on_stream_event,
@@ -1800,7 +1810,17 @@ async def run_chat_turn(
                 },
             )
 
-        res = await agent.invoke(augmented, **invoke_kwargs)
+        try:
+            res = await agent.invoke(augmented, **invoke_kwargs)
+        finally:
+            # Also on cancel/error: a job the turn started outlives the turn,
+            # and a stopped turn is precisely when the user still wants it.
+            try:
+                import jobs as _jobs
+
+                _jobs.harvest_registry(agent.tools, chat_id)
+            except Exception:  # noqa: BLE001
+                pass
         if obs_store is not None:
             try:
                 saved_path = obs_store.auto_save(chat_id=chat_id)

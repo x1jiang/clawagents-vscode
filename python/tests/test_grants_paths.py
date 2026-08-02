@@ -168,9 +168,9 @@ class GrantPathTests(unittest.TestCase):
         self.assertEqual(pricing_mod.price_for("claude-opus-4-8"), (5.0, 25.0))
         # Mantle OpenAI on Bedrock ~+10% vs direct API.
         self.assertEqual(
-            pricing_mod.price_for("openai.gpt-5.6-luna"), (1.1, 6.6)
+            pricing_mod.price_for("openai.gpt-5.6-luna"), (0.22, 1.32)
         )
-        self.assertEqual(pricing_mod.price_for("gpt-5.6-luna"), (1.0, 6.0))
+        self.assertEqual(pricing_mod.price_for("gpt-5.6-luna"), (0.2, 1.2))
         # Mantle open catalog — AWS Bedrock US Standard list prices.
         self.assertEqual(pricing_mod.price_for("xai.grok-4.3"), (1.25, 2.5))
         self.assertEqual(pricing_mod.price_for("deepseek.v3.2"), (0.62, 1.85))
@@ -196,66 +196,66 @@ class GrantPathTests(unittest.TestCase):
         import pricing as pricing_mod  # noqa: WPS433
 
         # Stay under the 272K long-context cliff so base rates apply.
-        # All uncached: 200k @ $1/M = $0.20
+        # All uncached: 200k @ $0.20/M = $0.04
         full = pricing_mod.estimate_usd(
             "gpt-5.6-luna", prompt_tokens=200_000, completion_tokens=0
         )
-        self.assertAlmostEqual(full or 0, 0.20, places=4)
-        # Fully cached read: 200k @ $0.10/M = $0.02
+        self.assertAlmostEqual(full or 0, 0.04, places=4)
+        # Fully cached read: 200k @ $0.02/M = $0.004
         cached = pricing_mod.estimate_usd(
             "gpt-5.6-luna",
             prompt_tokens=200_000,
             completion_tokens=0,
             cached_input_tokens=200_000,
         )
-        self.assertAlmostEqual(cached or 0, 0.02, places=4)
-        # Half cached: 100k@$1 + 100k@$0.10 = $0.11
+        self.assertAlmostEqual(cached or 0, 0.004, places=4)
+        # Half cached: 100k@$0.20 + 100k@$0.02 = $0.022
         half = pricing_mod.estimate_usd(
             "gpt-5.6-luna",
             prompt_tokens=200_000,
             completion_tokens=0,
             cached_input_tokens=100_000,
         )
-        self.assertAlmostEqual(half or 0, 0.11, places=4)
-        # Cache write premium: 200k uncached + 200k creation × ($1.25−$1) = $0.25
+        self.assertAlmostEqual(half or 0, 0.022, places=4)
+        # Cache write premium: 200k uncached + 200k creation × ($0.25−$0.20) = $0.05
         write = pricing_mod.estimate_usd(
             "gpt-5.6-luna",
             prompt_tokens=200_000,
             completion_tokens=0,
             cache_creation_tokens=200_000,
         )
-        self.assertAlmostEqual(write or 0, 0.25, places=4)
+        self.assertAlmostEqual(write or 0, 0.05, places=4)
 
     def test_pricing_long_context_luna(self) -> None:
         for mod in ("pricing",):
             sys.modules.pop(mod, None)
         import pricing as pricing_mod  # noqa: WPS433
 
-        # At/under 272K: short-context rates (1M-scale would be $0.272).
+        # At/under 272K: short-context rates (1M-scale would be $0.20).
         short = pricing_mod.estimate_usd(
             "gpt-5.6-luna", prompt_tokens=272_000, completion_tokens=0
         )
-        self.assertAlmostEqual(short or 0, 0.272, places=4)
-        # Above 272K: 2× input for the full request → 300k @ $2/M = $0.60
+        self.assertAlmostEqual(short or 0, 0.0544, places=4)
+        # Above 272K: 2× input for the full request → 300k @ $0.40/M = $0.12
         long_in = pricing_mod.estimate_usd(
             "gpt-5.6-luna", prompt_tokens=300_000, completion_tokens=0
         )
-        self.assertAlmostEqual(long_in or 0, 0.60, places=4)
-        # Output also 1.5×: 300k in @ $2 + 100k out @ $9 = $0.60 + $0.90
+        self.assertAlmostEqual(long_in or 0, 0.12, places=4)
+        # Output also 1.5×: 300k in @ $0.40 + 100k out @ $1.80 = $0.12 + $0.18
         long_both = pricing_mod.estimate_usd(
             "gpt-5.6-luna",
             prompt_tokens=300_000,
             completion_tokens=100_000,
         )
-        self.assertAlmostEqual(long_both or 0, 1.50, places=4)
-        # Cached long-context: 300k cached @ $0.20/M = $0.06
+        self.assertAlmostEqual(long_both or 0, 0.30, places=4)
+        # Cached long-context: 300k cached @ $0.04/M (2x $0.02) = $0.012
         long_cached = pricing_mod.estimate_usd(
             "gpt-5.6-luna",
             prompt_tokens=300_000,
             completion_tokens=0,
             cached_input_tokens=300_000,
         )
-        self.assertAlmostEqual(long_cached or 0, 0.06, places=4)
+        self.assertAlmostEqual(long_cached or 0, 0.012, places=4)
         # Non-GPT-5.6 models are unaffected.
         claude = pricing_mod.estimate_usd(
             "claude-sonnet-4-5", prompt_tokens=300_000, completion_tokens=0
@@ -321,13 +321,13 @@ class GrantPathTests(unittest.TestCase):
             "gpt-5.6-luna", prompt_tokens=150_000, completion_tokens=0
         )
         summed = (a or 0) + (b or 0)
-        # Each 150k @ $1/M = $0.15 → $0.30 total
-        self.assertAlmostEqual(summed, 0.30, places=4)
-        # Wrong approach: estimate on the sum would 2× → $0.60
+        # Each 150k @ $0.20/M = $0.03 → $0.06 total
+        self.assertAlmostEqual(summed, 0.06, places=4)
+        # Wrong approach: estimate on the sum would 2× → $0.12
         wrong = pricing_mod.estimate_usd(
             "gpt-5.6-luna", prompt_tokens=300_000, completion_tokens=0
         )
-        self.assertAlmostEqual(wrong or 0, 0.60, places=4)
+        self.assertAlmostEqual(wrong or 0, 0.12, places=4)
         self.assertLess(summed, (wrong or 0) - 0.01)
 
 

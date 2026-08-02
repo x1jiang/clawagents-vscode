@@ -27,7 +27,7 @@ export const LOCAL_DOCUMENT_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
-export const PREFERRED_OPENAI_MODEL = "gpt-5.6-luna";
+export const PREFERRED_OPENAI_MODEL = "gpt-5.6-terra";
 export const PREFERRED_GEMINI_MODEL = "gemini-3.5-flash";
 export const PREFERRED_EFFORT = "medium";
 
@@ -37,8 +37,8 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     id: "openai",
     name: "OpenAI",
     models: [
-      { id: PREFERRED_OPENAI_MODEL, label: "GPT-5.6 Luna" },
-      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+      { id: PREFERRED_OPENAI_MODEL, label: "GPT-5.6 Terra" },
+      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
       { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
       { id: "gpt-4o", label: "GPT-4o" },
     ],

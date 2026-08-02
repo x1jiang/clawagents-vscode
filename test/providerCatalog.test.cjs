@@ -92,6 +92,27 @@ test("modelFitsProvider rejects ollama leftovers on OpenAI", () => {
   assert.equal(mod.defaultModelForProvider("openai"), mod.PREFERRED_OPENAI_MODEL);
 });
 
+test("OpenAI defaults to GPT-5.6 Terra", () => {
+  // Must stay in step with settings_store._default_model_for_provider on the
+  // sidecar; if they disagree, the healer rewrites what the UI just picked.
+  assert.equal(mod.PREFERRED_OPENAI_MODEL, "gpt-5.6-terra");
+  assert.equal(mod.defaultModelForProvider("openai"), "gpt-5.6-terra");
+  // The unknown-provider fallback is an OpenAI id, so it moves too.
+  assert.equal(mod.defaultModelForProvider("nonesuch"), "gpt-5.6-terra");
+});
+
+test("the default OpenAI model is offered and correctly labelled", () => {
+  // The fallback list is what renders before the sidecar catalog arrives, so a
+  // stale label here mislabels the default model in the picker.
+  const openai = mod.FALLBACK_PROVIDERS.find((p) => p.id === "openai");
+  const hit = openai.models.filter((m) => m.id === mod.PREFERRED_OPENAI_MODEL);
+  assert.equal(hit.length, 1, "default must appear exactly once");
+  assert.equal(hit[0].label, "GPT-5.6 Terra");
+  assert.equal(mod.modelFitsProvider(mod.PREFERRED_OPENAI_MODEL, "openai"), true);
+  // Luna stays selectable, just no longer the default.
+  assert.ok(openai.models.some((m) => m.id === "gpt-5.6-luna"));
+});
+
 test("effectiveProviderLabel shows OpenAI for auto + gpt model", () => {
   assert.equal(
     mod.effectiveProviderLabel(

@@ -300,6 +300,11 @@ _ask_waiter = AskUserWaiter()
 
 # exit_plan_mode HITL — Approve / Request changes / Reject (desktop parity).
 PlanDecision = Literal["approve", "request_changes", "reject"]
+
+# How long a plan may sit unanswered before we stop waiting. This has to stay
+# below the registry's ceiling for human-gated tools, or that fires first and
+# the model gets a generic "tool timed out" instead of our reject-with-reason.
+PLAN_APPROVAL_TIMEOUT_S = 600.0
 _plan_lock = threading.Lock()
 _plan_pending: dict[str, Any] = {}  # None | asyncio.Future | str (pre-resolved)
 _plan_loops: dict[str, asyncio.AbstractEventLoop] = {}
@@ -319,7 +324,7 @@ class PlanApprovalWaiter:
         return request_id
 
     async def wait(
-        self, request_id: str, *, timeout: float = 600.0
+        self, request_id: str, *, timeout: float = PLAN_APPROVAL_TIMEOUT_S
     ) -> tuple[PlanDecision, str]:
         loop = asyncio.get_running_loop()
         with _plan_lock:
@@ -657,6 +662,10 @@ class CheckpointRestoreBody(BaseModel):
 class InterjectBody(BaseModel):
     text: str
     chat_id: str | None = None
+
+
+class PinnedBody(BaseModel):
+    text: str = ""
 
 
 class HunkActionBody(BaseModel):
@@ -1331,6 +1340,71 @@ def create_app() -> FastAPI:
         n = _interject_runs(body.text, chat_id=body.chat_id)
         return {"ok": True, "applied": n}
 
+    @app.get("/jobs")
+    async def jobs_list(request: Request, chat_id: str | None = None):
+        """Background jobs still running (or recently finished) in this sidecar."""
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        if chat_id:
+            bad = _validate_chat_id(chat_id)
+            if bad:
+                return bad
+        import jobs as _jobs
+
+        return {"ok": True, **_jobs.snapshot(chat_id)}
+
+    @app.get("/jobs/{job_id}")
+    async def jobs_output(job_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        import jobs as _jobs
+
+        try:
+            return {"ok": True, "job": _jobs.output(job_id)}
+        except KeyError as exc:
+            return Response(status_code=404, content=json.dumps({"error": str(exc)}))
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/jobs/{job_id}/stop")
+    async def jobs_stop(job_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        import jobs as _jobs
+
+        try:
+            return {"ok": True, "job": await _jobs.stop(job_id)}
+        except KeyError as exc:
+            return Response(status_code=404, content=json.dumps({"error": str(exc)}))
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/pinned")
+    async def pinned_get(request: Request):
+        """Always-on context the user pinned to the top of the chat."""
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        from clawagents.memory.rules import read_pinned_context
+
+        return {"ok": True, "text": read_pinned_context(str(WORKSPACE))}
+
+    @app.put("/pinned")
+    async def pinned_put(body: PinnedBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        from clawagents.memory.rules import write_pinned_context
+
+        try:
+            stored = write_pinned_context(body.text or "", str(WORKSPACE))
+        except OSError as exc:
+            return {"ok": False, "error": str(exc), "text": ""}
+        return {"ok": True, "text": stored}
+
     @app.get("/hunks")
     async def hunks_list(request: Request, path: str | None = None):
         denied = _auth_or_401(request)
@@ -1579,11 +1653,15 @@ def create_app() -> FastAPI:
             )
             try:
                 decision, comment = await _plan_waiter.wait(
-                    request_id, timeout=600.0
+                    request_id, timeout=PLAN_APPROVAL_TIMEOUT_S
                 )
             except asyncio.TimeoutError:
                 return PlanApprovalDecision(
-                    PlanApprovalAction.REJECT, comment="timeout"
+                    PlanApprovalAction.REJECT,
+                    comment=(
+                        "No response to the plan approval request. Report that "
+                        "nobody answered; do not treat it as approval."
+                    ),
                 )
             if decision == "approve":
                 with _run_lock:

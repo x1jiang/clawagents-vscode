@@ -6,8 +6,10 @@ export type {
   AutoApprove,
   ChatSummary,
   HostToWebview,
+  JobSummary,
   WebviewToHost,
 } from "../../src/protocol";
+export { PINNED_CONTEXT_MAX_CHARS, PLAN_FEEDBACK_MAX_CHARS } from "../../src/protocol";
 
 import type { WebviewToHost } from "../../src/protocol";
 

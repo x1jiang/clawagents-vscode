@@ -1,5 +1,10 @@
-Publisher **`clawagents`** · version **1.0.148**
+Publisher **`clawagents`** · version **1.0.150**
 
+- [x] GitHub release `v1.0.150` + VSIX (GPT-5.6 Terra is the default OpenAI model)
+      · Engine bump — requires clawagents **6.20.54**.
+- [x] GitHub release `v1.0.149` + VSIX (inline plan feedback, pinned context, background job visibility)
+- [x] clawagents **6.20.53** on GitHub + PyPI (human-gated tool timeouts, job labels/ownership, pinned context)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` available locally.
 - [x] GitHub release `v1.0.148` + VSIX (reject chat/error paste as API key)
 - [x] GitHub release `v1.0.147` + VSIX (reject path-as-API-key / auto-purge python.exe paste)
 - [x] GitHub release `v1.0.146` + VSIX (deferred tools + changelog fix + rewind branch summary)

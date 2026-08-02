@@ -12,11 +12,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   post,
+  PINNED_CONTEXT_MAX_CHARS,
+  PLAN_FEEDBACK_MAX_CHARS,
   type AgentMode,
   type AutoApprove,
   type ChatSummary,
   type HostToWebview,
   type InteractionStyle,
+  type JobSummary,
 } from "./vscodeApi";
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
@@ -91,6 +94,12 @@ type ChatItem =
       requestId: string;
       planText: string;
       resolved?: "approve" | "request_changes" | "reject";
+      /** Feedback composer state. Held here, not in component state, so it
+       *  survives the remount that loading older messages causes. */
+      feedbackOpen?: boolean;
+      feedbackDraft?: string;
+      /** Set when the run ended without this request being answered. */
+      stale?: boolean;
     };
 
 import {
@@ -186,10 +195,31 @@ function resolvePlan(
   setItems((prev) =>
     prev.map((it) =>
       it.kind === "plan_approval" && it.requestId === requestId
-        ? { ...it, resolved: decision }
+        ? { ...it, resolved: decision, feedbackOpen: false }
         : it,
     ),
   );
+}
+
+/**
+ * Retire approval cards the backend is no longer waiting on.
+ *
+ * A turn cannot finish while `exit_plan_mode` is genuinely blocked on a
+ * decision, so an unanswered card at the end of a run means the request died —
+ * the tool timed out, or the run was cancelled. Its buttons would post to a
+ * request id the sidecar has already discarded and get a silent 404, which
+ * looks identical to a plan that was approved and ignored.
+ */
+function markStalePlanApprovals(setItems: Dispatch<SetStateAction<ChatItem[]>>) {
+  setItems((prev) => {
+    let changed = false;
+    const next = prev.map((it) => {
+      if (it.kind !== "plan_approval" || it.resolved || it.stale) return it;
+      changed = true;
+      return { ...it, stale: true, feedbackOpen: false };
+    });
+    return changed ? next : prev;
+  });
 }
 
 function safeJson(value: unknown): string {
@@ -208,11 +238,253 @@ function looksLikeDiff(text: string): boolean {
   return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
 }
 
+type PinnedContextProps = {
+  text: string;
+  draft: string;
+  editing: boolean;
+  collapsed: boolean;
+  onDraft: (value: string) => void;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onToggleCollapse: () => void;
+};
+
+/**
+ * Always-on notes shown above the transcript.
+ *
+ * Anything written here is injected into every LLM round by the rules
+ * pipeline, which is the point: standing facts (which virtualenv, which uv
+ * environment, which skill to remember) stop being things you re-type each
+ * chat and stop being lost to compaction. It is deliberately small and
+ * collapsible, since it costs tokens on every request.
+ */
+const PinnedContext = memo(function PinnedContext({
+  text,
+  draft,
+  editing,
+  collapsed,
+  onDraft,
+  onEdit,
+  onCancel,
+  onSave,
+  onToggleCollapse,
+}: PinnedContextProps) {
+  const remaining = PINNED_CONTEXT_MAX_CHARS - draft.length;
+
+  if (editing) {
+    return (
+      <div className="banner pinned-banner pinned-editing">
+        <div className="pinned-head">
+          <IconPin size={13} className="pinned-icon" />
+          <strong className="pinned-title">Always applies</strong>
+          <span className={remaining < 0 ? "pinned-count over" : "pinned-count"}>
+            {remaining} left
+          </span>
+        </div>
+        <textarea
+          className="pinned-input"
+          value={draft}
+          autoFocus
+          rows={4}
+          maxLength={PINNED_CONTEXT_MAX_CHARS}
+          placeholder={
+            "Sent with every message. For example:\n"
+            + "• Use the .venv at repo root (uv sync, never pip)\n"
+            + "• Always follow the keep-track skill for long runs"
+          }
+          onChange={(e) => onDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter inserts a newline: this is a list, not a chat composer.
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              onSave();
+            }
+          }}
+        />
+        <div className="pinned-actions">
+          <button type="button" className="primary tiny" onClick={onSave}>
+            Save
+          </button>
+          <button type="button" className="ghost tiny" onClick={onCancel}>
+            Cancel
+          </button>
+          <span className="pinned-hint">⌘/Ctrl+Enter saves · Esc cancels</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!text.trim()) {
+    return (
+      <div className="banner pinned-banner pinned-empty">
+        <IconPin size={13} className="pinned-icon" />
+        <button type="button" className="linkish" onClick={onEdit}>
+          Pin always-on context
+        </button>
+        <span className="pinned-hint">venv, uv env, skills to always remember…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="banner pinned-banner">
+      <div className="pinned-head">
+        <IconPin size={13} className="pinned-icon" />
+        <strong className="pinned-title">Always applies</strong>
+        <button
+          type="button"
+          className="ghost tiny"
+          onClick={onToggleCollapse}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Show pinned context" : "Hide pinned context"}
+        >
+          {collapsed ? "Show" : "Hide"}
+        </button>
+        <button type="button" className="ghost tiny" onClick={onEdit} title="Edit pinned context">
+          Edit
+        </button>
+      </div>
+      {!collapsed && <pre className="pinned-body">{text.trim()}</pre>}
+    </div>
+  );
+});
+
+type BackgroundJobsProps = {
+  jobs: JobSummary[];
+  open: boolean;
+  detail: (JobSummary & { stdout: string; stderr: string }) | null;
+  onToggle: () => void;
+  onShow: (jobId: string) => void;
+  onStop: (jobId: string) => void;
+  onReport: (jobId: string) => void;
+  onCloseDetail: () => void;
+};
+
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/**
+ * Detached long-running commands.
+ *
+ * A command that outlives its foreground wait keeps running with no turn
+ * attached to it, so without this the only trace is a job id buried in a tool
+ * result. "Send to agent" is the important control: it puts the finished job's
+ * output back into the conversation, which is otherwise where the result of a
+ * long run goes to die.
+ */
+const BackgroundJobs = memo(function BackgroundJobs({
+  jobs,
+  open,
+  detail,
+  onToggle,
+  onShow,
+  onStop,
+  onReport,
+  onCloseDetail,
+}: BackgroundJobsProps) {
+  const running = jobs.filter((j) => j.running);
+  const finished = jobs.filter((j) => !j.running);
+  const failed = finished.filter((j) => !j.cancelled && j.exit_code !== 0);
+
+  return (
+    <div className="banner jobs-banner">
+      <button
+        type="button"
+        className="jobs-summary"
+        onClick={onToggle}
+        aria-expanded={open}
+        title="Background jobs started from this workspace"
+      >
+        {running.length > 0 ? <span className="dot running" /> : <span className="dot done" />}
+        <span>
+          {running.length > 0
+            ? `${running.length} background job${running.length > 1 ? "s" : ""} running`
+            : `${finished.length} background job${finished.length > 1 ? "s" : ""} finished`}
+        </span>
+        {failed.length > 0 && <span className="fail">{failed.length} failed</span>}
+        <span className="jobs-caret">{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <ul className="jobs-list">
+          {jobs.map((job) => (
+            <li key={job.job_id} className="jobs-row">
+              <span
+                className={`dot ${job.running ? "running" : "done"}${
+                  !job.running && !job.cancelled && job.exit_code !== 0 ? " fail-dot" : ""
+                }`}
+              />
+              <code className="jobs-cmd" title={job.command}>
+                {job.command}
+              </code>
+              <span className="jobs-meta">
+                {job.running
+                  ? formatElapsed(job.elapsed_ms)
+                  : job.cancelled
+                    ? "stopped"
+                    : `exit ${job.exit_code}`}
+              </span>
+              <span className="jobs-row-actions">
+                <button type="button" className="ghost tiny" onClick={() => onShow(job.job_id)}>
+                  Output
+                </button>
+                {job.running ? (
+                  <button type="button" className="ghost tiny" onClick={() => onStop(job.job_id)}>
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="ghost tiny"
+                    onClick={() => onReport(job.job_id)}
+                    title="Put this job's result back into the conversation"
+                  >
+                    Send to agent
+                  </button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {detail && (
+        <div className="jobs-detail">
+          <div className="jobs-detail-head">
+            <code>{detail.command}</code>
+            <button type="button" className="ghost tiny" onClick={onCloseDetail}>
+              ✕
+            </button>
+          </div>
+          {detail.stdout.trim() && <pre className="jobs-output">{detail.stdout.trimEnd()}</pre>}
+          {detail.stderr.trim() && (
+            <pre className="jobs-output jobs-stderr">{detail.stderr.trimEnd()}</pre>
+          )}
+          {!detail.stdout.trim() && !detail.stderr.trim() && (
+            <div className="jobs-hint">No output captured yet.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
 type TranscriptItemProps = {
   item: ChatItem;
   showStreamingCursor: boolean;
   setItems: Dispatch<SetStateAction<ChatItem[]>>;
   onAskDraftChange: (requestId: string, draft: string) => void;
+  onPlanFeedbackChange: (requestId: string, draft: string) => void;
+  onPlanFeedbackToggle: (requestId: string, open: boolean) => void;
 };
 
 const TranscriptItem = memo(function TranscriptItem({
@@ -220,6 +492,8 @@ const TranscriptItem = memo(function TranscriptItem({
   showStreamingCursor,
   setItems,
   onAskDraftChange,
+  onPlanFeedbackChange,
+  onPlanFeedbackToggle,
 }: TranscriptItemProps) {
   return (
     <div className={`item item-${item.kind}`}>
@@ -348,6 +622,75 @@ const TranscriptItem = memo(function TranscriptItem({
                   ? "Changes requested"
                   : "Rejected"}
             </div>
+          ) : item.stale ? (
+            <div className="muted">
+              This request is no longer waiting for an answer — the run ended
+              first. Send a message to pick the plan back up.
+            </div>
+          ) : item.feedbackOpen ? (
+            <div className="plan-feedback">
+              <label className="plan-feedback-label" htmlFor={`pf-${item.requestId}`}>
+                What should change before this runs?
+              </label>
+              <textarea
+                id={`pf-${item.requestId}`}
+                className="ask-input plan-feedback-input"
+                rows={4}
+                autoFocus
+                maxLength={PLAN_FEEDBACK_MAX_CHARS}
+                value={item.feedbackDraft || ""}
+                placeholder={
+                  "The plan comes back revised — you're not editing it here.\n"
+                  + "• Use the existing .venv, don't create one\n"
+                  + "• Drop step 3, that table is already validated\n"
+                  + "• Confirm the cohort count before extracting"
+                }
+                onChange={(e) => onPlanFeedbackChange(item.requestId, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    onPlanFeedbackToggle(item.requestId, false);
+                  } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    if (item.feedbackDraft?.trim()) {
+                      resolvePlan(
+                        item.requestId,
+                        "request_changes",
+                        setItems,
+                        item.feedbackDraft.trim(),
+                      );
+                    }
+                  }
+                }}
+              />
+              <div className="perm-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!item.feedbackDraft?.trim()}
+                  onClick={() =>
+                    resolvePlan(
+                      item.requestId,
+                      "request_changes",
+                      setItems,
+                      (item.feedbackDraft || "").trim(),
+                    )
+                  }
+                >
+                  Send feedback
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => onPlanFeedbackToggle(item.requestId, false)}
+                >
+                  Cancel
+                </button>
+                <span className="plan-feedback-hint">
+                  ⌘/Ctrl+Enter sends · Esc closes · stays in plan mode
+                </span>
+              </div>
+            </div>
           ) : (
             <div className="perm-actions">
               <button
@@ -360,11 +703,7 @@ const TranscriptItem = memo(function TranscriptItem({
               <button
                 type="button"
                 className="ghost"
-                onClick={() => {
-                  const comment =
-                    window.prompt("What should change in the plan?") || "";
-                  resolvePlan(item.requestId, "request_changes", setItems, comment);
-                }}
+                onClick={() => onPlanFeedbackToggle(item.requestId, true)}
               >
                 Request changes
               </button>
@@ -538,6 +877,18 @@ export function App() {
     runCostUsd?: number;
   }>({});
   const [compactPhase, setCompactPhase] = useState<string | undefined>();
+  // Always-on context the user pinned above the chat. `pinnedText` is what the
+  // host has stored; `pinnedDraft` is the in-progress edit, kept separate so a
+  // host echo cannot overwrite what is being typed.
+  const [pinnedText, setPinnedText] = useState("");
+  const [pinnedDraft, setPinnedDraft] = useState("");
+  const [pinnedEditing, setPinnedEditing] = useState(false);
+  const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
+  const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [jobsOpen, setJobsOpen] = useState(false);
+  const [jobDetail, setJobDetail] = useState<
+    (JobSummary & { stdout: string; stderr: string }) | null
+  >(null);
   const [checkpoints, setCheckpoints] = useState<
     Array<Record<string, unknown>>
   >([]);
@@ -582,6 +933,24 @@ export function App() {
   const handleAskDraftChange = useCallback((requestId: string, draft: string) => {
     setItems((prev) =>
       prev.map((it) => (it.kind === "ask" && it.requestId === requestId ? { ...it, draft } : it)),
+    );
+  }, []);
+  const handlePlanFeedbackChange = useCallback((requestId: string, draft: string) => {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.kind === "plan_approval" && it.requestId === requestId
+          ? { ...it, feedbackDraft: draft }
+          : it,
+      ),
+    );
+  }, []);
+  const handlePlanFeedbackToggle = useCallback((requestId: string, open: boolean) => {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.kind === "plan_approval" && it.requestId === requestId
+          ? { ...it, feedbackOpen: open }
+          : it,
+      ),
     );
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1268,6 +1637,28 @@ export function App() {
           }
           break;
         }
+        case "pinned": {
+          setPinnedText(msg.text || "");
+          // Do not clobber an edit in flight — the host echoes on every save,
+          // and the user may already be typing the next revision.
+          setPinnedEditing((editing) => {
+            if (!editing) setPinnedDraft(msg.text || "");
+            return editing;
+          });
+          break;
+        }
+        case "jobs": {
+          setJobs(msg.jobs || []);
+          // Auto-close once nothing is left to watch, but never yank the panel
+          // away while a job the user may want to inspect is still listed.
+          if (!(msg.jobs || []).length) setJobsOpen(false);
+          break;
+        }
+        case "job_output": {
+          setJobDetail(msg.job);
+          setJobsOpen(true);
+          break;
+        }
         case "checkpoint": {
           if (msg.sha) {
             setCheckpoints((prev) => {
@@ -1307,6 +1698,7 @@ export function App() {
         case "done": {
           setBusy(false);
           streamingRef.current = false;
+          markStalePlanApprovals(setItems);
           let finalUsage = runUsageRef.current;
           let serverSession: number | undefined = msg.sessionCostUsd;
           let serverRun: number | undefined = msg.runCostUsd;
@@ -1368,6 +1760,7 @@ export function App() {
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
+          markStalePlanApprovals(setItems);
           commitRunCost(runUsageRef.current);
           // A failed settings save posts type:"error" without saveOutcome —
           // clear the sticky pending patch so later Settings edits can save.
@@ -1386,6 +1779,7 @@ export function App() {
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
+          markStalePlanApprovals(setItems);
           commitRunCost(runUsageRef.current);
           setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
           break;
@@ -2617,6 +3011,44 @@ export function App() {
             </button>
           ))}
         </nav>
+        {panel === "chat" && (
+          <PinnedContext
+            text={pinnedText}
+            draft={pinnedDraft}
+            editing={pinnedEditing}
+            collapsed={pinnedCollapsed}
+            onDraft={setPinnedDraft}
+            onEdit={() => {
+              setPinnedDraft(pinnedText);
+              setPinnedEditing(true);
+              setPinnedCollapsed(false);
+            }}
+            onCancel={() => {
+              setPinnedDraft(pinnedText);
+              setPinnedEditing(false);
+            }}
+            onSave={() => {
+              post({ type: "save_pinned", text: pinnedDraft.slice(0, PINNED_CONTEXT_MAX_CHARS) });
+              setPinnedEditing(false);
+            }}
+            onToggleCollapse={() => setPinnedCollapsed((v) => !v)}
+          />
+        )}
+        {panel === "chat" && jobs.length > 0 && (
+          <BackgroundJobs
+            jobs={jobs}
+            open={jobsOpen}
+            detail={jobDetail}
+            onToggle={() => {
+              setJobsOpen((v) => !v);
+              post({ type: "list_jobs" });
+            }}
+            onShow={(jobId) => post({ type: "job_output", jobId })}
+            onStop={(jobId) => post({ type: "stop_job", jobId })}
+            onReport={(jobId) => post({ type: "report_job", jobId })}
+            onCloseDetail={() => setJobDetail(null)}
+          />
+        )}
         {forkNotice && panel === "chat" && (
           <div className="banner info fork-banner">
             <IconFork size={14} className="fork-banner-icon" />
@@ -4551,6 +4983,8 @@ export function App() {
                   item={item}
                   setItems={setItems}
                   onAskDraftChange={handleAskDraftChange}
+                  onPlanFeedbackChange={handlePlanFeedbackChange}
+                  onPlanFeedbackToggle={handlePlanFeedbackToggle}
                   showStreamingCursor={
                     busy && streamingRef.current && absoluteIndex === items.length - 1
                   }
@@ -5326,6 +5760,27 @@ function IconFork({ size = 14, className = "" }: { size?: number; className?: st
       <path d="M 2 8 H 5.5 L 11 2.5 M 5.5 8 L 11 13.5" />
       <path d="M 7.5 2.5 H 11 V 6" />
       <path d="M 7.5 13.5 H 11 V 10" />
+    </svg>
+  );
+}
+
+function IconPin({ size = 14, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      style={{ display: "inline-block", verticalAlign: "middle" }}
+    >
+      <path d="M6 1.75h4l-.6 3.1 2.1 2.4H4.5l2.1-2.4L6 1.75Z" />
+      <path d="M8 7.25v7" />
     </svg>
   );
 }

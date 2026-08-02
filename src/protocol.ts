@@ -272,7 +272,30 @@ export type HostToWebview =
   | {
       type: "stranded_interject";
       prompts: string[];
-    };
+    }
+  | {
+      /** Background jobs still alive in the sidecar (long runs that outlived a turn). */
+      type: "jobs";
+      jobs: JobSummary[];
+      running: number;
+    }
+  | { type: "job_output"; job: JobSummary & { stdout: string; stderr: string } }
+  | { type: "pinned"; text: string };
+
+/** A detached long-running command, as surfaced to the chat header. */
+export type JobSummary = {
+  job_id: string;
+  chat_id: string | null;
+  command: string;
+  cwd: string | null;
+  pid: number | null;
+  running: boolean;
+  exit_code: number | null;
+  cancelled: boolean;
+  elapsed_ms: number;
+  started_at: number | null;
+  ended_at: number | null;
+};
 
 export type WebviewToHost =
   | { type: "ready" }
@@ -404,14 +427,31 @@ export type WebviewToHost =
       target?: "composer" | "bug_report";
       /** Re-show mic QuickPick (e.g. Alt/⌥+Mic). Default: reuse session mic. */
       forcePick?: boolean;
-    };
+    }
+  | { type: "list_jobs" }
+  | { type: "job_output"; jobId: string }
+  | { type: "stop_job"; jobId: string }
+  | { type: "report_job"; jobId: string }
+  | { type: "load_pinned" }
+  | { type: "save_pinned"; text: string };
 
 const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "cancel", "clear", "new_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
   "load_stats", "bug_report_capture_screenshot", "load_older_chat",
+  "list_jobs", "load_pinned",
 ]);
+
+/** Pinned context rides every LLM round, so cap it well below a rules budget. */
+export const PINNED_CONTEXT_MAX_CHARS = 4000;
+
+/**
+ * Plan feedback is a note about a plan, not a replacement for it — the model
+ * revises `plan.md` from this. Generous enough for a numbered list of changes,
+ * bounded so it can't crowd out the plan itself in the next round.
+ */
+export const PLAN_FEEDBACK_MAX_CHARS = 4000;
 
 const GRAPHIFY_ACTIONS = new Set([
   "status",
@@ -498,7 +538,7 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
     case "plan_approval":
       return opaqueId(value.requestId)
         && ["approve", "request_changes", "reject"].includes(String(value.decision))
-        && (value.comment === undefined || optionalText(value.comment))
+        && optionalText(value.comment, PLAN_FEEDBACK_MAX_CHARS)
         ? value as WebviewToHost : undefined;
     case "graphify_action":
       return GRAPHIFY_ACTIONS.has(String(value.action))
@@ -573,6 +613,10 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
     case "interject":
       return text(value.text) && optionalText(value.chatId, 128)
         ? value as WebviewToHost : undefined;
+    case "job_output": case "stop_job": case "report_job":
+      return opaqueId(value.jobId) ? value as WebviewToHost : undefined;
+    case "save_pinned":
+      return text(value.text, PINNED_CONTEXT_MAX_CHARS) ? value as WebviewToHost : undefined;
     case "save_settings":
       return record(value.settings)
         && typeof value.revision === "number"

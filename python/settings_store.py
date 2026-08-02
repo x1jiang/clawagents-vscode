@@ -230,7 +230,7 @@ def _looks_like_ollama_local_id(model: str) -> bool:
 def _default_model_for_provider(provider: str) -> str:
     p = (provider or "").strip().lower()
     if p == "openai":
-        return "gpt-5.6-luna"
+        return "gpt-5.6-terra"
     if p == "gemini":
         return "gemini-3.5-flash"
     if p == "anthropic":
@@ -241,7 +241,7 @@ def _default_model_for_provider(provider: str) -> str:
         return "grok-4.5"
     if p == "bedrock":
         return "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-    return "gpt-5.6-luna"
+    return "gpt-5.6-terra"
 
 
 def _model_fits_provider(model: str, provider: str) -> bool:

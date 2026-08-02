@@ -38,14 +38,15 @@ assert.strictEqual(typeof pricing.estimateCostUsd, "function");
 
 // Under cliff
 const short = pricing.estimateCostUsd("gpt-5.6-luna", 200_000, 0);
-assert.ok(Math.abs(short - 0.2) < 1e-9);
+// 200K @ $0.20/M (July 30 2026 cut: was $1/M)
+assert.ok(Math.abs(short - 0.04) < 1e-9);
 
 // Per-request sum of two 150K ≠ cumulative 300K long-context
 const a = pricing.estimateCostUsd("gpt-5.6-luna", 150_000, 0);
 const b = pricing.estimateCostUsd("gpt-5.6-luna", 150_000, 0);
-assert.ok(Math.abs(a + b - 0.3) < 1e-9);
+assert.ok(Math.abs(a + b - 0.06) < 1e-9);
 const wrong = pricing.estimateCostUsd("gpt-5.6-luna", 300_000, 0);
-assert.ok(Math.abs(wrong - 0.6) < 1e-9);
+assert.ok(Math.abs(wrong - 0.12) < 1e-9);
 assert.ok(a + b < wrong - 0.01);
 
 console.log("pricingImport.test.cjs: ok");

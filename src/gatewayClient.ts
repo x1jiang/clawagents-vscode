@@ -1,7 +1,14 @@
 import * as http from "http";
 import * as vscode from "vscode";
 import type { SidecarHandle } from "./sidecar";
-import type { AgentMode, AutoApprove, ChatSummary, HostToWebview, InteractionStyle } from "./protocol";
+import type {
+  AgentMode,
+  AutoApprove,
+  ChatSummary,
+  HostToWebview,
+  InteractionStyle,
+  JobSummary,
+} from "./protocol";
 
 export type StreamHandlers = {
   onEvent: (msg: HostToWebview) => void;
@@ -769,6 +776,44 @@ export class GatewayClient {
       text,
       ...(chatId ? { chat_id: chatId } : {}),
     });
+  }
+
+  listJobs(chatId?: string) {
+    const q = chatId ? `?chat_id=${encodeURIComponent(chatId)}` : "";
+    return requestJson<{ ok: boolean; jobs?: JobSummary[]; running?: number }>(
+      this.requireHandle(),
+      "GET",
+      `/jobs${q}`,
+    );
+  }
+
+  jobOutput(jobId: string) {
+    return requestJson<{
+      ok: boolean;
+      job?: JobSummary & { stdout: string; stderr: string };
+      error?: string;
+    }>(this.requireHandle(), "GET", `/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  stopJob(jobId: string) {
+    return requestJson<{ ok: boolean; job?: JobSummary; error?: string }>(
+      this.requireHandle(),
+      "POST",
+      `/jobs/${encodeURIComponent(jobId)}/stop`,
+    );
+  }
+
+  getPinnedContext() {
+    return requestJson<{ ok: boolean; text?: string }>(this.requireHandle(), "GET", "/pinned");
+  }
+
+  setPinnedContext(text: string) {
+    return requestJson<{ ok: boolean; text?: string; error?: string }>(
+      this.requireHandle(),
+      "PUT",
+      "/pinned",
+      { text },
+    );
   }
 
   listHunks(path?: string) {

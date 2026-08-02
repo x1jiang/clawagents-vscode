@@ -1,3 +1,21 @@
+## 1.0.151
+
+- **Requires clawagents 6.20.54**, which fixes three engine-level problems the extension sits on top of. Writing a session log was quadratic in its own size — every event re-read and rewrote the whole file, roughly 2s of I/O once a log reached a few MB, on the turn's critical path; it is now a real append and ~20× faster. A skill installed with `marketplace_install` was written to `.clawagents/skills` and then never discovered, so the install silently did nothing. And a run ending in plain prose recorded no assistant message, which is the gap this extension had been papering over with its own safety net.
+- No extension-side behaviour changes.
+
+## 1.0.150
+
+- **GPT-5.6 Terra is now the default OpenAI model** (was Luna), and it leads the model picker. Note that Terra is priced higher than Luna — $2.50/$15.00 per M input/output tokens vs $1.00/$6.00 — so cost per turn goes up accordingly. Existing settings are untouched: the default only applies when no model is stored, so a saved `gpt-5.6-luna` keeps using Luna until you change it in Settings. Luna remains fully available in the picker.
+
+## 1.0.149
+
+- **Plan feedback without leaving the chat:** **Request changes** now opens an inline box in the approval card. Type what should change, send it, and the agent revises the plan and re-presents it — repeatable until you approve. Previously this used `window.prompt()`, which VS Code webviews block (no `allow-modals` in the sandbox), so the click always sent an empty comment and the agent learned only that you objected.
+- **Fix: plan approval no longer dies while you read.** `exit_plan_mode` was killed by the 120s default tool timeout, so a long plan failed with `Tool "exit_plan_mode" timed out` before you could answer. Tools that block on a person now get their own ceiling, and the approval waiter's own 600s limit reports "nobody answered" with a reason instead of a generic timeout.
+- Stale approval cards are retired when a run ends, so their buttons can no longer post to a request the sidecar already discarded (a silent 404 that looked like an ignored approval).
+- **Pinned context banner:** a collapsible box above the chat for notes that ride every request — which `.venv` / `uv` env to use, which skill to always follow. Stored in `.clawagents/pinned-context.md` and injected as a first-class rules source, so it survives restarts.
+- **Background jobs are visible and recoverable:** a jobs banner lists running and finished jobs with Output / Stop / Report-to-agent. Jobs started by `execute` (explicitly or by auto-backgrounding on timeout) are now tracked, and their completion is announced to the agent unprompted — including jobs that finish between turns. Job rows and notices show the command you typed rather than the shell-session wrapper, and captured output no longer ends in shell bookkeeping.
+- Require `clawagents>=6.20.53` — human-gated tool timeouts, background job labels/ownership APIs, and pinned-context rules.
+
 ## 1.0.148
 
 - **API-key paste guard (Windows):** also reject chat UI / error dumps pasted as keys (spaces, >512 chars, `You`/`Copy` chrome, `provider_auth` / `Incorrect API key` text). Auto-purge those from SecretStorage like path mistakes so a real `.env` key can win.
