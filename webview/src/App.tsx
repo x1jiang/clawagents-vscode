@@ -4622,6 +4622,19 @@ export function App() {
               />
               Context Mode (token-efficient ctx_* tools)
             </label>
+            <label
+              className="check"
+              title="Default on. When the agent has real clinical/tool rows, show actual sample rows in chat with patient ID / MRN / OR_LOG ID redacted. Turn off to refuse identifiers entirely."
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(settings.allow_clinical_samples ?? true)}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, allow_clinical_samples: e.target.checked }))
+                }
+              />
+              Allow clinical sample rows (redact identifiers)
+            </label>
             <div className="graphify-panel" style={{ marginTop: 10, marginBottom: 8 }}>
               <div className="muted tiny" style={{ marginBottom: 6 }}>
                 <strong>Graphify</strong> — local knowledge graph for architecture /

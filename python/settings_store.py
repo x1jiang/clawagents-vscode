@@ -37,6 +37,9 @@ DEFAULTS: dict[str, Any] = {
     # When False, only ~/.clawagents/mcp.json is loaded (not workspace).
     "mcp_trust_workspace": False,
     "context_mode": True,
+    # When True (default), the agent may show real clinical/tool sample rows in
+    # chat with identifiers redacted. Off = refuse patient/MRN/OR_LOG IDs entirely.
+    "allow_clinical_samples": True,
     # Graphify local knowledge graph MCP (https://github.com/Graphify-Labs/graphify).
     "graphify": False,
     # workspace = .clawagents/graphify (or graphify-out); path = use graphify_graph_path.

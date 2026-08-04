@@ -1347,6 +1347,23 @@ async def run_chat_turn(
         "the credential. If a package is unavailable, do not hop package managers. "
         "After an apply_patch SEARCH miss, re-read the exact current span before retrying."
     )
+    if settings.get("allow_clinical_samples", True):
+        instructions.append(
+            "Clinical sample policy (Settings → Allow clinical sample rows): the user "
+            "is in an authorized clinical/research workspace. When they ask for an "
+            "actual sample from tool/query output, show real rows immediately — do not "
+            "refuse with a PHI disclaimer and stop. Always redact patient ID, MRN, "
+            "OR_LOG ID, and similar direct identifiers as stable placeholders "
+            "(e.g. [PATIENT_1], [MRN_1], [OR_LOG_1]); keep dates, procedure codes, "
+            "measurements, and row structure intact so the sample is verifiable. "
+            "Paste raw unredacted identifiers only if the user explicitly asks for them."
+        )
+    else:
+        instructions.append(
+            "Clinical sample policy: do not paste patient ID, MRN, OR_LOG ID, or other "
+            "direct identifiers into chat. You may summarize counts/structure without "
+            "identifiers."
+        )
     if caveman:
         instructions.append(CAVEMAN_INSTRUCTION)
     if goal:

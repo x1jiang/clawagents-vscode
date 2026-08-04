@@ -1,3 +1,7 @@
+## 1.0.152
+
+- **Allow clinical sample rows (default on):** Settings checkbox so the agent shows real tool/query sample rows instead of soft-refusing with a PHI disclaimer. Patient ID / MRN / `OR_LOG` ID stay redacted as stable placeholders; structure and measurements remain so samples are verifiable. Turn off to refuse identifiers entirely.
+
 ## 1.0.151
 
 - **Requires clawagents 6.20.54**, which fixes three engine-level problems the extension sits on top of. Writing a session log was quadratic in its own size — every event re-read and rewrote the whole file, roughly 2s of I/O once a log reached a few MB, on the turn's critical path; it is now a real append and ~20× faster. A skill installed with `marketplace_install` was written to `.clawagents/skills` and then never discovered, so the install silently did nothing. And a run ending in plain prose recorded no assistant message, which is the gap this extension had been papering over with its own safety net.

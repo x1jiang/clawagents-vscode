@@ -38,6 +38,10 @@ class TestSanitizePatch(unittest.TestCase):
         self.assertEqual(clean, {})
         self.assertEqual(dropped, [])
 
+    def test_clinical_samples_default_on_and_persisted(self):
+        self.assertIs(DEFAULTS["allow_clinical_samples"], True)
+        self.assertIn("allow_clinical_samples", PERSISTED_KEYS)
+
 
 class TestSettingsRoundTrip(unittest.TestCase):
     def setUp(self):

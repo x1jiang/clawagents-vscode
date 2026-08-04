@@ -1,7 +1,9 @@
-Publisher **`clawagents`** · version **1.0.150**
+Publisher **`clawagents`** · version **1.0.152**
 
+- [ ] GitHub release `v1.0.152` + VSIX (clinical sample rows setting, default on)
+- [x] GitHub release `v1.0.151` + VSIX (require clawagents **6.20.54**)
+- [x] clawagents **6.20.54** on GitHub + PyPI (resumable sessions, skill discovery, O(1) session writes)
 - [x] GitHub release `v1.0.150` + VSIX (GPT-5.6 Terra is the default OpenAI model)
-      · Engine bump — requires clawagents **6.20.54**.
 - [x] GitHub release `v1.0.149` + VSIX (inline plan feedback, pinned context, background job visibility)
 - [x] clawagents **6.20.53** on GitHub + PyPI (human-gated tool timeouts, job labels/ownership, pinned context)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` available locally.
