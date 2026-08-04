@@ -1,6 +1,6 @@
 Publisher **`clawagents`** · version **1.0.152**
 
-- [ ] GitHub release `v1.0.152` + VSIX (clinical sample rows setting, default on)
+- [x] GitHub release `v1.0.152` + VSIX (clinical sample rows setting, default on)
 - [x] GitHub release `v1.0.151` + VSIX (require clawagents **6.20.54**)
 - [x] clawagents **6.20.54** on GitHub + PyPI (resumable sessions, skill discovery, O(1) session writes)
 - [x] GitHub release `v1.0.150` + VSIX (GPT-5.6 Terra is the default OpenAI model)
