@@ -85,17 +85,58 @@ class TestBedrockResolveKwargs(unittest.TestCase):
         )
         self.assertNotIn("base_url", kwargs)
 
-    def test_mantle_does_not_use_openai_key_fallback(self):
-        with patch(
+    def _only_openai_key(self):
+        return patch(
             "spawn_secrets.get_secret",
             side_effect=lambda k: {
                 "OPENAI_API_KEY": "sk-openai-only",
                 "BEDROCK_API_KEY": "",
                 "MANTLE_API_KEY": "",
             }.get(k, ""),
-        ):
-            self.assertEqual(chats._bedrock_api_key(mantle=True), "bedrock")
+        )
+
+    def test_mantle_does_not_use_openai_key_fallback(self):
+        with self._only_openai_key():
+            # "bedrock" as a bearer earns the same 401 as a wrong key; Mantle
+            # reports "no key" instead. BAG keeps the placeholder fallback.
+            self.assertEqual(chats._bedrock_api_key(mantle=True), "")
             self.assertEqual(chats._bedrock_api_key(mantle=False), "sk-openai-only")
+
+    def test_mantle_without_key_raises_actionable_error(self):
+        with self._only_openai_key():
+            with self.assertRaises(chats.MantleKeyMissingError) as ctx:
+                chats._resolve_model_kwargs(
+                    "anthropic.claude-opus-4-8",
+                    {
+                        "provider": "bedrock",
+                        "bedrock_mode": "mantle",
+                        "aws_region": "us-east-1",
+                        "base_url": "https://bedrock-mantle.us-east-1.api.aws/v1",
+                    },
+                )
+        message = str(ctx.exception)
+        self.assertIn("BEDROCK_API_KEY", message)
+        self.assertIn("Restart Sidecar", message)
+        self.assertIn("us-east-1", message)
+
+    def test_mantle_with_key_still_resolves(self):
+        with patch(
+            "spawn_secrets.get_secret",
+            side_effect=lambda k: {"BEDROCK_API_KEY": "mantle-key"}.get(k, ""),
+        ):
+            kwargs = chats._resolve_model_kwargs(
+                "anthropic.claude-opus-4-8",
+                {
+                    "provider": "bedrock",
+                    "bedrock_mode": "mantle",
+                    "aws_region": "us-east-1",
+                    "base_url": "https://bedrock-mantle.us-east-1.api.aws/v1",
+                },
+            )
+        self.assertEqual(kwargs["api_key"], "mantle-key")
+        self.assertEqual(
+            kwargs["base_url"], "https://bedrock-mantle.us-east-1.api.aws/v1"
+        )
 
 
 if __name__ == "__main__":

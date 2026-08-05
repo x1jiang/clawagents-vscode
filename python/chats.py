@@ -37,12 +37,19 @@ OnEvent = Callable[[str, dict[str, Any]], None]
 _PROFILE_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "ollama", "bedrock"})
 
 
+class MantleKeyMissingError(RuntimeError):
+    """Mantle route selected with no Bedrock/Mantle API key available."""
+
+
 def _bedrock_api_key(*, mantle: bool = False) -> str:
     """Gateway / Mantle token for OpenAI-compatible Bedrock proxies.
 
-    Mantle must not fall back to ``OPENAI_API_KEY`` — that yields
-    ``invalid bearer token`` (401) against bedrock-mantle hosts.
-    BAG / LiteLLM still allows OpenAI-key fallback (common local setup).
+    Mantle must not fall back to ``OPENAI_API_KEY`` nor to the ``"bedrock"``
+    placeholder — both yield ``invalid bearer token`` (401) against
+    bedrock-mantle hosts, which reads like a bad key rather than a missing one.
+    Returns ``""`` for Mantle when no Bedrock key exists so the caller can say
+    so plainly. BAG / LiteLLM still allows OpenAI-key fallback (common local
+    setup) and still accepts the placeholder.
     """
     try:
         from spawn_secrets import get_secret
@@ -52,7 +59,7 @@ def _bedrock_api_key(*, mantle: bool = False) -> str:
             return key
         if not mantle:
             return get_secret("OPENAI_API_KEY") or "bedrock"
-        return "bedrock"
+        return ""
     except Exception:  # noqa: BLE001
         key = (
             (os.environ.get("BEDROCK_API_KEY") or "").strip()
@@ -62,7 +69,7 @@ def _bedrock_api_key(*, mantle: bool = False) -> str:
             return key
         if not mantle:
             return (os.environ.get("OPENAI_API_KEY") or "").strip() or "bedrock"
-        return "bedrock"
+        return ""
 
 
 def _apply_aws_settings(settings: dict[str, Any], *, active: bool = True) -> None:
@@ -1090,6 +1097,16 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
             mantle_host = "bedrock-mantle." in str(kwargs.get("base_url") or "")
             # OpenAI-compatible gateway (Mantle / BAG / LiteLLM)
             kwargs["api_key"] = _bedrock_api_key(mantle=mantle_host)
+            if mantle_host and not kwargs["api_key"]:
+                raise MantleKeyMissingError(
+                    "Bedrock Mantle needs an API key. Add one in ClawAgents "
+                    "Settings (Bedrock / Mantle API key), or set BEDROCK_API_KEY / "
+                    "MANTLE_API_KEY in the workspace .env, then run "
+                    "'ClawAgents: Restart Sidecar'. The key must be a Bedrock API "
+                    f"key for {str(settings.get('aws_region') or 'us-east-1')} — AWS "
+                    "IAM credentials, ANTHROPIC_API_KEY and OPENAI_API_KEY do not "
+                    "work on Mantle, and short-term Bedrock keys expire in 12 hours."
+                )
             # Mantle is multi-path: only default wire_api for chat-ok models.
             # Claude → Anthropic Messages; openai.gpt-5.* → Responses.
             if mantle_host and not str(settings.get("wire_api") or "").strip():

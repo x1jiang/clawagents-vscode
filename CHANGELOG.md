@@ -1,3 +1,8 @@
+## 1.0.153
+
+- **Fix Mantle 401 "Invalid bearer token" when no Bedrock key is set:** selecting a Mantle model without a Bedrock/Mantle API key sent the literal string `bedrock` as the bearer token, so Mantle answered with a 401 that looked like a rejected key rather than a missing one. Worse, the generic recovery hint told you to check `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — neither of which works on Mantle, so following the advice produced the same 401. The sidecar now stops before the request and names the fix: add the key in Settings (Bedrock / Mantle API key) or set `BEDROCK_API_KEY` / `MANTLE_API_KEY` in the workspace `.env`, then **ClawAgents: Restart Sidecar**. Secrets are captured at sidecar start, so a key saved afterwards needs that restart.
+- **Requires clawagents 6.20.55**, which carries the matching engine fixes: Mantle 401s now get a Mantle-specific hint (naming the region and the 12-hour expiry of short-term Bedrock keys), all three Mantle routes reject placeholder and vendor keys up front, and Claude-on-Mantle no longer leaks a stray `X-Api-Key` header from an ambient `ANTHROPIC_API_KEY` alongside the bearer. The `bedrock` extra now needs `anthropic>=0.95.0` for the official Mantle client — **ClawAgents: Install/Upgrade Python Dependencies** picks it up.
+
 ## 1.0.152
 
 - **Allow clinical sample rows (default on):** Settings checkbox so the agent shows real tool/query sample rows instead of soft-refusing with a PHI disclaimer. Patient ID / MRN / `OR_LOG` ID stay redacted as stable placeholders; structure and measurements remain so samples are verifiable. Turn off to refuse identifiers entirely.
