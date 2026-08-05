@@ -1,7 +1,8 @@
 Publisher **`clawagents`** · version **1.0.153**
 
-- [ ] GitHub release `v1.0.153` + VSIX (Mantle missing-key error instead of opaque 401)
-- [ ] clawagents **6.20.55** on GitHub + PyPI (Mantle bearer auth hardening, anthropic>=0.95.0)
+- [x] GitHub release `v1.0.153` + VSIX (Mantle missing-key error instead of opaque 401)
+- [x] clawagents **6.20.55** on GitHub + PyPI (Mantle bearer auth hardening, anthropic>=0.95.0)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.152` + VSIX (clinical sample rows setting, default on)
 - [x] GitHub release `v1.0.151` + VSIX (require clawagents **6.20.54**)
 - [x] clawagents **6.20.54** on GitHub + PyPI (resumable sessions, skill discovery, O(1) session writes)
