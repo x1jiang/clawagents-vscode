@@ -1,3 +1,7 @@
+## 1.0.158
+
+- **Fix Context Mode when an existing sidecar has MCP 2.x installed.** The shared `clawagents` client now supplies the numeric `ClientSession` timeout MCP 2.x expects instead of a `datetime.timedelta`, preventing `unsupported operand type(s) for +: 'float' and 'datetime.timedelta'` immediately after “Running…”. Requires **clawagents 6.20.58**; **Install/Upgrade Python Dependencies** or **Restart Sidecar** updates the managed environment.
+
 ## 1.0.157
 
 - **Default model prefers a provider that has a key — OpenAI GPT-5.6 Terra first.** A race before host key flags arrived treated xAI as always available, so the auto pick often landed on Grok even when an OpenAI key was saved. Preferred fill now waits for key hydration, gates xAI on `XAI_API_KEY`, and orders keyed defaults: OpenAI Terra → Anthropic → Gemini → xAI Grok. Weak race leftovers (`grok-*` / local Ollama ids under `provider=auto`) are upgraded once keys are known.
