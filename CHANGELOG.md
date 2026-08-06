@@ -1,3 +1,7 @@
+## 1.0.155
+
+- **Default model is GPT-5.6 Terra from OpenAI when an OpenAI key is available.** On first run (or with an empty model), the composer now pins `provider=openai` and `model=gpt-5.6-terra` instead of leaving `provider=auto` and hoping the catalog resolves. Send also falls back to Terra when the model field is empty but an OpenAI key is present. Requires **clawagents 6.20.56**, which changes the library's own OpenAI default from `gpt-5-nano` to `gpt-5.6-terra` so CLI / no-workspace / empty-settings paths match the UI.
+
 ## 1.0.154
 
 - **Fix "python -m venv exited 1 / ensurepip is not available" on Debian and Ubuntu.** Those distributions ship `ensurepip` in a separate `pythonX.Y-venv` package, so the managed environment failed to build and the sidecar never started — on a remote or WSL host the only documented way out was `sudo apt install python3.10-venv`, which many users cannot run. Environment creation now falls back to a builder that carries its own pip: `uv venv --seed`, then `python -m virtualenv`, then `python -m venv --without-pip` seeded through `pip --python … install`, and finally PyPA's `get-pip.py` for hosts with no installer at all. Unrelated venv failures (permissions, disk) still surface immediately instead of burning time on fallbacks that cannot help. When every builder fails, the error names all four fixes rather than only the one that needs root.

@@ -2247,6 +2247,11 @@ export function App() {
       ...settings,
       model: preferredPick.model,
       ...(preferredPick.effort ? { reasoning_effort: preferredPick.effort } : {}),
+      // Pin the vendor when the pick came from a keyed provider so provider=auto
+      // does not leave the header / sidecar ambiguous (OpenAI key → openai).
+      ...("provider" in preferredPick && preferredPick.provider
+        ? { provider: preferredPick.provider }
+        : {}),
     };
     skipSettingsAutosave.current = true;
     setModel(preferredPick.model);
@@ -2595,6 +2600,10 @@ export function App() {
       !modelFitsProvider(sendModel, prov)
     ) {
       sendModel = defaultModelForProvider(prov);
+    }
+    // Empty model + OpenAI key → GPT-5.6 Terra (matches library get_default_model).
+    if (!sendModel && hasOpenAIKey) {
+      sendModel = PREFERRED_OPENAI_MODEL;
     }
     post({
       type: "send",

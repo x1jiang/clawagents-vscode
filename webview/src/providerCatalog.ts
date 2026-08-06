@@ -382,11 +382,26 @@ export function modelsForKeys(
 export function pickPreferredModel(providers: Provider[]) {
   const openai = providers.find((p) => p.id === "openai" && providerIsAvailable(p));
   if (openai?.models?.some((m) => m.id === PREFERRED_OPENAI_MODEL)) {
-    return { model: PREFERRED_OPENAI_MODEL, effort: PREFERRED_EFFORT };
+    return {
+      model: PREFERRED_OPENAI_MODEL,
+      effort: PREFERRED_EFFORT,
+      provider: "openai" as const,
+    };
+  }
+  // OpenAI key present but catalog omitted Terra — still prefer OpenAI's default.
+  if (openai) {
+    return {
+      model: PREFERRED_OPENAI_MODEL,
+      effort: PREFERRED_EFFORT,
+      provider: "openai" as const,
+    };
   }
   const gemini = providers.find((p) => p.id === "gemini" && providerIsAvailable(p));
   if (gemini?.models?.some((m) => m.id === PREFERRED_GEMINI_MODEL)) {
-    return { model: PREFERRED_GEMINI_MODEL };
+    return { model: PREFERRED_GEMINI_MODEL, provider: "gemini" as const };
+  }
+  if (gemini) {
+    return { model: PREFERRED_GEMINI_MODEL, provider: "gemini" as const };
   }
   return { model: modelsForKeys(providers, "auto")[0]?.id || "" };
 }

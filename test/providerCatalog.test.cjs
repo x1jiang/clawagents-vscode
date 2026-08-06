@@ -101,6 +101,44 @@ test("OpenAI defaults to GPT-5.6 Terra", () => {
   assert.equal(mod.defaultModelForProvider("nonesuch"), "gpt-5.6-terra");
 });
 
+test("pickPreferredModel pins OpenAI + Terra when the OpenAI key is available", () => {
+  const keyed = mod.applyKeyFlagsToFallback(mod.FALLBACK_PROVIDERS, {
+    openai: true,
+    anthropic: false,
+    gemini: false,
+    bedrock: false,
+  });
+  const pick = mod.pickPreferredModel(keyed);
+  assert.equal(pick.model, "gpt-5.6-terra");
+  assert.equal(pick.provider, "openai");
+  assert.equal(pick.effort, "medium");
+
+  // OpenAI key wins over Gemini even when both are present.
+  const both = mod.applyKeyFlagsToFallback(mod.FALLBACK_PROVIDERS, {
+    openai: true,
+    anthropic: false,
+    gemini: true,
+    bedrock: false,
+  });
+  assert.deepEqual(mod.pickPreferredModel(both), {
+    model: "gpt-5.6-terra",
+    effort: "medium",
+    provider: "openai",
+  });
+
+  // No OpenAI key → Gemini preferred when available.
+  const geminiOnly = mod.applyKeyFlagsToFallback(mod.FALLBACK_PROVIDERS, {
+    openai: false,
+    anthropic: false,
+    gemini: true,
+    bedrock: false,
+  });
+  assert.deepEqual(mod.pickPreferredModel(geminiOnly), {
+    model: mod.PREFERRED_GEMINI_MODEL,
+    provider: "gemini",
+  });
+});
+
 test("the default OpenAI model is offered and correctly labelled", () => {
   // The fallback list is what renders before the sidecar catalog arrives, so a
   // stale label here mislabels the default model in the picker.
