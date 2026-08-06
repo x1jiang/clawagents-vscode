@@ -1,3 +1,7 @@
+## 1.0.156
+
+- **Fix chat failing immediately with `unsupported operand type(s) for +: 'float' and 'datetime.timedelta'`.** URL MCP servers (SSE) that passed `datetime.timedelta` HTTP timeouts into the MCP SDK's `sse_client` blew up inside httpx/httpcore on connect, so every message died right after “Running…”. Requires **clawagents 6.20.57**, which coerces those timeouts to float seconds before the SDK sees them. **Install/Upgrade Python Dependencies** or **Restart Sidecar** picks up the floor.
+
 ## 1.0.155
 
 - **Default model is GPT-5.6 Terra from OpenAI when an OpenAI key is available.** On first run (or with an empty model), the composer now pins `provider=openai` and `model=gpt-5.6-terra` instead of leaving `provider=auto` and hoping the catalog resolves. Send also falls back to Terra when the model field is empty but an OpenAI key is present. Requires **clawagents 6.20.56**, which changes the library's own OpenAI default from `gpt-5-nano` to `gpt-5.6-terra` so CLI / no-workspace / empty-settings paths match the UI.
