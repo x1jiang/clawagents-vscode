@@ -1,8 +1,8 @@
 Publisher **`clawagents`** · version **1.0.155**
 
-- [ ] GitHub release `v1.0.155` + VSIX (OpenAI key → default GPT-5.6 Terra)
+- [x] GitHub release `v1.0.155` + VSIX (OpenAI key → default GPT-5.6 Terra)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [ ] clawagents **6.20.56** on GitHub + PyPI (OpenAI default model → gpt-5.6-terra)
+- [x] clawagents **6.20.56** on GitHub + PyPI (OpenAI default model → gpt-5.6-terra)
 - [x] GitHub release `v1.0.154` + VSIX (Debian ensurepip fallback; clinical samples → runtime-only approval, default off)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.153` + VSIX (Mantle missing-key error instead of opaque 401)
