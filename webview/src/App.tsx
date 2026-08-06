@@ -2055,11 +2055,9 @@ export function App() {
   };
   const toggleApprove = (key: keyof AutoApprove) =>
     setAutoApprove((a) => ({ ...a, [key]: !a[key] }));
-  const setAllowFullAccess = (on: boolean) => {
-    const nextSettings: Record<string, unknown> = {
-      ...settings,
-      allow_full_access: on,
-    };
+  /** Persist one setting straight away — composer toggles have no Save button. */
+  const commitSetting = (key: string, value: unknown) => {
+    const nextSettings: Record<string, unknown> = { ...settings, [key]: value };
     skipSettingsAutosave.current = true;
     settingsRef.current = nextSettings;
     setSettings(nextSettings);
@@ -2067,6 +2065,9 @@ export function App() {
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
     postSettingsSave(patch, nextSettings);
+  };
+  const setAllowFullAccess = (on: boolean) => {
+    commitSetting("allow_full_access", on);
     if (on) {
       // Full access = auto-approve edits/commands + OS sandbox off (sidecar).
       setAutoApprove((a) => ({ ...a, edit: true, execute: true }));
@@ -4622,19 +4623,6 @@ export function App() {
               />
               Context Mode (token-efficient ctx_* tools)
             </label>
-            <label
-              className="check"
-              title="Default on. When the agent has real clinical/tool rows, show actual sample rows in chat with patient ID / MRN / OR_LOG ID redacted. Turn off to refuse identifiers entirely."
-            >
-              <input
-                type="checkbox"
-                checked={Boolean(settings.allow_clinical_samples ?? true)}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, allow_clinical_samples: e.target.checked }))
-                }
-              />
-              Allow clinical sample rows (redact identifiers)
-            </label>
             <div className="graphify-panel" style={{ marginTop: 10, marginBottom: 8 }}>
               <div className="muted tiny" style={{ marginBottom: 6 }}>
                 <strong>Graphify</strong> — local knowledge graph for architecture /
@@ -5026,6 +5014,7 @@ export function App() {
                         autoApprove.execute && "Execute",
                         autoApprove.web && "Web",
                         autoApprove.browser && "Browser",
+                        settings.allow_clinical_samples && "Clinical samples",
                       ]
                         .filter(Boolean)
                         .join(", ") || "nothing (asks each time)"}
@@ -5098,6 +5087,18 @@ export function App() {
                   </label>
                   <label
                     className="check"
+                    title="Default off. When on, the agent shows real clinical/tool sample rows in chat with patient ID / MRN / OR_LOG ID redacted as stable placeholders. Off = refuse direct identifiers entirely."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.allow_clinical_samples)}
+                      onChange={(e) => commitSetting("allow_clinical_samples", e.target.checked)}
+                    />
+                    Clinical sample rows{" "}
+                    <span className="muted tiny">(redact patient ID / MRN)</span>
+                  </label>
+                  <label
+                    className="check"
                     title="Terse caveman-style replies — fewer tokens, same technical accuracy (juliusbrussee/caveman)"
                   >
                     <input
@@ -5119,6 +5120,8 @@ export function App() {
                     apply.
                     <strong> Full access</strong> disables the OS sandbox (needed for gcloud
                     credentials under <code>~/.config</code>).
+                    <strong> Clinical sample rows</strong> is off by default; turning it on lets
+                    the agent paste real rows with patient ID / MRN / OR_LOG ID redacted.
                     <strong> Caveman</strong> makes the agent reply ultra-brief.
                     Enable browser tools under Settings; install{" "}
                     <code>clawagents[browser]</code> + Chromium for Playwright.

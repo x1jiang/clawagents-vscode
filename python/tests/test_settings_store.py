@@ -18,6 +18,7 @@ from settings_store import (  # noqa: E402
     DEFAULTS,
     KNOWN_KEYS,
     PERSISTED_KEYS,
+    RUNTIME_ONLY_KEYS,
     load_settings,
     set_runtime_trust,
     sanitize_patch,
@@ -38,9 +39,12 @@ class TestSanitizePatch(unittest.TestCase):
         self.assertEqual(clean, {})
         self.assertEqual(dropped, [])
 
-    def test_clinical_samples_default_on_and_persisted(self):
-        self.assertIs(DEFAULTS["allow_clinical_samples"], True)
-        self.assertIn("allow_clinical_samples", PERSISTED_KEYS)
+    def test_clinical_samples_default_off_and_runtime_only(self):
+        self.assertIs(DEFAULTS["allow_clinical_samples"], False)
+        # Disclosing patient identifiers is an approval, not a preference: it
+        # must never be grantable by a file inside the repository.
+        self.assertIn("allow_clinical_samples", RUNTIME_ONLY_KEYS)
+        self.assertNotIn("allow_clinical_samples", PERSISTED_KEYS)
 
 
 class TestSettingsRoundTrip(unittest.TestCase):
@@ -117,6 +121,31 @@ class TestSettingsRoundTrip(unittest.TestCase):
         self.assertNotIn("evil", raw)
         self.assertEqual(raw["wire_api"], "responses")
         self.assertEqual(set(raw.keys()), set(PERSISTED_KEYS))
+
+    def test_committed_settings_file_cannot_enable_clinical_samples(self):
+        # A cloned repo ships a settings file that pre-authorizes PHI pasting,
+        # plus the stale key written by 1.0.152 when this was still persisted.
+        self._settings_path.write_text(
+            json.dumps({"allow_clinical_samples": True, "wire_api": "responses"}),
+            encoding="utf-8",
+        )
+        out = load_settings()
+        self.assertIs(out["allow_clinical_samples"], False)
+        self.assertEqual(out["wire_api"], "responses")
+        # The stale key is dropped from disk on the next save.
+        save_settings({"reasoning_effort": "high"})
+        raw = json.loads(self._settings_path.read_text(encoding="utf-8"))
+        self.assertNotIn("allow_clinical_samples", raw)
+
+    def test_clinical_samples_optin_lives_in_runtime_trust(self):
+        out = save_settings({"allow_clinical_samples": True})
+        self.assertIs(out["allow_clinical_samples"], True)
+        # Granted in process memory, never written to the workspace file.
+        raw = json.loads(self._settings_path.read_text(encoding="utf-8"))
+        self.assertNotIn("allow_clinical_samples", raw)
+        # A fresh sidecar with no restored grant starts off again.
+        set_runtime_trust({"allow_clinical_samples": False})
+        self.assertIs(load_settings()["allow_clinical_samples"], False)
 
     def test_untrusted_base_url_cleared_without_trust(self):
         out = save_settings({"base_url": "https://evil.example/v1"})

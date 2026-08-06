@@ -1364,9 +1364,9 @@ async def run_chat_turn(
         "the credential. If a package is unavailable, do not hop package managers. "
         "After an apply_patch SEARCH miss, re-read the exact current span before retrying."
     )
-    if settings.get("allow_clinical_samples", True):
+    if settings.get("allow_clinical_samples", False):
         instructions.append(
-            "Clinical sample policy (Settings → Allow clinical sample rows): the user "
+            "Clinical sample policy (Auto-approve → Clinical sample rows): the user "
             "is in an authorized clinical/research workspace. When they ask for an "
             "actual sample from tool/query output, show real rows immediately — do not "
             "refuse with a PHI disclaimer and stop. Always redact patient ID, MRN, "

@@ -10,7 +10,7 @@ import { ensureCompanions } from "./companionDeps";
 import { ensureSidecarDeps } from "./pythonDeps";
 import { pinPythonPathEnv } from "./pythonPathPin";
 import { StartGeneration } from "./startGeneration";
-import { ensureManagedPython } from "./managedPython";
+import { clearManagedPythonFailures, ensureManagedPython } from "./managedPython";
 
 export interface SidecarHandle {
   port: number;
@@ -111,7 +111,31 @@ export class SidecarManager {
     if (this.config.pythonRuntime === "custom") {
       return basePython;
     }
-    return ensureManagedPython(basePython, this.globalStoragePath, this.output);
+    return ensureManagedPython(basePython, this.globalStoragePath, this.output, {
+      confirmNetworkBootstrap: (url) => this.confirmPipBootstrapDownload(url),
+    });
+  }
+
+  /**
+   * Last-resort pip bootstrap runs a script fetched over the network, so it
+   * needs the same explicit consent as --break-system-packages.
+   */
+  private async confirmPipBootstrapDownload(url: string): Promise<boolean> {
+    const choice = await vscode.window.showWarningMessage(
+      `This Python cannot create a virtual environment with pip, and no local fallback `
+      + `(uv, virtualenv, or pip) is available. Download and run the official PyPA `
+      + `bootstrap script from ${url}?`,
+      { modal: true, detail: "Alternative: install python3-venv, uv, or virtualenv, then retry." },
+      "Download get-pip.py",
+      "Cancel",
+    );
+    const approved = choice === "Download get-pip.py";
+    this.output.appendLine(
+      approved
+        ? "User approved the network pip bootstrap."
+        : "User declined the network pip bootstrap.",
+    );
+    return approved;
   }
 
   get current(): SidecarHandle | undefined {
@@ -398,6 +422,9 @@ export class SidecarManager {
   }
 
   stop(): void {
+    // An explicit stop is a deliberate retry signal — don't replay a cached
+    // environment failure at someone who just installed the missing package.
+    clearManagedPythonFailures();
     this.startGeneration.invalidate();
     this.starting = undefined;
     this.stopChild();

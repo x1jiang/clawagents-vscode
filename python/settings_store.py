@@ -37,9 +37,10 @@ DEFAULTS: dict[str, Any] = {
     # When False, only ~/.clawagents/mcp.json is loaded (not workspace).
     "mcp_trust_workspace": False,
     "context_mode": True,
-    # When True (default), the agent may show real clinical/tool sample rows in
-    # chat with identifiers redacted. Off = refuse patient/MRN/OR_LOG IDs entirely.
-    "allow_clinical_samples": True,
+    # Off by default: refuse patient/MRN/OR_LOG IDs entirely. Runtime-only (see
+    # RUNTIME_ONLY_KEYS) so a committed settings file cannot pre-authorize
+    # pasting identifiers into chat. Toggled in the composer Auto-approve box.
+    "allow_clinical_samples": False,
     # Graphify local knowledge graph MCP (https://github.com/Graphify-Labs/graphify).
     "graphify": False,
     # workspace = .clawagents/graphify (or graphify-out); path = use graphify_graph_path.
@@ -86,8 +87,9 @@ KNOWN_KEYS: frozenset[str] = frozenset(DEFAULTS)
 
 # These values are approvals, not preferences.  Keeping them in the workspace
 # settings file lets a cloned repository approve its own gateway, MCP commands,
-# or elevated filesystem access.  They therefore live only in this process and
-# are restored by the extension from VS Code SecretStorage at sidecar startup.
+# elevated filesystem access, or the disclosure of patient identifiers.  They
+# therefore live only in this process and are restored by the extension from
+# VS Code SecretStorage at sidecar startup.
 RUNTIME_ONLY_KEYS: frozenset[str] = frozenset(
     {
         "trust_custom_base_url",
@@ -95,6 +97,7 @@ RUNTIME_ONLY_KEYS: frozenset[str] = frozenset(
         "allow_full_access",
         "allow_external_skill_dirs",
         "trust_graphify_external_path",
+        "allow_clinical_samples",
     }
 )
 PERSISTED_KEYS: frozenset[str] = KNOWN_KEYS - RUNTIME_ONLY_KEYS
