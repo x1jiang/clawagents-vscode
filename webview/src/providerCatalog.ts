@@ -29,6 +29,8 @@ export const LOCAL_DOCUMENT_TYPES = new Set([
 
 export const PREFERRED_OPENAI_MODEL = "gpt-5.6-terra";
 export const PREFERRED_GEMINI_MODEL = "gemini-3.5-flash";
+export const PREFERRED_ANTHROPIC_MODEL = "claude-sonnet-4-5";
+export const PREFERRED_XAI_MODEL = "grok-4.5";
 export const PREFERRED_EFFORT = "medium";
 
 /** Shown when the sidecar has not returned a catalog yet (e.g. remote Python missing deps). */
@@ -240,6 +242,14 @@ export function modelLooksLikeOllamaLocalId(id: string): boolean {
   );
 }
 
+/** Models that were often auto-picked before host keys hydrated (race → Grok/Ollama). */
+export function isWeakAutoDefaultModel(model: string): boolean {
+  const m = String(model || "").trim().toLowerCase();
+  if (!m) return true;
+  if (m.startsWith("grok")) return true;
+  return modelLooksLikeOllamaLocalId(m);
+}
+
 export function defaultModelForProvider(provider: string): string {
   switch (String(provider || "").trim().toLowerCase()) {
     case "openai":
@@ -247,7 +257,9 @@ export function defaultModelForProvider(provider: string): string {
     case "gemini":
       return PREFERRED_GEMINI_MODEL;
     case "anthropic":
-      return "claude-sonnet-4-5";
+      return PREFERRED_ANTHROPIC_MODEL;
+    case "xai":
+      return PREFERRED_XAI_MODEL;
     case "ollama":
       return "llama3.1";
     case "bedrock":
@@ -270,12 +282,16 @@ export function modelFitsProvider(model: string, provider: string): boolean {
     case "openai":
       if (isMantleCatalogModelId(m) || isNativeBedrockModelId(m)) return false;
       if (modelLooksLikeOllamaLocalId(m)) return false;
-      if (ml.startsWith("claude") || ml.includes("gemini")) return false;
+      if (ml.startsWith("claude") || ml.includes("gemini") || ml.startsWith("grok")) {
+        return false;
+      }
       return true;
     case "anthropic":
       return ml.includes("claude") || ml.startsWith("anthropic.");
     case "gemini":
       return ml.includes("gemini");
+    case "xai":
+      return ml.startsWith("grok");
     case "ollama":
       return modelLooksLikeOllamaLocalId(m);
     case "bedrock":
@@ -380,15 +396,8 @@ export function modelsForKeys(
 }
 
 export function pickPreferredModel(providers: Provider[]) {
+  // Prefer a provider that actually has a key. OpenAI / Terra wins when present.
   const openai = providers.find((p) => p.id === "openai" && providerIsAvailable(p));
-  if (openai?.models?.some((m) => m.id === PREFERRED_OPENAI_MODEL)) {
-    return {
-      model: PREFERRED_OPENAI_MODEL,
-      effort: PREFERRED_EFFORT,
-      provider: "openai" as const,
-    };
-  }
-  // OpenAI key present but catalog omitted Terra — still prefer OpenAI's default.
   if (openai) {
     return {
       model: PREFERRED_OPENAI_MODEL,
@@ -396,12 +405,22 @@ export function pickPreferredModel(providers: Provider[]) {
       provider: "openai" as const,
     };
   }
-  const gemini = providers.find((p) => p.id === "gemini" && providerIsAvailable(p));
-  if (gemini?.models?.some((m) => m.id === PREFERRED_GEMINI_MODEL)) {
-    return { model: PREFERRED_GEMINI_MODEL, provider: "gemini" as const };
+  const anthropic = providers.find(
+    (p) => p.id === "anthropic" && providerIsAvailable(p),
+  );
+  if (anthropic) {
+    return {
+      model: PREFERRED_ANTHROPIC_MODEL,
+      provider: "anthropic" as const,
+    };
   }
+  const gemini = providers.find((p) => p.id === "gemini" && providerIsAvailable(p));
   if (gemini) {
     return { model: PREFERRED_GEMINI_MODEL, provider: "gemini" as const };
+  }
+  const xai = providers.find((p) => p.id === "xai" && providerIsAvailable(p));
+  if (xai) {
+    return { model: PREFERRED_XAI_MODEL, provider: "xai" as const };
   }
   return { model: modelsForKeys(providers, "auto")[0]?.id || "" };
 }
@@ -437,6 +456,7 @@ export function overlayHostKeyAvailability(
     openai: boolean;
     anthropic: boolean;
     gemini: boolean;
+    xai: boolean;
     iam: boolean;
     mantle: boolean;
     bag: boolean;
@@ -446,6 +466,7 @@ export function overlayHostKeyAvailability(
     if (id === "openai") return flags.openai;
     if (id === "anthropic") return flags.anthropic;
     if (id === "gemini") return flags.gemini;
+    if (id === "xai") return flags.xai;
     if (id === BEDROCK_SELECT_IAM) return flags.iam;
     if (id === BEDROCK_SELECT_MANTLE) return flags.mantle;
     if (id === BEDROCK_SELECT_BAG) return flags.bag;
@@ -481,6 +502,7 @@ export function providerDisplayLabel(settings: Record<string, unknown>): string 
   if (p === "openai") return "OpenAI";
   if (p === "anthropic") return "Anthropic";
   if (p === "gemini") return "Gemini";
+  if (p === "xai") return "xAI (Grok)";
   if (p === "ollama") return "Ollama";
   if (p.startsWith("profile:")) return p.slice("profile:".length) || "profile";
   return "auto";
@@ -509,6 +531,7 @@ export function effectiveProviderLabel(
       if (p.id === "openai") return "OpenAI";
       if (p.id === "anthropic") return "Anthropic";
       if (p.id === "gemini") return "Gemini";
+      if (p.id === "xai") return "xAI (Grok)";
       if (p.id === "ollama") return "Ollama";
       return p.name || p.id;
     }

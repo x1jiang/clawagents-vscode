@@ -1,3 +1,7 @@
+## 1.0.157
+
+- **Default model prefers a provider that has a key — OpenAI GPT-5.6 Terra first.** A race before host key flags arrived treated xAI as always available, so the auto pick often landed on Grok even when an OpenAI key was saved. Preferred fill now waits for key hydration, gates xAI on `XAI_API_KEY`, and orders keyed defaults: OpenAI Terra → Anthropic → Gemini → xAI Grok. Weak race leftovers (`grok-*` / local Ollama ids under `provider=auto`) are upgraded once keys are known.
+
 ## 1.0.156
 
 - **Fix chat failing immediately with `unsupported operand type(s) for +: 'float' and 'datetime.timedelta'`.** URL MCP servers (SSE) that passed `datetime.timedelta` HTTP timeouts into the MCP SDK's `sse_client` blew up inside httpx/httpcore on connect, so every message died right after “Running…”. Requires **clawagents 6.20.57**, which coerces those timeouts to float seconds before the SDK sees them. **Install/Upgrade Python Dependencies** or **Restart Sidecar** picks up the floor.

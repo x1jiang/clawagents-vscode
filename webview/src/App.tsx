@@ -125,6 +125,7 @@ import {
   effectiveProviderLabel,
   defaultModelForProvider,
   modelFitsProvider,
+  isWeakAutoDefaultModel,
 } from "./providerCatalog";
 
 
@@ -834,6 +835,8 @@ export function App() {
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const [hasXaiKey, setHasXaiKey] = useState(false);
+  /** Host has reported key flags at least once — preferred-model fill waits on this. */
+  const [providerKeysHydrated, setProviderKeysHydrated] = useState(false);
   // Typed graph path is held locally and only committed on blur/Enter: the
   // settings autosave debounce fires a *blocking* modal for external paths,
   // so committing per keystroke stacks one modal per 500ms pause.
@@ -1135,15 +1138,19 @@ export function App() {
           }
           if (typeof msg.hasOpenAIKey === "boolean") {
             setHasOpenAIKey(msg.hasOpenAIKey);
+            setProviderKeysHydrated(true);
           }
           if (typeof msg.hasAnthropicKey === "boolean") {
             setHasAnthropicKey(msg.hasAnthropicKey);
+            setProviderKeysHydrated(true);
           }
           if (typeof msg.hasXaiKey === "boolean") {
             setHasXaiKey(msg.hasXaiKey);
+            setProviderKeysHydrated(true);
           }
           if (typeof msg.hasGeminiKey === "boolean") {
             setHasGeminiKey(msg.hasGeminiKey);
+            setProviderKeysHydrated(true);
           }
           if (typeof msg.includeContextByDefault === "boolean") {
             setIncludeContext(msg.includeContextByDefault);
@@ -1227,6 +1234,14 @@ export function App() {
           }
           if (typeof msg.hasGeminiKey === "boolean") setHasGeminiKey(msg.hasGeminiKey);
           if (typeof msg.hasXaiKey === "boolean") setHasXaiKey(msg.hasXaiKey);
+          if (
+            typeof msg.hasOpenAIKey === "boolean" ||
+            typeof msg.hasAnthropicKey === "boolean" ||
+            typeof msg.hasGeminiKey === "boolean" ||
+            typeof msg.hasXaiKey === "boolean"
+          ) {
+            setProviderKeysHydrated(true);
+          }
           const applySettingsSnapshot = (status: string) => {
             pendingSettingsPatch.current = null;
             inflightSettingsKey.current = "";
@@ -1375,6 +1390,14 @@ export function App() {
           }
           if (typeof msg.hasGeminiKey === "boolean") setHasGeminiKey(msg.hasGeminiKey);
           if (typeof msg.hasXaiKey === "boolean") setHasXaiKey(msg.hasXaiKey);
+          if (
+            typeof msg.hasOpenAIKey === "boolean" ||
+            typeof msg.hasAnthropicKey === "boolean" ||
+            typeof msg.hasGeminiKey === "boolean" ||
+            typeof msg.hasXaiKey === "boolean"
+          ) {
+            setProviderKeysHydrated(true);
+          }
           break;
         case "diagnostics":
           setDiagnostics(msg.data);
@@ -2171,6 +2194,7 @@ export function App() {
     openai: hasOpenAIKey,
     anthropic: hasAnthropicKey,
     gemini: hasGeminiKey,
+    xai: hasXaiKey,
     // Fallback catalog only: any Bedrock-related cred makes the parent row exist;
     // expandBedrockProviderChoices splits IAM vs Mantle vs BAG availability.
     bedrock: hasBedrockKey || hasAwsCreds,
@@ -2190,6 +2214,7 @@ export function App() {
       openai: hasOpenAIKey,
       anthropic: hasAnthropicKey,
       gemini: hasGeminiKey,
+      xai: hasXaiKey,
       iam: hasAwsCreds,
       mantle: hasBedrockKey,
       bag: hasBedrockKey,
@@ -2230,14 +2255,21 @@ export function App() {
   );
   modelRef.current = activeModelId || model;
   modelMetaRef.current = activeModelMeta;
-  // Fill a default model only when unset. Never replace a saved model just
-  // because it's missing from the current catalog (probe=0 / Mantle IDs) —
-  // that used to PUT /settings forever (skills "loading" storm).
+  // Fill a default model only when unset (or a weak race-time auto pick). Wait
+  // until host key flags arrive so xAI/Ollama cannot win before OpenAI is known.
   useEffect(() => {
+    if (!providerKeysHydrated) return;
     if (preferredModelFilled.current) return;
     const savedModel =
       typeof settings.model === "string" ? settings.model.trim() : "";
-    if (savedModel) {
+    const prov = String(settings.provider || "auto").trim().toLowerCase();
+    // Explicit vendor + model: user (or a prior pin) chose — do not rewrite.
+    if (savedModel && prov && prov !== "auto") {
+      preferredModelFilled.current = true;
+      return;
+    }
+    // auto + a real non-weak model (e.g. gpt-5.6-terra) — keep it.
+    if (savedModel && !isWeakAutoDefaultModel(savedModel)) {
       preferredModelFilled.current = true;
       return;
     }
@@ -2260,7 +2292,14 @@ export function App() {
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
     pendingSettingsPatch.current = patch;
     postSettingsSave(patch, nextSettings);
-  }, [preferredPick.model, preferredPick.effort, post, settings]);
+  }, [
+    providerKeysHydrated,
+    preferredPick.model,
+    preferredPick.effort,
+    preferredPick.provider,
+    post,
+    settings,
+  ]);
 
   // Heal leftovers that cannot belong to the selected vendor (Ollama llama3.1
   // after switching to OpenAI). Unlike "missing from catalog", this is a hard

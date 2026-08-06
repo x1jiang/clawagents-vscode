@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.156**
+Publisher **`clawagents`** · version **1.0.157**
 
+- [ ] GitHub release `v1.0.157` + VSIX (default model: keyed providers, prefer OpenAI Terra)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.156` + VSIX (MCP SSE timedelta timeout TypeError; floor clawagents **6.20.57**)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] clawagents **6.20.57** on GitHub + PyPI (coerce MCP SSE/HTTP timeouts to float seconds)

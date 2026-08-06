@@ -62,6 +62,7 @@ test("overlayHostKeyAvailability clears false (no key) when host has key", () =>
       openai: true,
       anthropic: false,
       gemini: false,
+      xai: false,
       iam: false,
       mantle: false,
       bag: false,
@@ -75,11 +76,13 @@ test("applyKeyFlagsToFallback leaves Ollama available without a key slot", () =>
   const rows = mod.applyKeyFlagsToFallback(
     [
       { id: "openai", name: "OpenAI", available: true, models: [] },
+      { id: "xai", name: "xAI (Grok)", available: true, models: [] },
       { id: "ollama", name: "Ollama (local)", available: true, models: [] },
     ],
-    { openai: false, anthropic: false, gemini: false, bedrock: false },
+    { openai: false, anthropic: false, gemini: false, bedrock: false, xai: false },
   );
   assert.equal(rows.find((r) => r.id === "openai").available, false);
+  assert.equal(rows.find((r) => r.id === "xai").available, false);
   assert.equal(rows.find((r) => r.id === "ollama").available, true);
 });
 
@@ -89,7 +92,10 @@ test("modelFitsProvider rejects ollama leftovers on OpenAI", () => {
   assert.equal(mod.modelFitsProvider("llama3.1", "openai"), false);
   assert.equal(mod.modelFitsProvider("gpt-5.6-luna", "openai"), true);
   assert.equal(mod.modelFitsProvider("llama3.1", "ollama"), true);
+  assert.equal(mod.modelFitsProvider("grok-4.5", "openai"), false);
+  assert.equal(mod.modelFitsProvider("grok-4.5", "xai"), true);
   assert.equal(mod.defaultModelForProvider("openai"), mod.PREFERRED_OPENAI_MODEL);
+  assert.equal(mod.defaultModelForProvider("xai"), mod.PREFERRED_XAI_MODEL);
 });
 
 test("OpenAI defaults to GPT-5.6 Terra", () => {
@@ -107,18 +113,20 @@ test("pickPreferredModel pins OpenAI + Terra when the OpenAI key is available", 
     anthropic: false,
     gemini: false,
     bedrock: false,
+    xai: true,
   });
   const pick = mod.pickPreferredModel(keyed);
   assert.equal(pick.model, "gpt-5.6-terra");
   assert.equal(pick.provider, "openai");
   assert.equal(pick.effort, "medium");
 
-  // OpenAI key wins over Gemini even when both are present.
+  // OpenAI key wins over Gemini and xAI even when all are present.
   const both = mod.applyKeyFlagsToFallback(mod.FALLBACK_PROVIDERS, {
     openai: true,
     anthropic: false,
     gemini: true,
     bedrock: false,
+    xai: true,
   });
   assert.deepEqual(mod.pickPreferredModel(both), {
     model: "gpt-5.6-terra",
@@ -126,17 +134,39 @@ test("pickPreferredModel pins OpenAI + Terra when the OpenAI key is available", 
     provider: "openai",
   });
 
-  // No OpenAI key → Gemini preferred when available.
+  // No OpenAI key → Gemini preferred when available (before xAI).
   const geminiOnly = mod.applyKeyFlagsToFallback(mod.FALLBACK_PROVIDERS, {
     openai: false,
     anthropic: false,
     gemini: true,
     bedrock: false,
+    xai: true,
   });
   assert.deepEqual(mod.pickPreferredModel(geminiOnly), {
     model: mod.PREFERRED_GEMINI_MODEL,
     provider: "gemini",
   });
+
+  // xAI only → Grok.
+  const xaiOnly = mod.applyKeyFlagsToFallback(mod.FALLBACK_PROVIDERS, {
+    openai: false,
+    anthropic: false,
+    gemini: false,
+    bedrock: false,
+    xai: true,
+  });
+  assert.deepEqual(mod.pickPreferredModel(xaiOnly), {
+    model: mod.PREFERRED_XAI_MODEL,
+    provider: "xai",
+  });
+});
+
+test("isWeakAutoDefaultModel flags race-time Grok/Ollama picks", () => {
+  assert.equal(mod.isWeakAutoDefaultModel(""), true);
+  assert.equal(mod.isWeakAutoDefaultModel("grok-4.5"), true);
+  assert.equal(mod.isWeakAutoDefaultModel("llama3.1"), true);
+  assert.equal(mod.isWeakAutoDefaultModel("gpt-5.6-terra"), false);
+  assert.equal(mod.isWeakAutoDefaultModel("claude-sonnet-4-5"), false);
 });
 
 test("the default OpenAI model is offered and correctly labelled", () => {
