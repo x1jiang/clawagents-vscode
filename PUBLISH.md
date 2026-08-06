@@ -1,8 +1,8 @@
 Publisher **`clawagents`** · version **1.0.156**
 
-- [ ] GitHub release `v1.0.156` + VSIX (MCP SSE timedelta timeout TypeError; floor clawagents **6.20.57**)
+- [x] GitHub release `v1.0.156` + VSIX (MCP SSE timedelta timeout TypeError; floor clawagents **6.20.57**)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [ ] clawagents **6.20.57** on GitHub + PyPI (coerce MCP SSE/HTTP timeouts to float seconds)
+- [x] clawagents **6.20.57** on GitHub + PyPI (coerce MCP SSE/HTTP timeouts to float seconds)
 - [x] GitHub release `v1.0.155` + VSIX (OpenAI key → default GPT-5.6 Terra)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] clawagents **6.20.56** on GitHub + PyPI (OpenAI default model → gpt-5.6-terra)
