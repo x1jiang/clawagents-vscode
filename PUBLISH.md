@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.158**
+Publisher **`clawagents`** · version **1.0.159**
 
+- [x] GitHub release `v1.0.159` + VSIX (prevent Settings refresh `/providers?probe=1` timeout from aborting active chats)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.158` + VSIX (Context Mode MCP 2.x ClientSession timeout compatibility; floor clawagents **6.20.58**)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally; PyPI upload of 6.20.58 is also pending its API token.
 - [x] GitHub release `v1.0.157` + VSIX (default model: keyed providers, prefer OpenAI Terra)

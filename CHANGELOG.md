@@ -1,3 +1,7 @@
+## 1.0.159
+
+- **Fix chats aborted by Settings refresh.** Opening or saving Settings used to live-probe OpenAI/Mantle and kill the whole sidecar when `/providers?probe=1` exceeded its 8-second local RPC timeout—taking any active chat stream down with it. Ordinary refreshes now use the cached provider catalog; only explicit credential/endpoint checks use the network. Skill previews now scan in a worker thread with their own 30-second deadline, so a large personal skills library cannot block chat SSE delivery.
+
 ## 1.0.158
 
 - **Fix Context Mode when an existing sidecar has MCP 2.x installed.** The shared `clawagents` client now supplies the numeric `ClientSession` timeout MCP 2.x expects instead of a `datetime.timedelta`, preventing `unsupported operand type(s) for +: 'float' and 'datetime.timedelta'` immediately after “Running…”. Requires **clawagents 6.20.58**; **Install/Upgrade Python Dependencies** or **Restart Sidecar** updates the managed environment.

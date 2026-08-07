@@ -703,19 +703,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       includeContextByDefault: this.config.includeContextByDefault,
     });
 
-    // Fire-and-forget a live probe so the UI gets remote models (e.g. OpenAI/Mantle) shortly after ready.
-    if (this.sidecar.current) {
-      this.gateway
-        .getProviders({ probe: true })
-        .then((probed) => {
-          if (this.sidecar.current) {
-            void this.postSettingsWithKeyFlags(settings, probed);
-          }
-        })
-        .catch(() => {
-          /* ignore */
-        });
-    }
+    // Do not start a live provider probe in the background. An endpoint can
+    // legitimately take longer than the local RPC deadline, and it must not
+    // compete with (or abort) an active chat. Explicit credential/endpoint
+    // checks still perform the live request.
   }
 
   /** Attach authoritative key flags whenever we push a providers catalog. */
@@ -1342,13 +1333,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         try {
           await this.sidecar.ensureStarted();
           const settings = await this.gateway.getSettings();
-          // Explicit Settings open — allow one live credential probe.
-          const providers = await this.gateway.getProviders({ probe: true });
+          // Opening Settings must never make network I/O compete with a chat.
+          // Explicit credential and endpoint checks are the live-probe path.
+          const providers = await this.gateway.getProviders({ probe: false });
           await this.postSettingsWithKeyFlags(settings, providers);
           const skills = await this.gateway.getSkills();
           this.post({ type: "skills_preview", ...skills });
         } catch (err) {
-          if (isSidecarTransportError(err)) {
+          if (isSidecarTransportError(err) && !this.busy) {
             this.sidecar.invalidate("load_settings transport failure");
           }
           this.post({
@@ -1528,19 +1520,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             keys.some((k) => JSON.stringify(previous[k] ?? null) !== JSON.stringify(settings[k] ?? null));
           const skillsChanged = changed(skillKeys);
           const catalogChanged = changed(catalogKeys);
-          const mantleMode =
-            String(settings.bedrock_mode || "").toLowerCase() === "mantle" ||
-            /bedrock-mantle\./i.test(String(settings.base_url || ""));
-          const ollamaMode =
-            String(settings.provider || "").toLowerCase() === "ollama";
-          // On provider/endpoint change: refresh catalog. Mantle + Ollama use
-          // live probes; others stay cheap (probe=0).
+          // Provider/endpoint changes refresh the local catalog only. A live
+          // probe belongs to an explicit check; it cannot be allowed to time
+          // out and disrupt an in-flight chat.
           let providers: unknown[] | undefined;
           if (catalogChanged) {
             try {
-              providers = await this.gateway.getProviders({
-                probe: mantleMode || ollamaMode,
-              });
+              providers = await this.gateway.getProviders({ probe: false });
             } catch {
               /* catalog refresh is best-effort */
             }
@@ -1556,7 +1542,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             }
           }
         } catch (err) {
-          if (isSidecarTransportError(err)) {
+          if (isSidecarTransportError(err) && !this.busy) {
             this.sidecar.invalidate("save_settings transport failure");
           }
           this.post({

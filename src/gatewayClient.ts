@@ -381,7 +381,9 @@ export class GatewayClient {
       quarantined?: Record<string, string>;
       /** Loader diagnostics (spec violations, oversized/skipped files). */
       warnings?: string[];
-    }>(this.requireHandle(), "GET", "/skills");
+    // Personal skill libraries can be large; this is a Settings preview, not
+    // a sidecar-health signal. Give its worker scan room to finish.
+    }>(this.requireHandle(), "GET", "/skills", undefined, 30_000);
   }
 
   putSettings(settings: Record<string, unknown>) {

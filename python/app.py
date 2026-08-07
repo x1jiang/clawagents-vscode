@@ -1005,7 +1005,10 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return preview_skills()
+        # SkillStore may walk and parse several personal libraries. Running it
+        # on the event loop pauses SSE keep-alives and chat delivery, so a
+        # Settings preview must use a worker thread.
+        return await asyncio.to_thread(preview_skills)
 
     @app.get("/mcp")
     async def mcp_list(request: Request):
