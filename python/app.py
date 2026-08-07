@@ -489,6 +489,9 @@ class AutoApprove(BaseModel):
     # to True runs without a confirmation prompt. Defaults are opt-in (safe).
     edit: bool = False
     execute: bool = False
+    # Context Mode code execution (ctx_execute and friends). Gated apart from
+    # `execute` because it runs arbitrary code with no sandbox. Default off.
+    ctx: bool = False
     # web_fetch / web_search. Default off — ask first.
     web: bool = False
     # browser_* tools (also requires settings.browser_tools). Default off.
@@ -607,6 +610,10 @@ def _tool_category(name: str) -> str:
         return "web"
     if name in _BROWSER_TOOLS:
         return "browser"
+    from mcp_loader import CONTEXT_MODE_WRITE_TOOLS
+
+    if name in CONTEXT_MODE_WRITE_TOOLS:
+        return "ctx"
     return "execute"
 
 
@@ -731,7 +738,8 @@ def _make_before_tool(
         """Granular auto-approve (Cline-style). Authoritative when provided.
 
         'Edit' auto-approve only covers in-workspace files; edits outside the
-        workspace still prompt. 'Execute' / 'web' / 'browser' have no path.
+        workspace still prompt. 'Execute' / 'ctx' / 'web' / 'browser' have no
+        path.
         """
         if auto_approve is None:
             # Legacy / direct-API behavior: fall back to mode heuristics.
@@ -742,6 +750,8 @@ def _make_before_tool(
             return bool(auto_approve.web)
         if category == "browser":
             return bool(auto_approve.browser)
+        if category == "ctx":
+            return bool(auto_approve.ctx)
         return bool(auto_approve.execute)
 
     def _is_readonly_shell(command: str | None) -> bool:

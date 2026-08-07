@@ -73,6 +73,7 @@ const STATE_KEY = "clawagents.chatState.v2";
 const DEFAULT_AUTO_APPROVE: AutoApprove = {
   edit: true,
   execute: true,
+  ctx: false,
   web: false,
   browser: false,
 };

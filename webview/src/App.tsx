@@ -819,6 +819,7 @@ export function App() {
   const [autoApprove, setAutoApprove] = useState<AutoApprove>({
     edit: true,
     execute: true,
+    ctx: false,
     web: false,
     browser: false,
   });
@@ -2093,7 +2094,9 @@ export function App() {
     commitSetting("allow_full_access", on);
     if (on) {
       // Full access = auto-approve edits/commands + OS sandbox off (sidecar).
-      setAutoApprove((a) => ({ ...a, edit: true, execute: true }));
+      // full_access short-circuits the tool gate entirely, so ctx is on too —
+      // leaving its box clear would misreport what the agent may do.
+      setAutoApprove((a) => ({ ...a, edit: true, execute: true, ctx: true }));
       if (workMode !== "plan") {
         setMode("full_access");
         post({ type: "set_mode", mode: "full_access" });
@@ -5060,6 +5063,7 @@ export function App() {
                         settings.allow_full_access && "Full access",
                         autoApprove.edit && "Edit",
                         autoApprove.execute && "Execute",
+                        autoApprove.ctx && "ctx_execute",
                         autoApprove.web && "Web",
                         autoApprove.browser && "Browser",
                         settings.allow_clinical_samples && "Clinical samples",
@@ -5083,13 +5087,27 @@ export function App() {
                     />
                     Edit files in workspace
                   </label>
-                  <label className="check">
+                  <label
+                    className="check"
+                    title="Shell commands and other write-class tools. Read-only commands never ask."
+                  >
                     <input
                       type="checkbox"
                       checked={autoApprove.execute}
                       onChange={() => toggleApprove("execute")}
                     />
-                    Run commands &amp; ctx_execute
+                    Run commands
+                  </label>
+                  <label
+                    className="check"
+                    title="ctx_execute, ctx_execute_file, ctx_batch_execute, ctx_purge, ctx_upgrade. These run arbitrary code and can write files — ctx_execute is not a sandbox. Off = ask each time."
+                  >
+                    <input
+                      type="checkbox"
+                      checked={autoApprove.ctx}
+                      onChange={() => toggleApprove("ctx")}
+                    />
+                    Context Mode code (ctx_execute)
                   </label>
                   <label
                     className="check"

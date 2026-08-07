@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.159**
+Publisher **`clawagents`** · version **1.0.161**
 
+- [x] GitHub release `v1.0.161` + VSIX (fix MCP discovery deadlock that hung every chat on "Running…"; split `ctx_execute` out of the Run-commands auto-approve; floor clawagents **6.20.59**)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
+- [x] clawagents **6.20.59** on GitHub + PyPI (MCP tool discovery no longer deadlocks `create_claw_agent`)
 - [x] GitHub release `v1.0.159` + VSIX (prevent Settings refresh `/providers?probe=1` timeout from aborting active chats)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.158` + VSIX (Context Mode MCP 2.x ClientSession timeout compatibility; floor clawagents **6.20.58**)

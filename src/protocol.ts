@@ -7,7 +7,14 @@ export type InteractionStyle = "interactive" | "auto";
 
 export type AutoApprove = {
   edit: boolean;
+  /** Shell `execute` and other write-class tools. */
   execute: boolean;
+  /**
+   * Context Mode code execution (ctx_execute / ctx_execute_file /
+   * ctx_batch_execute / ctx_purge / ctx_upgrade). Gated separately from
+   * `execute`: these run arbitrary code and are not sandboxed.
+   */
+  ctx: boolean;
   web: boolean;
   /** browser_* tools (requires Settings → Browser tools). */
   browser: boolean;
@@ -487,7 +494,7 @@ function opaqueId(value: unknown): value is string {
 function autoApprove(value: unknown): boolean {
   if (value === undefined) return true;
   if (!record(value)) return false;
-  return ["edit", "execute", "web", "browser"].every(
+  return ["edit", "execute", "ctx", "web", "browser"].every(
     (key) => value[key] === undefined || typeof value[key] === "boolean",
   );
 }
