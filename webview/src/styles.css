@@ -1901,3 +1901,21 @@ button.chat-pin.active {
   right: 2px;
   background: color-mix(in srgb, var(--bg) 80%, transparent);
 }
+
+/* ── Chat attention badge (pending interaction) ─────────────────────── */
+.chat-attention-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+  margin-right: 6px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  animation: pulse-attention 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-attention {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

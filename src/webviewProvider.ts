@@ -152,6 +152,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private goalMode = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
   private queue: string[] = [];
+  /** Buffered interactive events (permission / ask / plan approval) for
+   *  conversations that are not currently displayed. Keyed by chatId.
+   *  Flushed to the webview when the user switches back to that chat. */
+  private pendingInteractions: Map<string, HostToWebview[]> = new Map();
   /** True while Stop is clearing/promoting stranded redirects. */
   private cancelling = false;
   /** Image attachments staged for the next send (base64 stays host-side). */
@@ -923,6 +927,16 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         try {
           const chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
           await this.postChatRestore(msg.chatId, chat);
+          // Flush any buffered interactive events (permission / ask / plan
+          // approval) that arrived while this chat was in the background.
+          const pending = this.pendingInteractions.get(msg.chatId);
+          if (pending?.length) {
+            for (const ev of pending) {
+              this.post(ev);
+            }
+            this.pendingInteractions.delete(msg.chatId);
+            this.post({ type: "chat_attention", chatId: msg.chatId, clear: true });
+          }
         } catch (err) {
           this.post({
             type: "error",
@@ -2592,6 +2606,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     if (chatId) {
       this.chatId = chatId;
     }
+    // Capture the chat ID that owns this run. Even if the user switches to
+    // a different conversation mid-stream (updating this.chatId), streaming
+    // events must be tagged with the *originating* chat so the webview can
+    // route them to the correct thread.
+    const runChatId = this.chatId;
 
     let task = trimmed;
     if (includeContext) {
@@ -2669,6 +2688,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 this.post({
                   type: "status",
                   message: `Queued stranded redirect${prompts.length > 1 ? "s" : ""} (${this.queue.length})`,
+                  chatId: runChatId,
                 });
               }
               // Do not post stranded_interject to the webview — it was silently
@@ -2676,8 +2696,31 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               // starts the next turn.
               return;
             }
+            // Tag every event with the originating chatId so the webview
+            // can route it to the correct conversation thread.
+            const tagged = { ...ev, chatId: runChatId } as HostToWebview;
+
+            // Interactive events that block the agent must not be silently
+            // dropped when the user is viewing a different conversation.
+            // Buffer them and notify the webview with a badge instead.
+            const isInteractive =
+              ev.type === "permission_required" ||
+              ev.type === "ask_user_required" ||
+              ev.type === "plan_approval_required";
+            if (isInteractive && runChatId && runChatId !== this.chatId) {
+              const buf = this.pendingInteractions.get(runChatId) || [];
+              buf.push(tagged);
+              this.pendingInteractions.set(runChatId, buf);
+              const reason =
+                ev.type === "permission_required" ? "permission" as const
+                : ev.type === "ask_user_required" ? "ask" as const
+                : "plan_approval" as const;
+              this.post({ type: "chat_attention", chatId: runChatId, reason });
+              return;
+            }
+
             if (ev.type === "file_changed" && ev.path) {
-              this.post(ev);
+              this.post(tagged);
               if (
                 vscode.workspace
                   .getConfiguration("clawagents")
@@ -2687,7 +2730,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               }
               return;
             }
-            this.post(ev);
+            this.post(tagged);
           },
         },
         model,

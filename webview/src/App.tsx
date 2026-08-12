@@ -849,6 +849,7 @@ export function App() {
   );
   const [sidecarDetail, setSidecarDetail] = useState<string | undefined>();
   const [chatId, setChatId] = useState<string | undefined>();
+  const chatIdRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
@@ -856,6 +857,8 @@ export function App() {
   const [renamingChatId, setRenamingChatId] = useState<string | undefined>();
   const [renameDraft, setRenameDraft] = useState("");
   const [pendingDeleteChatId, setPendingDeleteChatId] = useState<string | undefined>();
+  /** Conversations with pending interactive prompts (permission / ask / plan approval). */
+  const [chatAttention, setChatAttention] = useState<Map<string, string>>(new Map());
   const [panel, setPanel] = useState<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
   const pendingForkRef = useRef(false);
@@ -1105,7 +1108,22 @@ export function App() {
     [workspace],
   );
 
+  // Keep chatIdRef in sync so the onMessage closure (which never
+  // re-creates thanks to the [] deps array) can read the latest value.
   useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
+
+  useEffect(() => {
+    // Returns true when an incoming streaming event belongs to a different
+    // conversation than the one currently displayed. Events without a
+    // chatId field are assumed to belong to the current conversation
+    // (backward compatibility).
+    const isStaleEvent = (msg: HostToWebview): boolean => {
+      const id = (msg as { chatId?: string }).chatId;
+      return Boolean(id && chatIdRef.current && id !== chatIdRef.current);
+    };
+
     const onMessage = (event: MessageEvent<HostToWebview>) => {
       const msg = event.data;
       if (!msg || typeof msg !== "object" || !("type" in msg)) {
@@ -1477,6 +1495,7 @@ export function App() {
           }
           break;
         case "user_echo":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => [...prev, { kind: "user", text: msg.text }]);
           setBusy(true);
           streamingRef.current = false;
@@ -1485,6 +1504,7 @@ export function App() {
           runCommittedRef.current = false;
           break;
         case "status":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -1496,6 +1516,7 @@ export function App() {
           });
           break;
         case "assistant_delta":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -1530,6 +1551,7 @@ export function App() {
           break;
         }
         case "tool_started":
+          if (isStaleEvent(msg)) break;
           streamingRef.current = false;
           setItems((prev) => [
             ...prev,
@@ -1544,6 +1566,7 @@ export function App() {
           ]);
           break;
         case "tool_completed":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => {
             let matched = false;
             const next = prev.map((it) => {
@@ -1617,6 +1640,7 @@ export function App() {
           setGoalMode(false);
           break;
         case "file_changed":
+          if (isStaleEvent(msg)) break;
           if (msg.path) {
             setItems((prev) => [
               ...prev,
@@ -1630,6 +1654,7 @@ export function App() {
           }
           break;
         case "usage": {
+          if (isStaleEvent(msg)) break;
           // Never treat missing lastInputTokens as promptTokens — the latter is
           // run-cumulative and would inflate the context meter after multi-round loops.
           const next = {
@@ -1720,6 +1745,7 @@ export function App() {
           break;
         }
         case "done": {
+          if (isStaleEvent(msg)) break;
           setBusy(false);
           streamingRef.current = false;
           markStalePlanApprovals(setItems);
@@ -1781,6 +1807,7 @@ export function App() {
           break;
         }
         case "error":
+          if (isStaleEvent(msg)) break;
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
@@ -1800,6 +1827,7 @@ export function App() {
           }
           break;
         case "cancelled":
+          if (isStaleEvent(msg)) break;
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
@@ -1868,6 +1896,17 @@ export function App() {
               { kind: "status", text: msg.detail },
             ]);
           }
+          break;
+        case "chat_attention":
+          setChatAttention((prev) => {
+            const next = new Map(prev);
+            if (msg.clear) {
+              next.delete(msg.chatId);
+            } else {
+              next.set(msg.chatId, msg.reason || "pending");
+            }
+            return next;
+          });
           break;
         default:
           break;
@@ -2714,6 +2753,9 @@ export function App() {
             }}
           >
             <div className="chat-title" title={title}>
+              {chatAttention.has(c.id) && (
+                <span className="chat-attention-dot" title="Needs your attention" />
+              )}
               {title}
             </div>
             <div className="muted tiny">{meta}</div>

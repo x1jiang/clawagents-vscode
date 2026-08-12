@@ -62,12 +62,12 @@ export type HostToWebview =
       /** Prefer Settings / clawagents.includeContextByDefault for the Context checkbox. */
       includeContextByDefault?: boolean;
     }
-  | { type: "status"; message: string }
+  | { type: "status"; message: string; chatId?: string }
   | { type: "view_hidden" }
-  | { type: "user_echo"; text: string }
-  | { type: "assistant_delta"; delta: string }
-  | { type: "assistant_message"; text: string }
-  | { type: "tool_started"; id: string; name: string; args?: unknown; filePath?: string }
+  | { type: "user_echo"; text: string; chatId?: string }
+  | { type: "assistant_delta"; delta: string; chatId?: string }
+  | { type: "assistant_message"; text: string; chatId?: string }
+  | { type: "tool_started"; id: string; name: string; args?: unknown; filePath?: string; chatId?: string }
   | {
       type: "tool_completed";
       id: string;
@@ -75,6 +75,7 @@ export type HostToWebview =
       success: boolean;
       output?: string;
       filePath?: string;
+      chatId?: string;
     }
   | {
       type: "permission_required";
@@ -83,19 +84,22 @@ export type HostToWebview =
       filePath?: string;
       command?: string;
       reason?: string;
+      chatId?: string;
     }
-  | { type: "ask_user_required"; requestId: string; question: string }
+  | { type: "ask_user_required"; requestId: string; question: string; chatId?: string }
   | {
       type: "plan_approval_required";
       requestId: string;
       planText: string;
+      chatId?: string;
     }
-  | { type: "plan_approved"; mode?: AgentMode }
+  | { type: "plan_approved"; mode?: AgentMode; chatId?: string }
   | {
       type: "file_changed";
       path: string;
       snapshotId?: string;
       snapshotRel?: string;
+      chatId?: string;
     }
   | {
       type: "usage";
@@ -111,11 +115,13 @@ export type HostToWebview =
       maxInputTokens?: number;
       longContextRequestCount?: number;
       nextPromptEstTokens?: number;
+      chatId?: string;
     }
   | {
       type: "compact_progress";
       phase: string;
       message?: string;
+      chatId?: string;
     }
   | {
       type: "checkpoint";
@@ -125,6 +131,7 @@ export type HostToWebview =
       label?: string;
       messageCount?: number;
       ts?: number;
+      chatId?: string;
     }
   | {
       type: "done";
@@ -134,9 +141,16 @@ export type HostToWebview =
       usage?: unknown;
       sessionCostUsd?: number;
       runCostUsd?: number;
+      chatId?: string;
     }
-  | { type: "error"; message: string }
-  | { type: "cancelled" }
+  | { type: "error"; message: string; chatId?: string }
+  | { type: "cancelled"; chatId?: string }
+  | {
+      type: "chat_attention";
+      chatId: string;
+      reason?: "permission" | "ask" | "plan_approval";
+      clear?: boolean;
+    }
   | { type: "prepend"; text: string }
   | {
       type: "restore";
