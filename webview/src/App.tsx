@@ -12,6 +12,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  getVsCodeApi,
   post,
   PINNED_CONTEXT_MAX_CHARS,
   PLAN_FEEDBACK_MAX_CHARS,
@@ -41,6 +42,21 @@ const EFFORT_OPTIONS = [
   { value: "xhigh", label: "Extra High" },
   { value: "none", label: "None" },
 ] as const;
+
+const MODE_HELP = {
+  goal:
+    "Goal autopilot runs planner → verify → strategist. It prefers start_goal / update_goal for multi-step work.",
+  plan:
+    "Explore and draft .clawagents/plan.md, then choose Approve, Request changes, or Reject on exit. Plan always uses Ask.",
+  act:
+    "Execute work. With Ask, unchecked Edit/Execute/Web/Browser actions ask first; with Auto, ask_user is skipped but Auto-approve still applies.",
+  ask:
+    "Ask (Interactive): ask you when unclear. In Act, unchecked Edit/Execute/Web/Browser actions ask first. Plan always uses Ask.",
+  auto:
+    "Auto: skip ask_user and decide without clarification in Act. Auto-approve toggles still control Edit/Execute/Web/Browser actions.",
+  autoApprove:
+    "In Act, enabled categories run without asking; unchecked categories ask first. These toggles still apply when Auto skips ask_user.",
+} as const;
 
 function modelSupportsEffort(model: string): boolean {
   let m = model.trim().toLowerCase();
@@ -154,6 +170,81 @@ type SkillsPreview = {
 };
 
 type Panel = "chat" | "history" | "settings" | "diagnostics";
+
+type ConversationTab = {
+  id: string;
+  title: string;
+  pinned: boolean;
+};
+
+type ConversationTabMenu = {
+  chatId: string;
+  x: number;
+  y: number;
+};
+
+function persistedConversationTabs(): ConversationTab[] {
+  try {
+    const saved = getVsCodeApi().getState() as { conversationTabs?: unknown } | undefined;
+    if (!Array.isArray(saved?.conversationTabs)) return [];
+    const seen = new Set<string>();
+    const tabs: ConversationTab[] = [];
+    for (const candidate of saved.conversationTabs) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const value = candidate as Partial<ConversationTab>;
+      const id = typeof value.id === "string" ? value.id.trim() : "";
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      tabs.push({
+        id,
+        title:
+          typeof value.title === "string" && value.title.trim()
+            ? value.title.trim()
+            : id,
+        pinned: Boolean(value.pinned),
+      });
+    }
+    return tabs;
+  } catch {
+    return [];
+  }
+}
+
+function reconcileConversationTabs(
+  current: ConversationTab[],
+  chats: ChatSummary[],
+): ConversationTab[] {
+  const summaries = new Map(chats.map((chat) => [chat.id, chat]));
+  return current.map((tab) => {
+    const summary = summaries.get(tab.id);
+    if (!summary) return tab;
+    return {
+      id: tab.id,
+      title: summary.title?.trim() || tab.title || tab.id,
+      pinned: Boolean(summary.pinned),
+    };
+  });
+}
+
+function upsertConversationTab(
+  current: ConversationTab[],
+  chatId: string,
+  chats: ChatSummary[],
+  title?: string,
+): ConversationTab[] {
+  const summary = chats.find((chat) => chat.id === chatId);
+  const index = current.findIndex((tab) => tab.id === chatId);
+  const previous = index >= 0 ? current[index] : undefined;
+  const next: ConversationTab = {
+    id: chatId,
+    title: title?.trim() || summary?.title?.trim() || previous?.title || chatId,
+    pinned: summary?.pinned === undefined ? Boolean(previous?.pinned) : Boolean(summary.pinned),
+  };
+  if (index < 0) return [...current, next];
+  const updated = [...current];
+  updated[index] = next;
+  return updated;
+}
 
 function resolvePerm(
   requestId: string,
@@ -863,6 +954,11 @@ export function App() {
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   /** Conversations with pending interactive prompts (permission / ask / plan approval). */
   const [chatAttention, setChatAttention] = useState<Map<string, string>>(new Map());
+  const [openConversationTabs, setOpenConversationTabs] = useState<ConversationTab[]>(
+    persistedConversationTabs,
+  );
+  const [conversationTabMenu, setConversationTabMenu] =
+    useState<ConversationTabMenu | null>(null);
   const [panel, setPanel] = useState<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
   const pendingForkRef = useRef(false);
@@ -1164,6 +1260,34 @@ export function App() {
   }, [chatId]);
 
   useEffect(() => {
+    const api = getVsCodeApi();
+    const previous = api.getState();
+    api.setState({
+      ...(previous && typeof previous === "object" ? previous : {}),
+      conversationTabs: openConversationTabs,
+    });
+  }, [openConversationTabs]);
+
+  useEffect(() => {
+    if (!conversationTabMenu) return;
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".conversation-tab-menu")) {
+        setConversationTabMenu(null);
+      }
+    };
+    const dismissWithEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConversationTabMenu(null);
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", dismissWithEscape);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", dismissWithEscape);
+    };
+  }, [conversationTabMenu]);
+
+  useEffect(() => {
     // Returns true when an incoming streaming event belongs to a different
     // conversation than the one currently displayed. Events without a
     // chatId field are assumed to belong to the current conversation
@@ -1230,6 +1354,12 @@ export function App() {
           chatIdRef.current = msg.chatId;
           setChatId(msg.chatId);
           setChats(msg.chats || []);
+          setOpenConversationTabs((previous) => {
+            const reconciled = reconcileConversationTabs(previous, msg.chats || []);
+            return msg.chatId
+              ? upsertConversationTab(reconciled, msg.chatId, msg.chats || [])
+              : reconciled;
+          });
           if (msg.settings) {
             const localKey = settingsSaveKey(settingsRef.current);
             const dirty =
@@ -1285,6 +1415,12 @@ export function App() {
         }
         case "chats":
           setChats(msg.chats || []);
+          setOpenConversationTabs((previous) => {
+            const reconciled = reconcileConversationTabs(previous, msg.chats || []);
+            return msg.chatId
+              ? upsertConversationTab(reconciled, msg.chatId, msg.chats || [])
+              : reconciled;
+          });
           setHistorySearching(false);
           if (msg.chatId) {
             chatIdRef.current = msg.chatId;
@@ -1505,6 +1641,16 @@ export function App() {
             const restoredChatId = msg.chatId || undefined;
             chatIdRef.current = restoredChatId;
             setChatId(restoredChatId);
+            if (restoredChatId) {
+              setOpenConversationTabs((previous) =>
+                upsertConversationTab(
+                  previous,
+                  restoredChatId,
+                  [],
+                  typeof msg.chatTitle === "string" ? msg.chatTitle : undefined,
+                ),
+              );
+            }
           }
           // Prefer persisted session total from chat meta (survives reload).
           resetSessionCost(
@@ -2192,9 +2338,58 @@ export function App() {
     setSelectedChatIds(new Set());
     // Change the routing guard immediately; waiting for React's effect leaves
     // a window where events from the old chat can enter the new transcript.
+    setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
+    setPanel("chat");
     chatIdRef.current = c.id;
     setChatId(c.id);
     post({ type: "select_chat", chatId: c.id });
+  };
+
+  const selectConversationTab = (tab: ConversationTab) => {
+    setConversationTabMenu(null);
+    setPanel("chat");
+    setOpenConversationTabs((previous) =>
+      upsertConversationTab(previous, tab.id, chats, tab.title),
+    );
+    if (tab.id === chatIdRef.current) return;
+    chatIdRef.current = tab.id;
+    setChatId(tab.id);
+    post({ type: "select_chat", chatId: tab.id });
+  };
+
+  const closeConversationTab = (closingId: string) => {
+    const closingIndex = openConversationTabs.findIndex((tab) => tab.id === closingId);
+    if (closingIndex < 0) return;
+    const remaining = openConversationTabs.filter((tab) => tab.id !== closingId);
+    setOpenConversationTabs(remaining);
+    setConversationTabMenu(null);
+    if (chatIdRef.current !== closingId) return;
+    const replacement = remaining[Math.min(closingIndex, remaining.length - 1)];
+    if (replacement) {
+      chatIdRef.current = replacement.id;
+      setChatId(replacement.id);
+      setPanel("chat");
+      post({ type: "select_chat", chatId: replacement.id });
+    } else {
+      setPanel("history");
+    }
+  };
+
+  const closeAllConversationTabs = () => {
+    setOpenConversationTabs([]);
+    setConversationTabMenu(null);
+    setPanel("history");
+  };
+
+  const toggleConversationTabPin = (tab: ConversationTab) => {
+    const pinned = !tab.pinned;
+    setOpenConversationTabs((previous) =>
+      previous.map((candidate) =>
+        candidate.id === tab.id ? { ...candidate, pinned } : candidate,
+      ),
+    );
+    setConversationTabMenu(null);
+    post({ type: "pin_chat", chatId: tab.id, pinned });
   };
 
   const beginRenameChat = (chat: ChatSummary) => {
@@ -3221,30 +3416,102 @@ export function App() {
             </button>
           </div>
         </div>
-        <nav className="tabs" role="tablist" aria-label="Panels">
-          {(["chat", "history", "settings", "diagnostics"] as Panel[]).map((p) => (
-            <button
-              key={p}
-              type="button"
-              role="tab"
-              aria-selected={panel === p}
-              className={panel === p ? "tab active" : "tab"}
-              onClick={() => {
-                setPanel(p);
-                if (p === "settings") {
-                  post({ type: "load_settings" });
-                  post({ type: "graphify_action", action: "status" });
-                }
-                if (p === "diagnostics") {
-                  post({ type: "load_diagnostics" });
-                  post({ type: "load_stats" });
-                }
-              }}
-            >
-              {p}
-            </button>
-          ))}
+        <nav className="tabs" aria-label="Navigation and open conversations">
+          <div className="panel-tabs" role="tablist" aria-label="Panels">
+            {(["chat", "history", "settings", "diagnostics"] as Panel[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                role="tab"
+                aria-selected={panel === p}
+                className={panel === p ? "tab active" : "tab"}
+                onClick={() => {
+                  setPanel(p);
+                  if (p === "chat" && chatIdRef.current) {
+                    setOpenConversationTabs((previous) =>
+                      upsertConversationTab(previous, chatIdRef.current!, chats),
+                    );
+                  }
+                  if (p === "settings") {
+                    post({ type: "load_settings" });
+                    post({ type: "graphify_action", action: "status" });
+                  }
+                  if (p === "diagnostics") {
+                    post({ type: "load_diagnostics" });
+                    post({ type: "load_stats" });
+                  }
+                }}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+          {openConversationTabs.length ? (
+            <>
+              <span className="tabs-divider" aria-hidden="true">|</span>
+              <div className="conversation-tabs" role="tablist" aria-label="Open conversations">
+                {openConversationTabs.map((tab) => (
+                  <div
+                    className={`conversation-tab${tab.id === chatId && panel === "chat" ? " active" : ""}`}
+                    key={tab.id}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setConversationTabMenu({
+                        chatId: tab.id,
+                        x: Math.max(8, Math.min(event.clientX, window.innerWidth - 172)),
+                        y: Math.max(8, Math.min(event.clientY, window.innerHeight - 118)),
+                      });
+                    }}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tab.id === chatId && panel === "chat"}
+                      aria-label={tab.title}
+                      className="conversation-tab-main"
+                      title={tab.title}
+                      onClick={() => selectConversationTab(tab)}
+                    >
+                      {tab.pinned ? <span className="conversation-tab-pin" aria-label="Pinned">●</span> : null}
+                      <span className="conversation-tab-title">{tab.title}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="conversation-tab-close"
+                      title={`Close ${tab.title}`}
+                      aria-label={`Close ${tab.title}`}
+                      onClick={() => closeConversationTab(tab.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : null}
         </nav>
+        {conversationTabMenu ? (() => {
+          const tab = openConversationTabs.find((candidate) => candidate.id === conversationTabMenu.chatId);
+          if (!tab) return null;
+          return (
+            <div
+              className="conversation-tab-menu"
+              role="menu"
+              aria-label={`${tab.title} tab options`}
+              style={{ left: conversationTabMenu.x, top: conversationTabMenu.y }}
+            >
+              <button type="button" role="menuitem" onClick={() => toggleConversationTabPin(tab)}>
+                {tab.pinned ? "Unpin thread" : "Pin thread"}
+              </button>
+              <button type="button" role="menuitem" onClick={() => closeConversationTab(tab.id)}>
+                Close
+              </button>
+              <button type="button" role="menuitem" onClick={closeAllConversationTabs}>
+                Close all
+              </button>
+            </div>
+          );
+        })() : null}
         {panel === "chat" && (
           <PinnedContext
             text={pinnedText}
@@ -5307,11 +5574,12 @@ export function App() {
             <div ref={autoApproveRef} className="autoapprove">
               <button
                 type="button"
-                className="aa-summary"
+                className="aa-summary has-tooltip tooltip-left"
                 onClick={() => setAutoApproveOpen((o) => !o)}
                 aria-expanded={autoApproveOpen}
                 aria-controls="autoapprove-options"
-                title="Actions the agent may take without asking each time"
+                aria-label={`Auto-approve. ${MODE_HELP.autoApprove}`}
+                data-tooltip={MODE_HELP.autoApprove}
               >
                 <span className="aa-caret">{autoApproveOpen ? "▴" : "▸"}</span>
                 Auto-approve:{" "}
@@ -5434,16 +5702,7 @@ export function App() {
                     Caveman mode <span className="muted tiny">(terse replies)</span>
                   </label>
                   <div className="muted tiny">
-                    In <strong>Goal</strong>, the agent runs planner→verify→strategist
-                    (prefer <code>start_goal</code> / <code>update_goal</code>).
-                    In <strong>Plan</strong>, the agent explores, drafts{" "}
-                    <code>.clawagents/plan.md</code>, then asks you to Approve / Request
-                    changes / Reject on exit — interaction is always Interactive.
-                    In <strong>Act + Interactive</strong>, unchecked Edit/Execute/Web/Browser ask
-                    first.
-                    In <strong>Act + Auto</strong>, ask_user is skipped; Auto-approve toggles still
-                    apply.
-                    <strong> Full access</strong> disables the OS sandbox (needed for gcloud
+                    <strong>Full access</strong> disables the OS sandbox (needed for gcloud
                     credentials under <code>~/.config</code>).
                     <strong> Clinical sample rows</strong> is off by default; turning it on lets
                     the agent paste real rows with patient ID / MRN / OR_LOG ID redacted.
@@ -5461,10 +5720,15 @@ export function App() {
                     type="button"
                     role="tab"
                     aria-selected={workMode === "goal"}
-                    className={workMode === "goal" ? "seg active" : "seg"}
+                    aria-label={`Goal. ${MODE_HELP.goal}`}
+                    className={
+                      workMode === "goal"
+                        ? "seg active has-tooltip tooltip-left"
+                        : "seg has-tooltip tooltip-left"
+                    }
                     onClick={() => setWorkMode("goal")}
                     disabled={busy}
-                    title="Goal autopilot — planner → execute → majority verifier (Grok /goal)."
+                    data-tooltip={MODE_HELP.goal}
                   >
                     Goal
                   </button>
@@ -5472,10 +5736,15 @@ export function App() {
                     type="button"
                     role="tab"
                     aria-selected={workMode === "plan"}
-                    className={workMode === "plan" ? "seg active" : "seg"}
+                    aria-label={`Plan. ${MODE_HELP.plan}`}
+                    className={
+                      workMode === "plan"
+                        ? "seg active has-tooltip tooltip-center"
+                        : "seg has-tooltip tooltip-center"
+                    }
                     onClick={() => setWorkMode("plan")}
                     disabled={busy}
-                    title="Read & reason only — proposes changes without editing or running"
+                    data-tooltip={MODE_HELP.plan}
                   >
                     Plan
                   </button>
@@ -5483,10 +5752,15 @@ export function App() {
                     type="button"
                     role="tab"
                     aria-selected={workMode === "act"}
-                    className={workMode === "act" ? "seg active" : "seg"}
+                    aria-label={`Act. ${MODE_HELP.act}`}
+                    className={
+                      workMode === "act"
+                        ? "seg active has-tooltip tooltip-right"
+                        : "seg has-tooltip tooltip-right"
+                    }
                     onClick={() => setWorkMode("act")}
                     disabled={busy}
-                    title="Execute — the auto-approve toggles decide what runs without a prompt"
+                    data-tooltip={MODE_HELP.act}
                   >
                     Act
                   </button>
@@ -5500,12 +5774,15 @@ export function App() {
                     type="button"
                     role="tab"
                     aria-selected={effectiveInteraction === "interactive"}
+                    aria-label={`Ask. ${MODE_HELP.ask}`}
                     className={
-                      effectiveInteraction === "interactive" ? "seg active" : "seg"
+                      effectiveInteraction === "interactive"
+                        ? "seg active has-tooltip tooltip-left"
+                        : "seg has-tooltip tooltip-left"
                     }
                     onClick={() => setInteractionStyle("interactive")}
                     disabled={busy || planAct === "plan"}
-                    title="Interactive: ask you when unclear — Plan always uses this"
+                    data-tooltip={MODE_HELP.ask}
                   >
                     Ask
                   </button>
@@ -5513,10 +5790,15 @@ export function App() {
                     type="button"
                     role="tab"
                     aria-selected={effectiveInteraction === "auto"}
-                    className={effectiveInteraction === "auto" ? "seg active" : "seg"}
+                    aria-label={`Auto. ${MODE_HELP.auto}`}
+                    className={
+                      effectiveInteraction === "auto"
+                        ? "seg active has-tooltip tooltip-right"
+                        : "seg has-tooltip tooltip-right"
+                    }
                     onClick={() => setInteractionStyle("auto")}
                     disabled={busy || planAct === "plan"}
-                    title="Auto: decide without asking — Act only; also auto-approves Edit/Execute/Web for the turn"
+                    data-tooltip={MODE_HELP.auto}
                   >
                     Auto
                   </button>
