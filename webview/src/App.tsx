@@ -214,15 +214,17 @@ function reconcileConversationTabs(
   current: ConversationTab[],
   chats: ChatSummary[],
 ): ConversationTab[] {
+  // `chats` is a full snapshot. Drop tabs the backend no longer has, and
+  // archived threads so they cannot be re-selected from the strip.
   const summaries = new Map(chats.map((chat) => [chat.id, chat]));
-  return current.map((tab) => {
+  return current.flatMap((tab) => {
     const summary = summaries.get(tab.id);
-    if (!summary) return tab;
-    return {
+    if (!summary || summary.archived) return [];
+    return [{
       id: tab.id,
       title: summary.title?.trim() || tab.title || tab.id,
       pinned: Boolean(summary.pinned),
-    };
+    }];
   });
 }
 
@@ -245,6 +247,12 @@ function upsertConversationTab(
   updated[index] = next;
   return updated;
 }
+
+const INTERACTIVE_EVENT_TYPES = new Set<HostToWebview["type"]>([
+  "permission_required",
+  "ask_user_required",
+  "plan_approval_required",
+]);
 
 function resolvePerm(
   requestId: string,
@@ -962,6 +970,8 @@ export function App() {
   const [panel, setPanel] = useState<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
   const pendingForkRef = useRef(false);
+  /** New chat does not know the created id yet; restore may legally change chatId. */
+  const pendingNewChatRef = useRef(false);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [skillsPreview, setSkillsPreview] = useState<SkillsPreview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -1303,6 +1313,20 @@ export function App() {
         return;
       }
       if (runScopedEventTypes.has(msg.type) && isStaleEvent(msg)) {
+        if (INTERACTIVE_EVENT_TYPES.has(msg.type)) {
+          const id = (msg as { chatId?: string }).chatId;
+          if (id) {
+            const reason =
+              msg.type === "permission_required" ? "permission"
+              : msg.type === "ask_user_required" ? "ask"
+              : "plan_approval";
+            setChatAttention((prev) => {
+              const next = new Map(prev);
+              next.set(id, reason);
+              return next;
+            });
+          }
+        }
         return;
       }
       switch (msg.type) {
@@ -1417,12 +1441,23 @@ export function App() {
           setChats(msg.chats || []);
           setOpenConversationTabs((previous) => {
             const reconciled = reconcileConversationTabs(previous, msg.chats || []);
-            return msg.chatId
-              ? upsertConversationTab(reconciled, msg.chatId, msg.chats || [])
-              : reconciled;
+            if (
+              msg.chatId &&
+              (pendingNewChatRef.current ||
+                !chatIdRef.current ||
+                msg.chatId === chatIdRef.current)
+            ) {
+              return upsertConversationTab(reconciled, msg.chatId, msg.chats || []);
+            }
+            return reconciled;
           });
           setHistorySearching(false);
-          if (msg.chatId) {
+          if (
+            msg.chatId &&
+            (pendingNewChatRef.current ||
+              !chatIdRef.current ||
+              msg.chatId === chatIdRef.current)
+          ) {
             chatIdRef.current = msg.chatId;
             setChatId(msg.chatId);
           }
@@ -1617,7 +1652,17 @@ export function App() {
         case "stats":
           setStats(msg.data);
           break;
-        case "restore":
+        case "restore": {
+          const pendingNew = pendingNewChatRef.current;
+          pendingNewChatRef.current = false;
+          if (
+            msg.chatId &&
+            chatIdRef.current &&
+            msg.chatId !== chatIdRef.current &&
+            !pendingNew
+          ) {
+            break;
+          }
           setItems((msg.items as ChatItem[]) || []);
           setRenderWindow(TRANSCRIPT_RENDER_CHUNK);
           setEventsHasMore(Boolean(msg.eventsHasMore));
@@ -1670,8 +1715,11 @@ export function App() {
               : `[Forked] ${rawTitle}`;
             setForkNotice({ title: displayTitle, chatId: (msg.chatId as string) || "" });
           }
-          setPanel("chat");
+          if (msg.chatId) {
+            setPanel("chat");
+          }
           break;
+        }
         case "prepend_items": {
           const older = (msg.items as ChatItem[]) || [];
           if (older.length) {
@@ -1804,38 +1852,53 @@ export function App() {
           });
           break;
         case "permission_required":
-          setItems((prev) => [
-            ...prev,
-            {
-              kind: "permission",
-              requestId: msg.requestId,
-              tool: msg.tool,
-              filePath: msg.filePath,
-              command: msg.command,
-              reason: msg.reason,
-            },
-          ]);
+          setItems((prev) => {
+            if (prev.some((it) => it.kind === "permission" && it.requestId === msg.requestId)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                kind: "permission",
+                requestId: msg.requestId,
+                tool: msg.tool,
+                filePath: msg.filePath,
+                command: msg.command,
+                reason: msg.reason,
+              },
+            ];
+          });
           break;
         case "ask_user_required":
-          setItems((prev) => [
-            ...prev,
-            {
-              kind: "ask",
-              requestId: msg.requestId,
-              question: msg.question,
-              draft: "",
-            },
-          ]);
+          setItems((prev) => {
+            if (prev.some((it) => it.kind === "ask" && it.requestId === msg.requestId)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                kind: "ask",
+                requestId: msg.requestId,
+                question: msg.question,
+                draft: "",
+              },
+            ];
+          });
           break;
         case "plan_approval_required":
-          setItems((prev) => [
-            ...prev,
-            {
-              kind: "plan_approval",
-              requestId: msg.requestId,
-              planText: msg.planText || "",
-            },
-          ]);
+          setItems((prev) => {
+            if (prev.some((it) => it.kind === "plan_approval" && it.requestId === msg.requestId)) {
+              return prev;
+            }
+            return [
+              ...prev,
+              {
+                kind: "plan_approval",
+                requestId: msg.requestId,
+                planText: msg.planText || "",
+              },
+            ];
+          });
           break;
         case "plan_approved":
           setMode(msg.mode || "auto");
@@ -2336,6 +2399,7 @@ export function App() {
     }
 
     setSelectedChatIds(new Set());
+    pendingNewChatRef.current = false;
     // Change the routing guard immediately; waiting for React's effect leaves
     // a window where events from the old chat can enter the new transcript.
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
@@ -2347,6 +2411,7 @@ export function App() {
 
   const selectConversationTab = (tab: ConversationTab) => {
     setConversationTabMenu(null);
+    pendingNewChatRef.current = false;
     setPanel("chat");
     setOpenConversationTabs((previous) =>
       upsertConversationTab(previous, tab.id, chats, tab.title),
@@ -2366,19 +2431,26 @@ export function App() {
     if (chatIdRef.current !== closingId) return;
     const replacement = remaining[Math.min(closingIndex, remaining.length - 1)];
     if (replacement) {
+      pendingNewChatRef.current = false;
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
       setPanel("chat");
       post({ type: "select_chat", chatId: replacement.id });
     } else {
+      chatIdRef.current = undefined;
+      setChatId(undefined);
       setPanel("history");
+      post({ type: "deselect_chat" });
     }
   };
 
   const closeAllConversationTabs = () => {
     setOpenConversationTabs([]);
     setConversationTabMenu(null);
+    chatIdRef.current = undefined;
+    setChatId(undefined);
     setPanel("history");
+    post({ type: "deselect_chat" });
   };
 
   const toggleConversationTabPin = (tab: ConversationTab) => {
@@ -3840,6 +3912,7 @@ export function App() {
               className="primary"
               onClick={() => {
                 clearHistorySelection();
+                pendingNewChatRef.current = true;
                 post({ type: "new_chat" });
               }}
             >
@@ -5892,7 +5965,10 @@ export function App() {
                 className="ghost tiny"
                 disabled={busy}
                 title="Start a new chat"
-                onClick={() => post({ type: "new_chat" })}
+                onClick={() => {
+                  pendingNewChatRef.current = true;
+                  post({ type: "new_chat" });
+                }}
               >
                 New
               </button>
