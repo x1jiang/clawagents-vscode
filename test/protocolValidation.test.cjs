@@ -24,6 +24,10 @@ test("accepts a legitimate send request", () => {
   assert.deepEqual(parseWebviewToHost(message), message);
 });
 
+test("accepts deselect_chat with no payload", () => {
+  assert.deepEqual(parseWebviewToHost({ type: "deselect_chat" }), { type: "deselect_chat" });
+});
+
 test("settings saves require a positive integer revision", () => {
   const message = { type: "save_settings", revision: 7, settings: { provider: "openai" } };
   assert.deepEqual(parseWebviewToHost(message), message);

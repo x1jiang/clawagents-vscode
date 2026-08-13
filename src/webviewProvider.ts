@@ -523,24 +523,27 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       // Once New has selected a blank conversation, further clicks should
       // keep using it. Check both counters so a failed/legacy run that wrote
       // UI events is not mistaken for a genuinely empty conversation.
-      const currentChatId = this.chatId;
-      if (currentChatId) {
+      const startedOn = this.chatId;
+      if (startedOn) {
         try {
-          const current = await this.gateway.getChat(currentChatId, { tail: 1 });
+          const current = await this.gateway.getChat(startedOn, { tail: 1 });
           if (
-            this.chatId === currentChatId &&
+            this.chatId === startedOn &&
             Number(current.message_count) === 0 &&
             Number(current.events_total) === 0
           ) {
             this.eventsOffset = 0;
             this.eventsHasMore = false;
             await this.refreshChats();
+            if (this.chatId !== startedOn) {
+              return;
+            }
             this.post({
               type: "restore",
               items: [],
               draft: "",
               mode: this.mode,
-              chatId: currentChatId,
+              chatId: startedOn,
               autoApprove: this.autoApprove,
               interaction: this.interaction,
               caveman: this.caveman,
@@ -556,10 +559,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
 
       const chat = await this.gateway.createChat(this.mode);
+      if (this.chatId !== startedOn) {
+        // User selected another conversation while createChat was in flight.
+        await this.refreshChats();
+        return;
+      }
       this.chatId = String(chat.id);
       this.eventsOffset = 0;
       this.eventsHasMore = false;
       await this.refreshChats();
+      if (this.chatId !== String(chat.id)) {
+        return;
+      }
       this.post({
         type: "restore",
         items: [],
@@ -1031,6 +1042,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "clear":
       case "new_chat":
         await this.newChat();
+        break;
+      case "deselect_chat":
+        this.clearCurrentChat();
+        await this.persistLocal(this.persistState());
         break;
       case "fork_chat": {
         const targetId = msg.chatId || this.chatId;
@@ -2894,7 +2909,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               ev.type === "permission_required" ||
               ev.type === "ask_user_required" ||
               ev.type === "plan_approval_required";
-            if (isInteractive && runChatId && runChatId !== this.chatId) {
+            if (isInteractive && runChatId) {
+              // Always buffer. The webview may have switched already while
+              // this.chatId still points at the run — without a buffer those
+              // prompts are dropped by the stale filter with no recovery.
               const buf = this.pendingInteractions.get(runChatId) || [];
               buf.push(tagged);
               this.pendingInteractions.set(runChatId, buf);
@@ -2902,8 +2920,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 ev.type === "permission_required" ? "permission" as const
                 : ev.type === "ask_user_required" ? "ask" as const
                 : "plan_approval" as const;
-              this.post({ type: "chat_attention", chatId: runChatId, reason });
-              return;
+              if (runChatId !== this.chatId) {
+                this.post({ type: "chat_attention", chatId: runChatId, reason });
+                return;
+              }
             }
 
             if (ev.type === "file_changed" && ev.path) {

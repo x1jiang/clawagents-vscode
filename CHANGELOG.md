@@ -1,3 +1,9 @@
+## 1.0.163
+
+- **Permission / ask / plan prompts survive a mid-run thread switch.** Switching chats in the gap before the host processed `select_chat` used to drop those interactive events — no card, no attention badge, no recovery. The host now always buffers them; the webview badges the owning thread instead of discarding; switching back flushes the prompt (deduped by request id).
+- **New chat no longer hijacks a conversation you selected while it was creating.** `createOrReuseEmptyChat` re-checks the displayed chat after every await and skips the empty restore if you already moved. The webview also ignores a late `restore` whose `chatId` does not match the thread on screen (unless that restore is the New you just requested).
+- **Closing the last tab no longer leaves a ghost thread.** `chatId` is cleared and the host is deselected, so clicking Chat cannot reopen the closed id. Deleted and archived chats are pruned from the tab strip.
+
 ## 1.0.162
 
 - **Conversation tabs.** Open chats stay in a tab strip next to Chat / History / Settings. Click a history item to open it as a tab; close, close-all, and pin from the tab's context menu. The strip stays on one line as the sidebar narrows.

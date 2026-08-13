@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.162**
+Publisher **`clawagents`** · version **1.0.163**
 
+- [x] GitHub release `v1.0.163` + VSIX (fix conversation routing races: interactive prompts, New-chat hijack, late restore, ghost tabs)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.162` + VSIX (conversation tabs, thread-routed streaming, history bulk actions)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.161` + VSIX (fix MCP discovery deadlock that hung every chat on "Running…"; split `ctx_execute` out of the Run-commands auto-approve; floor clawagents **6.20.59**)

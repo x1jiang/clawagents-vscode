@@ -28,3 +28,12 @@ test("the navigation and conversation strips stay on one line", () => {
   assert.match(styles, /@container \(max-width: 54px\)[\s\S]*\.conversation-tab-title\s*\{[^}]*display:\s*none;/);
   assert.match(app, /className="tabs-divider"[^>]*>\|<\/span>/);
 });
+
+test("tabs drop deleted or archived chats and clear chatId when the last tab closes", () => {
+  assert.match(app, /if \(!summary \|\| summary\.archived\) return \[\]/);
+  assert.match(app, /post\(\{ type: "deselect_chat" \}\)/);
+  assert.match(
+    app,
+    /chatIdRef\.current = undefined;\s*setChatId\(undefined\);\s*setPanel\("history"\);\s*post\(\{ type: "deselect_chat" \}\)/,
+  );
+});

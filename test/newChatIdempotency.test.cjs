@@ -28,9 +28,21 @@ test("New reuses only the currently selected, genuinely empty chat", () => {
     "private async createOrReuseEmptyChat",
     "async newChat(): Promise<void>",
   );
-  assert.match(create, /this\.gateway\.getChat\(currentChatId, \{ tail: 1 \}\)/);
-  assert.match(create, /this\.chatId === currentChatId/);
+  assert.match(create, /this\.gateway\.getChat\(startedOn, \{ tail: 1 \}\)/);
+  assert.match(create, /this\.chatId === startedOn/);
   assert.match(create, /Number\(current\.message_count\) === 0/);
   assert.match(create, /Number\(current\.events_total\) === 0/);
+  assert.match(create, /if \(this\.chatId !== startedOn\)/);
   assert.match(create, /return;[\s\S]*this\.gateway\.createChat\(this\.mode\)/);
+});
+
+test("New does not overwrite a conversation selected while create was in flight", () => {
+  const create = section(
+    provider,
+    "private async createOrReuseEmptyChat",
+    "async newChat(): Promise<void>",
+  );
+  const afterCreate = create.slice(create.indexOf("this.gateway.createChat"));
+  assert.match(afterCreate, /if \(this\.chatId !== startedOn\)/);
+  assert.match(afterCreate, /await this\.refreshChats\(\);\s*return;/);
 });

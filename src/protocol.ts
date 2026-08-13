@@ -347,6 +347,7 @@ export type WebviewToHost =
     }
   | { type: "clear" }
   | { type: "new_chat" }
+  | { type: "deselect_chat" }
   | { type: "fork_chat"; chatId?: string }
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
@@ -460,7 +461,7 @@ export type WebviewToHost =
   | { type: "save_pinned"; text: string };
 
 const NO_PAYLOAD_MESSAGES = new Set([
-  "ready", "cancel", "clear", "new_chat", "regenerate", "pick_attach_files",
+  "ready", "cancel", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
   "load_stats", "bug_report_capture_screenshot", "load_older_chat",

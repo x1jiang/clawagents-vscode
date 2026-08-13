@@ -68,3 +68,24 @@ test("every run-scoped event, including the canonical final response, is stale-g
     /runScopedEventTypes\.has\(msg\.type\) && isStaleEvent\(msg\)/,
   );
 });
+
+test("stale interactive prompts badge the owner instead of disappearing", () => {
+  assert.match(app, /const INTERACTIVE_EVENT_TYPES = new Set<HostToWebview\["type"\]>/);
+  assert.match(app, /INTERACTIVE_EVENT_TYPES\.has\(msg\.type\)/);
+  assert.match(app, /next\.set\(id, reason\)/);
+  const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
+  assert.match(runTask, /this\.pendingInteractions\.set\(runChatId, buf\)/);
+  assert.match(runTask, /if \(runChatId !== this\.chatId\)/);
+  assert.doesNotMatch(
+    runTask,
+    /isInteractive && runChatId && runChatId !== this\.chatId/,
+  );
+});
+
+test("late restore cannot replace the currently displayed chat", () => {
+  assert.match(app, /pendingNewChatRef/);
+  assert.match(
+    app,
+    /msg\.chatId !== chatIdRef\.current &&\s*!pendingNew/,
+  );
+});
