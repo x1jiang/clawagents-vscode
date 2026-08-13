@@ -1108,6 +1108,32 @@ export function App() {
     [workspace],
   );
 
+  // These messages are emitted by one agent run and therefore belong to
+  // exactly one conversation. Keep the list centralized: a missing guard on
+  // assistant_message previously let an old run's canonical final response
+  // appear in a newly created chat even though its streamed deltas were
+  // correctly ignored.
+  const runScopedEventTypes = new Set<HostToWebview["type"]>([
+    "stranded_interject",
+    "status",
+    "user_echo",
+    "assistant_delta",
+    "assistant_message",
+    "tool_started",
+    "tool_completed",
+    "permission_required",
+    "ask_user_required",
+    "plan_approval_required",
+    "plan_approved",
+    "file_changed",
+    "usage",
+    "compact_progress",
+    "checkpoint",
+    "done",
+    "error",
+    "cancelled",
+  ]);
+
   // Keep chatIdRef in sync so the onMessage closure (which never
   // re-creates thanks to the [] deps array) can read the latest value.
   useEffect(() => {
@@ -1127,6 +1153,9 @@ export function App() {
     const onMessage = (event: MessageEvent<HostToWebview>) => {
       const msg = event.data;
       if (!msg || typeof msg !== "object" || !("type" in msg)) {
+        return;
+      }
+      if (runScopedEventTypes.has(msg.type) && isStaleEvent(msg)) {
         return;
       }
       switch (msg.type) {
@@ -1175,6 +1204,7 @@ export function App() {
             setIncludeContext(msg.includeContextByDefault);
           }
           setSidecar(msg.sidecar);
+          chatIdRef.current = msg.chatId;
           setChatId(msg.chatId);
           setChats(msg.chats || []);
           if (msg.settings) {
@@ -1234,6 +1264,7 @@ export function App() {
           setChats(msg.chats || []);
           setHistorySearching(false);
           if (msg.chatId) {
+            chatIdRef.current = msg.chatId;
             setChatId(msg.chatId);
           }
           break;
@@ -1448,6 +1479,7 @@ export function App() {
             setGoalMode(msg.goal);
           }
           if (msg.chatId) {
+            chatIdRef.current = msg.chatId;
             setChatId(msg.chatId);
           }
           // Prefer persisted session total from chat meta (survives reload).
@@ -2749,6 +2781,11 @@ export function App() {
             onClick={() => {
               setOpenChatMenuId(undefined);
               setPendingDeleteChatId(undefined);
+              // Change the routing guard immediately; waiting for React's
+              // effect leaves a window where events from the old chat can be
+              // appended to the newly selected transcript.
+              chatIdRef.current = c.id;
+              setChatId(c.id);
               post({ type: "select_chat", chatId: c.id });
             }}
           >

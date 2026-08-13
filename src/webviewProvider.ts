@@ -130,6 +130,13 @@ type PersistedState = {
   goal?: boolean;
 };
 
+type QueuedTurn = {
+  text: string;
+  chatId?: string;
+  includeContext: boolean;
+  modelOverride?: string;
+};
+
 
 function sessionCostFromChat(chat: Record<string, unknown> | undefined): number | undefined {
   if (!chat) return undefined;
@@ -151,7 +158,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private caveman = true;
   private goalMode = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
-  private queue: string[] = [];
+  /** Follow-up turns retain the conversation that owned the send. Without
+   *  this, switching chats while another turn runs reroutes every queued
+   *  prompt to whichever chat happens to be selected when the lane drains. */
+  private queue: QueuedTurn[] = [];
+  /** Stable owner of the one active HTTP stream. `this.chatId` is only the
+   *  conversation currently displayed and may change while the run continues. */
+  private activeRunChatId: string | undefined;
   /** Buffered interactive events (permission / ask / plan approval) for
    *  conversations that are not currently displayed. Keyed by chatId.
    *  Flushed to the webview when the user switches back to that chat. */
@@ -548,9 +561,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         .filter(Boolean);
       if (stranded.length) {
         // Dedupe against anything SSE already promoted.
-        const seen = new Set(this.queue);
+        const seen = new Set(this.queue.map((turn) => turn.text));
         const unique = stranded.filter((p) => !seen.has(p));
-        this.queue = [...unique, ...this.queue];
+        const targetChatId = this.activeRunChatId || this.chatId;
+        this.queue = [
+          ...unique.map((text) => ({
+            text,
+            chatId: targetChatId,
+            includeContext: this.config.includeContextByDefault,
+          })),
+          ...this.queue,
+        ];
         this.post({
           type: "status",
           message: `Queued stranded redirect${this.queue.length > 1 ? "s" : ""} (${this.queue.length})`,
@@ -568,7 +589,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     if (!this.abort && this.queue.length > 0) {
       const next = this.queue.shift();
       if (next) {
-        void this.runTask(next, this.config.includeContextByDefault, this.chatId);
+        void this.runTask(
+          next.text,
+          next.includeContext,
+          next.chatId,
+          next.modelOverride,
+        );
       }
     }
   }
@@ -775,8 +801,16 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         } catch {
           /* fall through to queue */
         }
-        this.queue.push(msg.text);
-        this.post({ type: "status", message: `Queued (${this.queue.length})` });
+        this.queue.push({
+          text: msg.text,
+          chatId: this.chatId,
+          includeContext: this.config.includeContextByDefault,
+        });
+        this.post({
+          type: "status",
+          message: `Queued (${this.queue.length})`,
+          chatId: this.chatId,
+        });
         // If the run finished while interject raced, finally already drained —
         // start the queued turn now so the message is not stranded.
         this.drainQueueIfIdle(true);
@@ -791,10 +825,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             });
             break;
           }
-          this.queue.push(msg.text);
+          this.queue.push({
+            text: msg.text,
+            chatId: this.chatId,
+            includeContext: this.config.includeContextByDefault,
+          });
           this.post({
             type: "status",
             message: "No active run to redirect — queued for next turn",
+            chatId: this.chatId,
           });
           this.drainQueueIfIdle(true);
         } catch (err) {
@@ -926,6 +965,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         await this.persistLocal(this.persistState());
         try {
           const chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          // Selection requests can overlap. A slow response for an older click
+          // must not replace the transcript chosen more recently.
+          if (this.chatId !== msg.chatId) {
+            break;
+          }
           await this.postChatRestore(msg.chatId, chat);
           // Flush any buffered interactive events (permission / ask / plan
           // approval) that arrived while this chat was in the background.
@@ -2529,8 +2573,16 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     } catch {
       /* fall through to queueing */
     }
-    this.queue.push(prompt);
-    this.post({ type: "status", message: "Job result queued for the next turn" });
+    this.queue.push({
+      text: prompt,
+      chatId: this.chatId,
+      includeContext: false,
+    });
+    this.post({
+      type: "status",
+      message: "Job result queued for the next turn",
+      chatId: this.chatId,
+    });
     this.drainQueueIfIdle(false);
   }
 
@@ -2598,19 +2650,22 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (this.abort) {
-      this.queue.push(trimmed);
-      this.post({ type: "status", message: `Queued (${this.queue.length})` });
+      const targetChatId = chatId || this.chatId;
+      this.queue.push({
+        text: trimmed,
+        chatId: targetChatId,
+        includeContext,
+        modelOverride,
+      });
+      this.post({
+        type: "status",
+        message: `Queued (${this.queue.length})`,
+        chatId: targetChatId,
+      });
       return;
     }
 
-    if (chatId) {
-      this.chatId = chatId;
-    }
-    // Capture the chat ID that owns this run. Even if the user switches to
-    // a different conversation mid-stream (updating this.chatId), streaming
-    // events must be tagged with the *originating* chat so the webview can
-    // route them to the correct thread.
-    const runChatId = this.chatId;
+    const requestedChatId = chatId || this.chatId;
 
     let task = trimmed;
     if (includeContext) {
@@ -2622,17 +2677,19 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
     // Reserve the run slot before await points so concurrent drainQueueIfIdle
     // / interject cannot start a second turn in parallel.
-    this.abort = new AbortController();
-    const signal = this.abort.signal;
+    const controller = new AbortController();
+    this.abort = controller;
+    const signal = controller.signal;
 
-    this.post({ type: "user_echo", text: trimmed });
     this.post({ type: "sidecar", state: "starting" });
 
     try {
       await this.sidecar.ensureStarted();
       this.post({ type: "sidecar", state: "running" });
     } catch (err) {
-      this.abort = undefined;
+      if (this.abort === controller) {
+        this.abort = undefined;
+      }
       this.post({
         type: "sidecar",
         state: "error",
@@ -2645,6 +2702,34 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       this.drainQueueIfIdle(includeContext);
       return;
     }
+
+    // A brand-new conversation needs an ID before the stream starts. This
+    // gives every event and queued follow-up a stable owner even if the user
+    // switches conversations while createChat is in flight.
+    let runChatId = requestedChatId;
+    if (!runChatId) {
+      try {
+        const chat = await this.gateway.createChat(this.mode);
+        runChatId = String(chat.id);
+        if (!this.chatId) {
+          this.chatId = runChatId;
+          await this.persistLocal(this.persistState());
+        }
+        await this.refreshChats();
+      } catch (err) {
+        if (this.abort === controller) {
+          this.abort = undefined;
+        }
+        this.post({
+          type: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+        this.drainQueueIfIdle(includeContext);
+        return;
+      }
+    }
+    this.activeRunChatId = runChatId;
+    this.post({ type: "user_echo", text: trimmed, chatId: runChatId });
     try {
       const settings = await this.gateway
         .getSettings()
@@ -2675,7 +2760,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
       const newId = await this.gateway.streamChat(
         task,
-        this.chatId,
+        runChatId,
         this.mode,
         {
           signal,
@@ -2684,7 +2769,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               const prompts = ev.prompts.map((p) => String(p).trim()).filter(Boolean);
               if (prompts.length) {
                 // Front of queue — send-now semantics for stranded redirects.
-                this.queue = [...prompts, ...this.queue];
+                this.queue = [
+                  ...prompts.map((text) => ({
+                    text,
+                    chatId: runChatId,
+                    includeContext,
+                    modelOverride,
+                  })),
+                  ...this.queue,
+                ];
                 this.post({
                   type: "status",
                   message: `Queued stranded redirect${prompts.length > 1 ? "s" : ""} (${this.queue.length})`,
@@ -2742,8 +2835,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         files,
       );
       if (newId) {
-        this.chatId = newId;
-        await this.persistLocal(this.persistState());
+        // Completing a background run must never pull the UI away from the
+        // conversation the user selected while it was running.
+        if (this.chatId === runChatId) {
+          this.chatId = newId;
+          await this.persistLocal(this.persistState());
+        }
         await this.refreshChats();
       }
     } catch (err) {
@@ -2754,7 +2851,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         });
       }
     } finally {
-      this.abort = undefined;
+      if (this.abort === controller) {
+        this.abort = undefined;
+      }
+      if (this.activeRunChatId === runChatId) {
+        this.activeRunChatId = undefined;
+      }
       // A job the turn detached is now unattended: the run's event stream is
       // closed, so polling is the only thing that will notice it finishing.
       void this.refreshJobs();
@@ -2773,7 +2875,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
     const next = this.queue.shift();
     if (next) {
-      void this.runTask(next, includeContext, this.chatId);
+      void this.runTask(
+        next.text,
+        next.includeContext,
+        next.chatId,
+        next.modelOverride,
+      );
     }
   }
 
