@@ -157,7 +157,7 @@ export type HostToWebview =
       items: unknown[];
       draft?: string;
       mode: AgentMode;
-      chatId?: string;
+      chatId?: string | null;
       /** Chat title from meta (used for fork banner; may precede chats list refresh). */
       chatTitle?: string;
       autoApprove?: AutoApprove;
@@ -351,9 +351,12 @@ export type WebviewToHost =
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
+  | { type: "delete_chats"; chatIds: string[] }
   | { type: "rename_chat"; chatId: string; title: string }
   | { type: "pin_chat"; chatId: string; pinned: boolean }
+  | { type: "pin_chats"; chatIds: string[]; pinned: boolean }
   | { type: "archive_chat"; chatId: string; archived: boolean }
+  | { type: "archive_chats"; chatIds: string[]; archived: boolean }
   | { type: "search_chats"; query: string }
   | { type: "regenerate" }
   | { type: "set_mode"; mode: AgentMode }
@@ -505,6 +508,14 @@ function opaqueId(value: unknown): value is string {
   return typeof value === "string" && OPAQUE_ID.test(value) && !value.includes("..");
 }
 
+function opaqueIds(value: unknown): value is string[] {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.length <= 200
+    && value.every(opaqueId)
+    && new Set(value).size === value.length;
+}
+
 function autoApprove(value: unknown): boolean {
   if (value === undefined) return true;
   if (!record(value)) return false;
@@ -567,6 +578,8 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
+    case "delete_chats":
+      return opaqueIds(value.chatIds) ? value as WebviewToHost : undefined;
     case "rename_chat":
       return opaqueId(value.chatId) && text(value.title, 200)
         ? value as WebviewToHost
@@ -575,8 +588,16 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return opaqueId(value.chatId) && typeof value.pinned === "boolean"
         ? value as WebviewToHost
         : undefined;
+    case "pin_chats":
+      return opaqueIds(value.chatIds) && typeof value.pinned === "boolean"
+        ? value as WebviewToHost
+        : undefined;
     case "archive_chat":
       return opaqueId(value.chatId) && typeof value.archived === "boolean"
+        ? value as WebviewToHost
+        : undefined;
+    case "archive_chats":
+      return opaqueIds(value.chatIds) && typeof value.archived === "boolean"
         ? value as WebviewToHost
         : undefined;
     case "fork_chat":

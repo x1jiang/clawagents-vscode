@@ -40,3 +40,31 @@ test("rejects unknown, malformed, and traversal-bearing authority requests", () 
   assert.equal(parseWebviewToHost({ type: "select_chat", chatId: "../../outside" }), undefined);
   assert.equal(parseWebviewToHost({ type: "restore_checkpoint", sha: "abc", mode: "invalid" }), undefined);
 });
+
+test("accepts bounded, unique chat batches and rejects unsafe IDs", () => {
+  for (const message of [
+    { type: "delete_chats", chatIds: ["chat-1", "chat-2"] },
+    { type: "pin_chats", chatIds: ["chat-1", "chat-2"], pinned: true },
+    { type: "archive_chats", chatIds: ["chat-1", "chat-2"], archived: false },
+  ]) {
+    assert.deepEqual(parseWebviewToHost(message), message);
+  }
+
+  assert.equal(parseWebviewToHost({ type: "delete_chats", chatIds: [] }), undefined);
+  assert.equal(
+    parseWebviewToHost({ type: "delete_chats", chatIds: ["chat-1", "chat-1"] }),
+    undefined,
+  );
+  assert.equal(
+    parseWebviewToHost({ type: "pin_chats", chatIds: ["../../outside"], pinned: true }),
+    undefined,
+  );
+  assert.equal(
+    parseWebviewToHost({ type: "archive_chats", chatIds: ["chat-1"] }),
+    undefined,
+  );
+  assert.equal(
+    parseWebviewToHost({ type: "delete_chats", chatIds: Array.from({ length: 201 }, (_, i) => `chat-${i}`) }),
+    undefined,
+  );
+});

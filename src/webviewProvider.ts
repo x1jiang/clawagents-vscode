@@ -150,6 +150,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private abort?: AbortController;
   private chatId: string | undefined;
+  /** Coalesce repeated New clicks while chat lookup/creation is in flight. */
+  private newChatPromise?: Promise<void>;
   /** Absolute UI-log offset of the oldest event currently shown (for load-older). */
   private eventsOffset = 0;
   private eventsHasMore = false;
@@ -514,11 +516,49 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "prepend", text });
   }
 
-  async newChat(): Promise<void> {
+  private async createOrReuseEmptyChat(): Promise<void> {
     try {
       await this.sidecar.ensureStarted();
+
+      // Once New has selected a blank conversation, further clicks should
+      // keep using it. Check both counters so a failed/legacy run that wrote
+      // UI events is not mistaken for a genuinely empty conversation.
+      const currentChatId = this.chatId;
+      if (currentChatId) {
+        try {
+          const current = await this.gateway.getChat(currentChatId, { tail: 1 });
+          if (
+            this.chatId === currentChatId &&
+            Number(current.message_count) === 0 &&
+            Number(current.events_total) === 0
+          ) {
+            this.eventsOffset = 0;
+            this.eventsHasMore = false;
+            await this.refreshChats();
+            this.post({
+              type: "restore",
+              items: [],
+              draft: "",
+              mode: this.mode,
+              chatId: currentChatId,
+              autoApprove: this.autoApprove,
+              interaction: this.interaction,
+              caveman: this.caveman,
+              goal: this.goalMode,
+              sessionCostUsd: 0,
+            });
+            await this.persistLocal(this.persistState());
+            return;
+          }
+        } catch {
+          // A stale workspace pointer should fall through and create a chat.
+        }
+      }
+
       const chat = await this.gateway.createChat(this.mode);
       this.chatId = String(chat.id);
+      this.eventsOffset = 0;
+      this.eventsHasMore = false;
       await this.refreshChats();
       this.post({
         type: "restore",
@@ -538,6 +578,24 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         type: "error",
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  async newChat(): Promise<void> {
+    // VS Code commands and webview messages can arrive concurrently. Sharing
+    // one promise prevents a burst of clicks from issuing multiple POSTs.
+    if (this.newChatPromise) {
+      await this.newChatPromise;
+      return;
+    }
+    const pending = this.createOrReuseEmptyChat();
+    this.newChatPromise = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.newChatPromise === pending) {
+        this.newChatPromise = undefined;
+      }
     }
   }
 
@@ -625,6 +683,52 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "chats", chats, chatId: this.chatId });
     } catch {
       /* ignore until sidecar up */
+    }
+  }
+
+  private clearCurrentChat(): void {
+    this.chatId = undefined;
+    this.eventsOffset = 0;
+    this.eventsHasMore = false;
+    this.post({
+      type: "restore",
+      items: [],
+      draft: "",
+      mode: this.mode,
+      chatId: null,
+      autoApprove: this.autoApprove,
+      interaction: this.interaction,
+      caveman: this.caveman,
+      goal: this.goalMode,
+      sessionCostUsd: 0,
+    });
+  }
+
+  /** Run a multi-chat mutation with one list refresh and report partial failure. */
+  private async applyChatBatch(
+    chatIds: string[],
+    failureLabel: string,
+    mutation: (chatId: string) => Promise<unknown>,
+    clearActive: boolean,
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      chatIds.map(async (chatId) => {
+        await mutation(chatId);
+        return chatId;
+      }),
+    );
+    const succeeded = new Set(
+      results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []),
+    );
+    if (clearActive && this.chatId && succeeded.has(this.chatId)) {
+      this.clearCurrentChat();
+    }
+    await this.refreshChats();
+    const failed = results.length - succeeded.size;
+    if (failed > 0) {
+      throw new Error(
+        `${failed} of ${results.length} conversation${results.length === 1 ? "" : "s"} could not be ${failureLabel}.`,
+      );
     }
   }
 
@@ -999,23 +1103,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         break;
       case "delete_chat":
+      case "delete_chats":
         try {
-          await this.gateway.deleteChat(msg.chatId);
-          if (this.chatId === msg.chatId) {
-            this.chatId = undefined;
-            this.post({
-              type: "restore",
-              items: [],
-              draft: "",
-              mode: this.mode,
-              autoApprove: this.autoApprove,
-              interaction: this.interaction,
-              caveman: this.caveman,
-              goal: this.goalMode,
-              sessionCostUsd: 0,
-            });
-          }
-          await this.refreshChats();
+          const chatIds = msg.type === "delete_chat" ? [msg.chatId] : msg.chatIds;
+          await this.applyChatBatch(
+            chatIds,
+            "deleted",
+            (chatId) => this.gateway.deleteChat(chatId),
+            true,
+          );
         } catch (err) {
           this.post({
             type: "error",
@@ -1035,9 +1131,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         break;
       case "pin_chat":
+      case "pin_chats":
         try {
-          await this.gateway.patchChat(msg.chatId, { pinned: msg.pinned });
-          await this.refreshChats();
+          const chatIds = msg.type === "pin_chat" ? [msg.chatId] : msg.chatIds;
+          await this.applyChatBatch(
+            chatIds,
+            msg.pinned ? "pinned" : "unpinned",
+            (chatId) => this.gateway.patchChat(chatId, { pinned: msg.pinned }),
+            false,
+          );
         } catch (err) {
           this.post({
             type: "error",
@@ -1046,23 +1148,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         break;
       case "archive_chat":
+      case "archive_chats":
         try {
-          await this.gateway.patchChat(msg.chatId, { archived: msg.archived });
-          if (this.chatId === msg.chatId && msg.archived) {
-            this.chatId = undefined;
-            this.post({
-              type: "restore",
-              items: [],
-              draft: "",
-              mode: this.mode,
-              autoApprove: this.autoApprove,
-              interaction: this.interaction,
-              caveman: this.caveman,
-              goal: this.goalMode,
-              sessionCostUsd: 0,
-            });
-          }
-          await this.refreshChats();
+          const chatIds = msg.type === "archive_chat" ? [msg.chatId] : msg.chatIds;
+          await this.applyChatBatch(
+            chatIds,
+            msg.archived ? "archived" : "unarchived",
+            (chatId) => this.gateway.patchChat(chatId, { archived: msg.archived }),
+            msg.archived,
+          );
         } catch (err) {
           this.post({
             type: "error",
