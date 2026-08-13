@@ -1,3 +1,9 @@
+## 1.0.162
+
+- **Conversation tabs.** Open chats stay in a tab strip next to Chat / History / Settings. Click a history item to open it as a tab; close, close-all, and pin from the tab's context menu. The strip stays on one line as the sidebar narrows.
+- **Streaming stays on the conversation that started it.** Switching threads mid-run used to dump tokens, tools, and approvals into whatever chat you were looking at. Events are tagged with the originating chat, buffered if that chat isn't on screen, and flushed when you switch back — with an attention badge on history items that need a permission or plan answer.
+- **History bulk actions and a quieter New chat.** Shift-click a range or Cmd/Ctrl-click to toggle, then pin, archive, or delete in one shot. Rapid New-chat clicks reuse a genuinely empty thread instead of spawning duplicates. Auto-approve / Goal / Plan / Act / Ask controls show hover guidance so the segmented bar is readable at a glance.
+
 ## 1.0.161
 
 - **Fix chats that hung on “Running…” forever with Context Mode enabled.** MCP tool discovery ran inside a throwaway event loop that was then torn down while the server's transport was still open. Cancelling the transport's reader tasks never completed, so `create_claw_agent` blocked before the agent existed and no model request was ever made — the turn emitted `started` and then only keep-alive pings, which kept the stream's idle timeout from ever firing. Discovery now closes its transports before that loop exits and reconnects lazily on the loop that first invokes a tool. Because Context Mode is on by default, this affected every chat. Requires **clawagents 6.20.59**; **Install/Upgrade Python Dependencies** or **Restart Sidecar** updates the managed environment.
