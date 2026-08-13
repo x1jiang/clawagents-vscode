@@ -62,12 +62,12 @@ export type HostToWebview =
       /** Prefer Settings / clawagents.includeContextByDefault for the Context checkbox. */
       includeContextByDefault?: boolean;
     }
-  | { type: "status"; message: string }
+  | { type: "status"; message: string; chatId?: string }
   | { type: "view_hidden" }
-  | { type: "user_echo"; text: string }
-  | { type: "assistant_delta"; delta: string }
-  | { type: "assistant_message"; text: string }
-  | { type: "tool_started"; id: string; name: string; args?: unknown; filePath?: string }
+  | { type: "user_echo"; text: string; chatId?: string }
+  | { type: "assistant_delta"; delta: string; chatId?: string }
+  | { type: "assistant_message"; text: string; chatId?: string }
+  | { type: "tool_started"; id: string; name: string; args?: unknown; filePath?: string; chatId?: string }
   | {
       type: "tool_completed";
       id: string;
@@ -75,6 +75,7 @@ export type HostToWebview =
       success: boolean;
       output?: string;
       filePath?: string;
+      chatId?: string;
     }
   | {
       type: "permission_required";
@@ -83,19 +84,22 @@ export type HostToWebview =
       filePath?: string;
       command?: string;
       reason?: string;
+      chatId?: string;
     }
-  | { type: "ask_user_required"; requestId: string; question: string }
+  | { type: "ask_user_required"; requestId: string; question: string; chatId?: string }
   | {
       type: "plan_approval_required";
       requestId: string;
       planText: string;
+      chatId?: string;
     }
-  | { type: "plan_approved"; mode?: AgentMode }
+  | { type: "plan_approved"; mode?: AgentMode; chatId?: string }
   | {
       type: "file_changed";
       path: string;
       snapshotId?: string;
       snapshotRel?: string;
+      chatId?: string;
     }
   | {
       type: "usage";
@@ -111,11 +115,13 @@ export type HostToWebview =
       maxInputTokens?: number;
       longContextRequestCount?: number;
       nextPromptEstTokens?: number;
+      chatId?: string;
     }
   | {
       type: "compact_progress";
       phase: string;
       message?: string;
+      chatId?: string;
     }
   | {
       type: "checkpoint";
@@ -125,6 +131,7 @@ export type HostToWebview =
       label?: string;
       messageCount?: number;
       ts?: number;
+      chatId?: string;
     }
   | {
       type: "done";
@@ -134,16 +141,23 @@ export type HostToWebview =
       usage?: unknown;
       sessionCostUsd?: number;
       runCostUsd?: number;
+      chatId?: string;
     }
-  | { type: "error"; message: string }
-  | { type: "cancelled" }
+  | { type: "error"; message: string; chatId?: string }
+  | { type: "cancelled"; chatId?: string }
+  | {
+      type: "chat_attention";
+      chatId: string;
+      reason?: "permission" | "ask" | "plan_approval";
+      clear?: boolean;
+    }
   | { type: "prepend"; text: string }
   | {
       type: "restore";
       items: unknown[];
       draft?: string;
       mode: AgentMode;
-      chatId?: string;
+      chatId?: string | null;
       /** Chat title from meta (used for fork banner; may precede chats list refresh). */
       chatTitle?: string;
       autoApprove?: AutoApprove;
@@ -337,9 +351,12 @@ export type WebviewToHost =
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
+  | { type: "delete_chats"; chatIds: string[] }
   | { type: "rename_chat"; chatId: string; title: string }
   | { type: "pin_chat"; chatId: string; pinned: boolean }
+  | { type: "pin_chats"; chatIds: string[]; pinned: boolean }
   | { type: "archive_chat"; chatId: string; archived: boolean }
+  | { type: "archive_chats"; chatIds: string[]; archived: boolean }
   | { type: "search_chats"; query: string }
   | { type: "regenerate" }
   | { type: "set_mode"; mode: AgentMode }
@@ -491,6 +508,14 @@ function opaqueId(value: unknown): value is string {
   return typeof value === "string" && OPAQUE_ID.test(value) && !value.includes("..");
 }
 
+function opaqueIds(value: unknown): value is string[] {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.length <= 200
+    && value.every(opaqueId)
+    && new Set(value).size === value.length;
+}
+
 function autoApprove(value: unknown): boolean {
   if (value === undefined) return true;
   if (!record(value)) return false;
@@ -553,6 +578,8 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
+    case "delete_chats":
+      return opaqueIds(value.chatIds) ? value as WebviewToHost : undefined;
     case "rename_chat":
       return opaqueId(value.chatId) && text(value.title, 200)
         ? value as WebviewToHost
@@ -561,8 +588,16 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return opaqueId(value.chatId) && typeof value.pinned === "boolean"
         ? value as WebviewToHost
         : undefined;
+    case "pin_chats":
+      return opaqueIds(value.chatIds) && typeof value.pinned === "boolean"
+        ? value as WebviewToHost
+        : undefined;
     case "archive_chat":
       return opaqueId(value.chatId) && typeof value.archived === "boolean"
+        ? value as WebviewToHost
+        : undefined;
+    case "archive_chats":
+      return opaqueIds(value.chatIds) && typeof value.archived === "boolean"
         ? value as WebviewToHost
         : undefined;
     case "fork_chat":

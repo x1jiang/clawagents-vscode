@@ -758,7 +758,9 @@ summary {
 /* Auto-approve bar */
 .autoapprove {
   display: flex;
-  flex-direction: column;
+  /* Keep the disclosure button beside the mode controls while the options
+     expand upward, so the pointer remains over the button for a second click. */
+  flex-direction: column-reverse;
   gap: 6px;
 }
 
@@ -1116,6 +1118,26 @@ button.send:not(.icon-btn) {
   margin-top: -4px;
 }
 
+.history-bulk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.history-bulk-toolbar strong {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.history-selection-clear {
+  margin-left: auto;
+}
+
 .chat-list {
   list-style: none;
   margin: 0;
@@ -1141,6 +1163,12 @@ button.send:not(.icon-btn) {
 
 .chat-list li.active .chat-item {
   border-color: var(--accent);
+}
+
+.chat-list li.selected .chat-item {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--input-bg));
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .chat-item {
@@ -1170,6 +1198,12 @@ button.send:not(.icon-btn) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-selected-check {
+  display: inline-block;
+  width: 16px;
+  color: var(--accent);
 }
 
 .chat-sections,
@@ -1900,4 +1934,22 @@ button.chat-pin.active {
   top: 2px;
   right: 2px;
   background: color-mix(in srgb, var(--bg) 80%, transparent);
+}
+
+/* ── Chat attention badge (pending interaction) ─────────────────────── */
+.chat-attention-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+  margin-right: 6px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  animation: pulse-attention 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-attention {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }

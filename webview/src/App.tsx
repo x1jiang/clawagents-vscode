@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type MouseEvent as ReactMouseEvent,
   type SetStateAction,
 } from "react";
 import ReactMarkdown from "react-markdown";
@@ -849,6 +850,7 @@ export function App() {
   );
   const [sidecarDetail, setSidecarDetail] = useState<string | undefined>();
   const [chatId, setChatId] = useState<string | undefined>();
+  const chatIdRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
@@ -856,6 +858,11 @@ export function App() {
   const [renamingChatId, setRenamingChatId] = useState<string | undefined>();
   const [renameDraft, setRenameDraft] = useState("");
   const [pendingDeleteChatId, setPendingDeleteChatId] = useState<string | undefined>();
+  const [selectedChatIds, setSelectedChatIds] = useState<Set<string>>(() => new Set());
+  const [selectionAnchorChatId, setSelectionAnchorChatId] = useState<string | undefined>();
+  const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
+  /** Conversations with pending interactive prompts (permission / ask / plan approval). */
+  const [chatAttention, setChatAttention] = useState<Map<string, string>>(new Map());
   const [panel, setPanel] = useState<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
   const pendingForkRef = useRef(false);
@@ -931,6 +938,7 @@ export function App() {
   const [verifyMsg, setVerifyMsg] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
+  const autoApproveRef = useRef<HTMLDivElement>(null);
   /** When false, streaming tokens must not yank scroll away from the user. */
   const stickToBottomRef = useRef(true);
   const streamingRef = useRef(false);
@@ -1003,6 +1011,24 @@ export function App() {
   /** Dedupe one-shot heal of vendor-incompatible leftovers (e.g. llama3.1 on OpenAI). */
   const incompatibleModelHealKey = useRef("");
   const historySearchTimer = useRef<number | undefined>();
+
+  useEffect(() => {
+    if (!autoApproveOpen) return;
+
+    const dismissOnOutsidePointer = (event: PointerEvent) => {
+      if (!autoApproveRef.current?.contains(event.target as Node)) {
+        setAutoApproveOpen(false);
+      }
+    };
+    const dismissOnWindowBlur = () => setAutoApproveOpen(false);
+
+    document.addEventListener("pointerdown", dismissOnOutsidePointer);
+    window.addEventListener("blur", dismissOnWindowBlur);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnOutsidePointer);
+      window.removeEventListener("blur", dismissOnWindowBlur);
+    };
+  }, [autoApproveOpen]);
   const [dragOver, setDragOver] = useState(false);
   const dragDepth = useRef(0);
   const attachmentRequestsRef = useRef(new Set<string>());
@@ -1105,10 +1131,54 @@ export function App() {
     [workspace],
   );
 
+  // These messages are emitted by one agent run and therefore belong to
+  // exactly one conversation. Keep the list centralized: a missing guard on
+  // assistant_message previously let an old run's canonical final response
+  // appear in a newly created chat even though its streamed deltas were
+  // correctly ignored.
+  const runScopedEventTypes = new Set<HostToWebview["type"]>([
+    "stranded_interject",
+    "status",
+    "user_echo",
+    "assistant_delta",
+    "assistant_message",
+    "tool_started",
+    "tool_completed",
+    "permission_required",
+    "ask_user_required",
+    "plan_approval_required",
+    "plan_approved",
+    "file_changed",
+    "usage",
+    "compact_progress",
+    "checkpoint",
+    "done",
+    "error",
+    "cancelled",
+  ]);
+
+  // Keep chatIdRef in sync so the onMessage closure (which never
+  // re-creates thanks to the [] deps array) can read the latest value.
   useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
+
+  useEffect(() => {
+    // Returns true when an incoming streaming event belongs to a different
+    // conversation than the one currently displayed. Events without a
+    // chatId field are assumed to belong to the current conversation
+    // (backward compatibility).
+    const isStaleEvent = (msg: HostToWebview): boolean => {
+      const id = (msg as { chatId?: string }).chatId;
+      return Boolean(id && chatIdRef.current && id !== chatIdRef.current);
+    };
+
     const onMessage = (event: MessageEvent<HostToWebview>) => {
       const msg = event.data;
       if (!msg || typeof msg !== "object" || !("type" in msg)) {
+        return;
+      }
+      if (runScopedEventTypes.has(msg.type) && isStaleEvent(msg)) {
         return;
       }
       switch (msg.type) {
@@ -1157,6 +1227,7 @@ export function App() {
             setIncludeContext(msg.includeContextByDefault);
           }
           setSidecar(msg.sidecar);
+          chatIdRef.current = msg.chatId;
           setChatId(msg.chatId);
           setChats(msg.chats || []);
           if (msg.settings) {
@@ -1216,6 +1287,7 @@ export function App() {
           setChats(msg.chats || []);
           setHistorySearching(false);
           if (msg.chatId) {
+            chatIdRef.current = msg.chatId;
             setChatId(msg.chatId);
           }
           break;
@@ -1429,8 +1501,10 @@ export function App() {
           if (typeof msg.goal === "boolean") {
             setGoalMode(msg.goal);
           }
-          if (msg.chatId) {
-            setChatId(msg.chatId);
+          if (msg.chatId !== undefined) {
+            const restoredChatId = msg.chatId || undefined;
+            chatIdRef.current = restoredChatId;
+            setChatId(restoredChatId);
           }
           // Prefer persisted session total from chat meta (survives reload).
           resetSessionCost(
@@ -1477,6 +1551,7 @@ export function App() {
           }
           break;
         case "user_echo":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => [...prev, { kind: "user", text: msg.text }]);
           setBusy(true);
           streamingRef.current = false;
@@ -1485,6 +1560,7 @@ export function App() {
           runCommittedRef.current = false;
           break;
         case "status":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -1496,6 +1572,7 @@ export function App() {
           });
           break;
         case "assistant_delta":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -1530,6 +1607,7 @@ export function App() {
           break;
         }
         case "tool_started":
+          if (isStaleEvent(msg)) break;
           streamingRef.current = false;
           setItems((prev) => [
             ...prev,
@@ -1544,6 +1622,7 @@ export function App() {
           ]);
           break;
         case "tool_completed":
+          if (isStaleEvent(msg)) break;
           setItems((prev) => {
             let matched = false;
             const next = prev.map((it) => {
@@ -1617,6 +1696,7 @@ export function App() {
           setGoalMode(false);
           break;
         case "file_changed":
+          if (isStaleEvent(msg)) break;
           if (msg.path) {
             setItems((prev) => [
               ...prev,
@@ -1630,6 +1710,7 @@ export function App() {
           }
           break;
         case "usage": {
+          if (isStaleEvent(msg)) break;
           // Never treat missing lastInputTokens as promptTokens — the latter is
           // run-cumulative and would inflate the context meter after multi-round loops.
           const next = {
@@ -1720,6 +1801,7 @@ export function App() {
           break;
         }
         case "done": {
+          if (isStaleEvent(msg)) break;
           setBusy(false);
           streamingRef.current = false;
           markStalePlanApprovals(setItems);
@@ -1781,6 +1863,7 @@ export function App() {
           break;
         }
         case "error":
+          if (isStaleEvent(msg)) break;
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
@@ -1800,6 +1883,7 @@ export function App() {
           }
           break;
         case "cancelled":
+          if (isStaleEvent(msg)) break;
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
@@ -1868,6 +1952,17 @@ export function App() {
               { kind: "status", text: msg.detail },
             ]);
           }
+          break;
+        case "chat_attention":
+          setChatAttention((prev) => {
+            const next = new Map(prev);
+            if (msg.clear) {
+              next.delete(msg.chatId);
+            } else {
+              next.set(msg.chatId, msg.reason || "pending");
+            }
+            return next;
+          });
           break;
         default:
           break;
@@ -1993,6 +2088,9 @@ export function App() {
     if (panel !== "history") {
       setOpenChatMenuId(undefined);
       setPendingDeleteChatId(undefined);
+      setSelectedChatIds(new Set());
+      setSelectionAnchorChatId(undefined);
+      setPendingBulkDelete(false);
       return;
     }
     window.clearTimeout(historySearchTimer.current);
@@ -2020,6 +2118,84 @@ export function App() {
     () => chats.filter((c) => c.archived),
     [chats],
   );
+  const orderedHistoryChats = useMemo(
+    () => [...pinnedChats, ...regularChats, ...archivedChats],
+    [pinnedChats, regularChats, archivedChats],
+  );
+  const selectedChats = useMemo(
+    () => orderedHistoryChats.filter((chat) => selectedChatIds.has(chat.id)),
+    [orderedHistoryChats, selectedChatIds],
+  );
+  const allSelectedPinned = selectedChats.length > 0 && selectedChats.every((chat) => chat.pinned);
+  const allSelectedArchived = selectedChats.length > 0 && selectedChats.every((chat) => chat.archived);
+
+  useEffect(() => {
+    const available = new Set(chats.map((chat) => chat.id));
+    setSelectedChatIds((previous) => {
+      const next = new Set([...previous].filter((id) => available.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+    setSelectionAnchorChatId((previous) => previous && available.has(previous) ? previous : undefined);
+  }, [chats]);
+
+  useEffect(() => {
+    if (selectedChats.length === 0) {
+      setPendingBulkDelete(false);
+    }
+  }, [selectedChats.length]);
+
+  const clearHistorySelection = () => {
+    setSelectedChatIds(new Set());
+    setSelectionAnchorChatId(undefined);
+    setPendingBulkDelete(false);
+  };
+
+  const handleHistoryChatClick = (event: ReactMouseEvent<HTMLButtonElement>, c: ChatSummary) => {
+    const toggle = event.metaKey || event.ctrlKey;
+    setOpenChatMenuId(undefined);
+    setPendingDeleteChatId(undefined);
+    setPendingBulkDelete(false);
+
+    if (event.shiftKey) {
+      const targetIndex = orderedHistoryChats.findIndex((item) => item.id === c.id);
+      const anchorIndex = selectionAnchorChatId
+        ? orderedHistoryChats.findIndex((item) => item.id === selectionAnchorChatId)
+        : -1;
+      if (targetIndex >= 0 && anchorIndex >= 0) {
+        const start = Math.min(anchorIndex, targetIndex);
+        const end = Math.max(anchorIndex, targetIndex);
+        setSelectedChatIds((previous) => {
+          const next = toggle ? new Set(previous) : new Set<string>();
+          for (const item of orderedHistoryChats.slice(start, end + 1)) {
+            next.add(item.id);
+          }
+          return next;
+        });
+      } else {
+        setSelectedChatIds(new Set([c.id]));
+        setSelectionAnchorChatId(c.id);
+      }
+      return;
+    }
+
+    setSelectionAnchorChatId(c.id);
+    if (toggle) {
+      setSelectedChatIds((previous) => {
+        const next = new Set(previous);
+        if (next.has(c.id)) next.delete(c.id);
+        else next.add(c.id);
+        return next;
+      });
+      return;
+    }
+
+    setSelectedChatIds(new Set());
+    // Change the routing guard immediately; waiting for React's effect leaves
+    // a window where events from the old chat can enter the new transcript.
+    chatIdRef.current = c.id;
+    setChatId(c.id);
+    post({ type: "select_chat", chatId: c.id });
+  };
 
   const beginRenameChat = (chat: ChatSummary) => {
     setRenamingChatId(chat.id);
@@ -2677,12 +2853,16 @@ export function App() {
     const isRenaming = renamingChatId === c.id;
     const menuOpen = openChatMenuId === c.id;
     const deletePending = pendingDeleteChatId === c.id;
+    const isSelected = selectedChatIds.has(c.id);
     const meta = `${c.message_count || 0} msgs${
       c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""
     }`;
 
     return (
-      <li key={c.id} className={c.id === chatId ? "active" : ""}>
+      <li
+        key={c.id}
+        className={`${c.id === chatId ? "active" : ""}${isSelected ? " selected" : ""}`.trim()}
+      >
         {isRenaming ? (
           <div className="chat-item chat-item-edit">
             <input
@@ -2707,13 +2887,15 @@ export function App() {
           <button
             type="button"
             className="chat-item"
-            onClick={() => {
-              setOpenChatMenuId(undefined);
-              setPendingDeleteChatId(undefined);
-              post({ type: "select_chat", chatId: c.id });
-            }}
+            aria-pressed={isSelected}
+            title="Click to open · Shift-click selects a range · Cmd/Ctrl-click toggles selection"
+            onClick={(event) => handleHistoryChatClick(event, c)}
           >
             <div className="chat-title" title={title}>
+              {isSelected ? <span className="chat-selected-check" aria-hidden="true">✓</span> : null}
+              {chatAttention.has(c.id) && (
+                <span className="chat-attention-dot" title="Needs your attention" />
+              )}
               {title}
             </div>
             <div className="muted tiny">{meta}</div>
@@ -3386,13 +3568,88 @@ export function App() {
               aria-label="Search chat history"
               onChange={(e) => setHistoryQuery(e.target.value)}
             />
-            <button type="button" className="primary" onClick={() => post({ type: "new_chat" })}>
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                clearHistorySelection();
+                post({ type: "new_chat" });
+              }}
+            >
               New
             </button>
           </div>
+          {selectedChats.length > 0 ? (
+            <div className="history-bulk-toolbar" role="toolbar" aria-label="Selected conversation actions">
+              <strong>{selectedChats.length} selected</strong>
+              <button
+                type="button"
+                className="ghost tiny"
+                onClick={() => {
+                  setPendingBulkDelete(false);
+                  post({
+                    type: "pin_chats",
+                    chatIds: selectedChats.map((chat) => chat.id),
+                    pinned: !allSelectedPinned,
+                  });
+                }}
+              >
+                {allSelectedPinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
+                onClick={() => {
+                  setPendingBulkDelete(false);
+                  post({
+                    type: "archive_chats",
+                    chatIds: selectedChats.map((chat) => chat.id),
+                    archived: !allSelectedArchived,
+                  });
+                }}
+              >
+                {allSelectedArchived ? "Unarchive" : "Archive"}
+              </button>
+              {pendingBulkDelete ? (
+                <>
+                  <button
+                    type="button"
+                    className="danger tiny"
+                    onClick={() => {
+                      post({
+                        type: "delete_chats",
+                        chatIds: selectedChats.map((chat) => chat.id),
+                      });
+                      clearHistorySelection();
+                    }}
+                  >
+                    Delete permanently?
+                  </button>
+                  <button type="button" className="ghost tiny" onClick={() => setPendingBulkDelete(false)}>
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="danger tiny" onClick={() => setPendingBulkDelete(true)}>
+                  Delete
+                </button>
+              )}
+              <button
+                type="button"
+                className="ghost tiny history-selection-clear"
+                onClick={clearHistorySelection}
+              >
+                Clear
+              </button>
+            </div>
+          ) : null}
           {historySearching && historyQuery.trim() ? (
             <div className="muted tiny history-hint">Searching…</div>
-          ) : null}
+          ) : (
+            <div className="muted tiny history-hint">
+              Shift-click selects a range · Cmd/Ctrl-click toggles individual conversations
+            </div>
+          )}
           {chats.length ? (
             <div className="chat-sections">
               {pinnedChats.length ? (
@@ -5047,14 +5304,16 @@ export function App() {
           </main>
 
           <footer className="composer">
-            <div className="autoapprove">
+            <div ref={autoApproveRef} className="autoapprove">
               <button
                 type="button"
                 className="aa-summary"
                 onClick={() => setAutoApproveOpen((o) => !o)}
+                aria-expanded={autoApproveOpen}
+                aria-controls="autoapprove-options"
                 title="Actions the agent may take without asking each time"
               >
-                <span className="aa-caret">{autoApproveOpen ? "▾" : "▸"}</span>
+                <span className="aa-caret">{autoApproveOpen ? "▴" : "▸"}</span>
                 Auto-approve:{" "}
                 <strong>
                   {planAct === "plan"
@@ -5074,7 +5333,7 @@ export function App() {
                 </strong>
               </button>
               {autoApproveOpen && (
-                <div className="aa-options">
+                <div id="autoapprove-options" className="aa-options">
                   <label className="check" title="Reads and searches are never gated">
                     <input type="checkbox" checked readOnly disabled />
                     Read files &amp; search <span className="muted tiny">(always)</span>
