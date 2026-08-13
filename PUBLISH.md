@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.161**
+Publisher **`clawagents`** · version **1.0.162**
 
+- [x] GitHub release `v1.0.162` + VSIX (conversation tabs, thread-routed streaming, history bulk actions)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.161` + VSIX (fix MCP discovery deadlock that hung every chat on "Running…"; split `ctx_execute` out of the Run-commands auto-approve; floor clawagents **6.20.59**)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] clawagents **6.20.59** on GitHub + PyPI (MCP tool discovery no longer deadlocks `create_claw_agent`)
