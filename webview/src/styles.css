@@ -718,6 +718,7 @@ summary {
 }
 
 .toolbar-modes {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -730,7 +731,9 @@ summary {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 6px;
-  overflow: hidden;
+  /* Tooltips must escape the segmented control. Corner radii on the first and
+     last buttons preserve the clipped appearance we previously got here. */
+  overflow: visible;
 }
 
 .planact.interaction .seg {
@@ -746,17 +749,88 @@ summary {
   border-radius: 0;
 }
 
+.planact .seg:first-child {
+  border-radius: 5px 0 0 5px;
+}
+
+.planact .seg:last-child {
+  border-radius: 0 5px 5px 0;
+}
+
 .planact .seg.active {
   background: var(--btn);
   color: var(--btn-fg);
 }
 
 .planact .seg:disabled {
-  opacity: 0.6;
+  /* Do not use opacity here: it would also fade the button's tooltip. */
+  opacity: 1;
+  color: color-mix(in srgb, var(--muted) 60%, transparent);
+  cursor: not-allowed;
+}
+
+.planact .seg.active:disabled {
+  background: color-mix(in srgb, var(--btn) 60%, transparent);
+  color: color-mix(in srgb, var(--btn-fg) 72%, transparent);
+}
+
+/* Native `title` bubbles are inconsistent in VS Code webviews and may not
+   appear at all on disabled controls. Keep help inside the webview so hover
+   works for every mode and keyboard focus works whenever the button can focus. */
+.has-tooltip {
+  /* The positioned toolbar/Auto-approve container is the containing block.
+     This keeps long help inside a narrow VS Code sidebar. */
+  position: static;
+}
+
+.has-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  z-index: 1000;
+  width: max-content;
+  min-width: 180px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 7px 9px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--border));
+  border-radius: 6px;
+  background: var(--vscode-editorHoverWidget-background, var(--input-bg));
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
+  box-shadow: 0 4px 14px color-mix(in srgb, #000 35%, transparent);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  transition:
+    opacity 100ms ease,
+    transform 100ms ease,
+    visibility 0s linear 100ms;
+}
+
+.has-tooltip.tooltip-left::after,
+.has-tooltip.tooltip-center::after,
+.has-tooltip.tooltip-right::after {
+  left: 0;
+  right: auto;
+}
+
+.has-tooltip:hover::after,
+.has-tooltip:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 120ms;
 }
 
 /* Auto-approve bar */
 .autoapprove {
+  position: relative;
   display: flex;
   /* Keep the disclosure button beside the mode controls while the options
      expand upward, so the pointer remains over the button for a second click. */
@@ -1062,10 +1136,20 @@ button.send:not(.icon-btn) {
 
 .tabs {
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 2px;
   margin: 0 -4px;
   padding: 6px 4px 8px;
   border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.panel-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
 }
 
 .tab {
@@ -1083,6 +1167,141 @@ button.send:not(.icon-btn) {
   color: var(--fg);
   border-color: var(--border);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.tabs-divider {
+  flex: 0 0 auto;
+  color: var(--border);
+  padding: 0 3px;
+  user-select: none;
+}
+
+.conversation-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 3px;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.conversation-tab {
+  display: flex;
+  flex: 1 1 140px;
+  align-items: center;
+  width: auto;
+  min-width: 28px;
+  max-width: 150px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--input-bg) 68%, transparent);
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.conversation-tab:hover {
+  background: var(--input-bg);
+}
+
+.conversation-tab.active {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 13%, var(--input-bg));
+}
+
+button.conversation-tab-main,
+button.conversation-tab-close {
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+}
+
+button.conversation-tab-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
+  padding-left: 8px;
+  text-align: left;
+}
+
+.conversation-tab-pin {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 7px;
+}
+
+.conversation-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+@container (max-width: 54px) {
+  button.conversation-tab-main {
+    padding-left: 4px;
+  }
+
+  .conversation-tab-title {
+    display: none;
+  }
+
+  .conversation-tab-pin {
+    margin: 0 auto;
+  }
+}
+
+button.conversation-tab-close {
+  flex: 0 0 24px;
+  font-size: 16px;
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.conversation-tab:hover button.conversation-tab-close,
+button.conversation-tab-close:focus-visible {
+  opacity: 1;
+}
+
+button.conversation-tab-close:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.conversation-tab-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  width: 164px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--vscode-menu-background, var(--input-bg));
+  color: var(--vscode-menu-foreground, var(--fg));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.conversation-tab-menu button {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+}
+
+.conversation-tab-menu button:hover,
+.conversation-tab-menu button:focus-visible {
+  background: var(--vscode-menu-selectionBackground, color-mix(in srgb, var(--accent) 20%, transparent));
+  color: var(--vscode-menu-selectionForeground, var(--fg));
 }
 
 .panel {
