@@ -122,6 +122,9 @@ async function warnUntrustedBaseUrl(settings: Record<string, unknown>): Promise<
 
 type PersistedState = {
   draft: string;
+  /** Unsent composer text keyed by conversation. `draft` remains as a
+   *  compatibility mirror for state written by older extension versions. */
+  drafts?: Record<string, string>;
   mode: AgentMode;
   chatId?: string;
   autoApprove?: AutoApprove;
@@ -150,7 +153,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private abort?: AbortController;
   private chatId: string | undefined;
-  /** Coalesce repeated New clicks while chat lookup/creation is in flight. */
+  /** Composer drafts are workspace-local because chat IDs are workspace-local. */
+  private readonly drafts: Record<string, string> = Object.create(null) as Record<
+    string,
+    string
+  >;
+  /** Coalesce repeated New clicks while chat creation is in flight. */
   private newChatPromise?: Promise<void>;
   /** Absolute UI-log offset of the oldest event currently shown (for load-older). */
   private eventsOffset = 0;
@@ -188,6 +196,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   /** Serialize settings saves — concurrent autosaves + live /providers probes
    *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
   private saveSettingsChain: Promise<void> = Promise.resolve();
+  /** Webview persistence messages can overlap with thread selection. Keep
+   *  workspace-state writes ordered so an older draft cannot land last. */
+  private persistStateChain: Promise<void> = Promise.resolve();
   /** Debounced auto-open of agent-edited files (avoid focus thrash). */
   private readonly autoOpen = new AutoOpenScheduler(
     (filePath) => {
@@ -213,6 +224,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     if (saved) {
       this.mode = saved.mode || this.mode;
       this.chatId = saved.chatId;
+      if (saved.drafts && typeof saved.drafts === "object") {
+        for (const [chatId, draft] of Object.entries(saved.drafts)) {
+          if (chatId && chatId.length <= 128 && typeof draft === "string" && draft) {
+            this.drafts[chatId] = draft;
+          }
+        }
+      }
+      // Migrate the former single-draft state into its owning conversation.
+      if (saved.chatId && saved.draft && this.drafts[saved.chatId] === undefined) {
+        this.drafts[saved.chatId] = saved.draft;
+      }
       if (saved.autoApprove) {
         this.autoApprove = { ...DEFAULT_AUTO_APPROVE, ...saved.autoApprove };
       }
@@ -237,9 +259,23 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private persistState(draft = ""): PersistedState {
+  private draftForChat(chatId = this.chatId): string {
+    return chatId ? this.drafts[chatId] || "" : "";
+  }
+
+  private rememberDraft(chatId: string | undefined, draft: string): void {
+    if (!chatId) return;
+    if (draft) {
+      this.drafts[chatId] = draft;
+    } else {
+      delete this.drafts[chatId];
+    }
+  }
+
+  private persistState(): PersistedState {
     return {
-      draft,
+      draft: this.draftForChat(),
+      drafts: { ...this.drafts },
       mode: this.mode,
       chatId: this.chatId,
       autoApprove: this.autoApprove,
@@ -411,7 +447,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private async postChatRestore(
     chatId: string,
     chat: Record<string, unknown>,
-    draft = "",
+    draft?: string,
     chatTitle?: string,
   ): Promise<void> {
     const events = (chat.events as Array<Record<string, unknown>>) || [];
@@ -423,7 +459,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({
       type: "restore",
       items: eventsToItems(events),
-      draft,
+      draft: draft ?? this.draftForChat(chatId),
       mode: (chat.mode as AgentMode) || this.mode,
       chatId,
       chatTitle: title,
@@ -516,48 +552,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "prepend", text });
   }
 
-  private async createOrReuseEmptyChat(): Promise<void> {
+  private async createNewChat(): Promise<void> {
     try {
       await this.sidecar.ensureStarted();
-
-      // Once New has selected a blank conversation, further clicks should
-      // keep using it. Check both counters so a failed/legacy run that wrote
-      // UI events is not mistaken for a genuinely empty conversation.
       const startedOn = this.chatId;
-      if (startedOn) {
-        try {
-          const current = await this.gateway.getChat(startedOn, { tail: 1 });
-          if (
-            this.chatId === startedOn &&
-            Number(current.message_count) === 0 &&
-            Number(current.events_total) === 0
-          ) {
-            this.eventsOffset = 0;
-            this.eventsHasMore = false;
-            await this.refreshChats();
-            if (this.chatId !== startedOn) {
-              return;
-            }
-            this.post({
-              type: "restore",
-              items: [],
-              draft: "",
-              mode: this.mode,
-              chatId: startedOn,
-              autoApprove: this.autoApprove,
-              interaction: this.interaction,
-              caveman: this.caveman,
-              goal: this.goalMode,
-              sessionCostUsd: 0,
-            });
-            await this.persistLocal(this.persistState());
-            return;
-          }
-        } catch {
-          // A stale workspace pointer should fall through and create a chat.
-        }
-      }
-
       const chat = await this.gateway.createChat(this.mode);
       if (this.chatId !== startedOn) {
         // User selected another conversation while createChat was in flight.
@@ -599,7 +597,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       await this.newChatPromise;
       return;
     }
-    const pending = this.createOrReuseEmptyChat();
+    const pending = this.createNewChat();
     this.newChatPromise = pending;
     try {
       await pending;
@@ -685,7 +683,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private async persistLocal(state: PersistedState): Promise<void> {
-    await this.context.workspaceState.update(STATE_KEY, state);
+    const pending = this.persistStateChain.then(() =>
+      this.context.workspaceState.update(STATE_KEY, state),
+    );
+    this.persistStateChain = pending.catch(() => undefined);
+    await pending;
   }
 
   private async refreshChats(query?: string): Promise<void> {
@@ -1331,9 +1333,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
           if (res.ok && (msg.mode === "conversation" || msg.mode === "both") && this.chatId) {
             // Carry draft through: restore overwrites it.
-            const saved = this.context.workspaceState.get<PersistedState>(STATE_KEY);
             const chat = await this.gateway.getChat(this.chatId, { tail: 400 });
-            await this.postChatRestore(this.chatId, chat, saved?.draft || "");
+            await this.postChatRestore(this.chatId, chat);
           }
         } catch (err) {
           this.post({
@@ -2153,9 +2154,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
       case "persist":
         this.mode = msg.mode;
-        if (msg.chatId) {
-          this.chatId = msg.chatId;
-        }
+        // A persist from the conversation being left must never change the
+        // selected conversation. It only updates that conversation's draft.
+        this.rememberDraft(msg.chatId, msg.draft);
         if (msg.autoApprove) {
           this.autoApprove = { ...DEFAULT_AUTO_APPROVE, ...msg.autoApprove };
         }
@@ -2171,7 +2172,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         if (this.mode === "read_only") {
           this.interaction = "interactive";
         }
-        await this.persistLocal(this.persistState(msg.draft));
+        await this.persistLocal(this.persistState());
         break;
       default:
         break;
