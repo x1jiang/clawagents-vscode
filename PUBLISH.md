@@ -1,7 +1,8 @@
 Publisher **`clawagents`** · version **1.0.164**
 
-- [ ] GitHub release `v1.0.164` + VSIX (Gemini 3.7 Flash catalog + preferred Gemini default; floor clawagents **6.20.60**)
-- [ ] clawagents **6.20.60** on GitHub + PyPI (Gemini 3.7 Flash profile + default)
+- [x] GitHub release `v1.0.164` + VSIX (Gemini 3.7 Flash catalog + preferred Gemini default; floor clawagents **6.20.60**)
+      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
+- [x] clawagents **6.20.60** on GitHub + PyPI (Gemini 3.7 Flash profile + default)
 - [x] GitHub release `v1.0.163` + VSIX (fix conversation routing races: interactive prompts, New-chat hijack, late restore, ghost tabs)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] GitHub release `v1.0.162` + VSIX (conversation tabs, thread-routed streaming, history bulk actions)
