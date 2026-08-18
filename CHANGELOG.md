@@ -1,3 +1,8 @@
+## 1.0.164
+
+- **Gemini 3.7 Flash** (`gemini-3.7-flash`) is in the model picker and is the preferred Gemini default (was `gemini-3.5-flash`). Existing saved models are unchanged. Requires **clawagents 6.20.60** for the 1M context profile; **Install/Upgrade Python Dependencies** or **Restart Sidecar** updates the managed environment.
+- Cost estimate uses the introductory 3.7 Flash rate ($0.75 / $3.75 per 1M input/output through 31 December 2026).
+
 ## 1.0.163
 
 - **Permission / ask / plan prompts survive a mid-run thread switch.** Switching chats in the gap before the host processed `select_chat` used to drop those interactive events — no card, no attention badge, no recovery. The host now always buffers them; the webview badges the owning thread instead of discarding; switching back flushes the prompt (deduped by request id).

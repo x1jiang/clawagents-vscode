@@ -238,7 +238,7 @@ def _default_model_for_provider(provider: str) -> str:
     if p == "openai":
         return "gpt-5.6-terra"
     if p == "gemini":
-        return "gemini-3.5-flash"
+        return "gemini-3.7-flash"
     if p == "anthropic":
         return "claude-sonnet-4-5"
     if p == "ollama":

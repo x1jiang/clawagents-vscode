@@ -28,7 +28,7 @@ export const LOCAL_DOCUMENT_TYPES = new Set([
 ]);
 
 export const PREFERRED_OPENAI_MODEL = "gpt-5.6-terra";
-export const PREFERRED_GEMINI_MODEL = "gemini-3.5-flash";
+export const PREFERRED_GEMINI_MODEL = "gemini-3.7-flash";
 export const PREFERRED_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 export const PREFERRED_XAI_MODEL = "grok-4.5";
 export const PREFERRED_EFFORT = "medium";
@@ -57,6 +57,7 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     id: "gemini",
     name: "Google Gemini",
     models: [
+      { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
       { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
       { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
       { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
