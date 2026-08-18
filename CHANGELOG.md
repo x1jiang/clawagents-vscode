@@ -1,3 +1,7 @@
+## 1.0.165
+
+- **Fix sidecar refused after a successful 6.20.60 install.** The floor check read `clawagents.__version__`, which 6.20.60 left at `6.20.59`, so the host reported “Packages installed but clawagents 6.20.59 is still outside the required range (>=6.20.60, <7.0.0).” The probe now uses the installed distribution metadata (the version pip actually wrote). **Reload the window** — if 6.20.60 is already in the managed env, no extra pip step is needed.
+
 ## 1.0.164
 
 - **Gemini 3.7 Flash** (`gemini-3.7-flash`) is in the model picker and is the preferred Gemini default (was `gemini-3.5-flash`). Existing saved models are unchanged. Requires **clawagents 6.20.60** for the 1M context profile; **Install/Upgrade Python Dependencies** or **Restart Sidecar** updates the managed environment.

@@ -88,12 +88,18 @@ export function probeSidecarDepsSync(
           "import sys, inspect",
           "import fastapi, uvicorn, pydantic",
           "import pexpect, pyte",
+          "from importlib.metadata import version as _dist_ver",
           "import clawagents",
           "from clawagents.agent import create_claw_agent",
           "print(sys.executable)",
-          "print(getattr(clawagents, '__version__', '?'))",
+          // Prefer dist-info over clawagents.__version__, which has lagged
+          // pyproject on more than one release and falsely fails the floor.
+          "try:",
+          "    print(_dist_ver('clawagents'))",
+          "except Exception:",
+          "    print(getattr(clawagents, '__version__', '?'))",
           "print('skills_exclude' in inspect.signature(create_claw_agent).parameters)",
-        ].join("; "),
+        ].join("\n"),
       ],
       { encoding: "utf8", timeout: 25_000, env },
     );

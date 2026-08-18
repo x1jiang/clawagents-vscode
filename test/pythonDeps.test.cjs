@@ -97,6 +97,15 @@ test("dependency versions stay inside the supported major ranges", () => {
   );
 });
 
+test("dependency probe prefers dist-info over clawagents.__version__", () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, "..", "src", "pythonDeps.ts"),
+    "utf8",
+  );
+  assert.match(src, /_dist_ver\('clawagents'\)/);
+  assert.match(src, /from importlib\.metadata import version as _dist_ver/);
+});
+
 test("dependency probe requires PTY runtime imports", () => {
   const fakePython = path.join(tempDir, "python-without-pty");
   fs.writeFileSync(

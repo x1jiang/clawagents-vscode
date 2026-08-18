@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.164**
+Publisher **`clawagents`** · version **1.0.165**
 
+- [ ] GitHub release `v1.0.165` + VSIX (sidecar floor probe uses dist-info, not stale `__version__`)
+- [ ] clawagents **6.20.61** on GitHub + PyPI (`__version__` follows installed metadata)
 - [x] GitHub release `v1.0.164` + VSIX (Gemini 3.7 Flash catalog + preferred Gemini default; floor clawagents **6.20.60**)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] clawagents **6.20.60** on GitHub + PyPI (Gemini 3.7 Flash profile + default)
