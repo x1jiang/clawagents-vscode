@@ -950,6 +950,9 @@ export function App() {
   const [sidecarDetail, setSidecarDetail] = useState<string | undefined>();
   const [chatId, setChatId] = useState<string | undefined>();
   const chatIdRef = useRef<string | undefined>();
+  /** Draft ownership is cleared while a different conversation is loading,
+   *  so the old text cannot be persisted under the newly selected chat ID. */
+  const draftOwnerRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
@@ -1663,6 +1666,9 @@ export function App() {
           ) {
             break;
           }
+          const restoredChatId =
+            msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
+          draftOwnerRef.current = restoredChatId;
           setItems((msg.items as ChatItem[]) || []);
           setRenderWindow(TRANSCRIPT_RENDER_CHUNK);
           setEventsHasMore(Boolean(msg.eventsHasMore));
@@ -1683,7 +1689,6 @@ export function App() {
             setGoalMode(msg.goal);
           }
           if (msg.chatId !== undefined) {
-            const restoredChatId = msg.chatId || undefined;
             chatIdRef.current = restoredChatId;
             setChatId(restoredChatId);
             if (restoredChatId) {
@@ -2244,7 +2249,16 @@ export function App() {
   useEffect(() => {
     window.clearTimeout(persistTimer.current);
     persistTimer.current = window.setTimeout(() => {
-      post({ type: "persist", draft, mode, chatId, autoApprove, interaction, caveman, goal: goalMode });
+      post({
+        type: "persist",
+        draft,
+        mode,
+        chatId: draftOwnerRef.current,
+        autoApprove,
+        interaction,
+        caveman,
+        goal: goalMode,
+      });
     }, 400);
     return () => window.clearTimeout(persistTimer.current);
   }, [draft, mode, chatId, autoApprove, interaction, caveman, goalMode]);
@@ -2359,6 +2373,30 @@ export function App() {
     setPendingBulkDelete(false);
   };
 
+  /** Save before navigation instead of waiting for the debounce: switching
+   *  threads cancels that timer and used to lose the last typed characters. */
+  const persistDraftNow = (
+    value = draft,
+    ownerChatId = draftOwnerRef.current,
+  ) => {
+    if (!ownerChatId) return;
+    post({
+      type: "persist",
+      draft: value,
+      mode,
+      chatId: ownerChatId,
+      autoApprove,
+      interaction,
+      caveman,
+      goal: goalMode,
+    });
+  };
+
+  const clearDraft = () => {
+    setDraft("");
+    persistDraftNow("");
+  };
+
   const handleHistoryChatClick = (event: ReactMouseEvent<HTMLButtonElement>, c: ChatSummary) => {
     const toggle = event.metaKey || event.ctrlKey;
     setOpenChatMenuId(undefined);
@@ -2404,6 +2442,8 @@ export function App() {
     // a window where events from the old chat can enter the new transcript.
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
     setPanel("chat");
+    persistDraftNow();
+    draftOwnerRef.current = undefined;
     chatIdRef.current = c.id;
     setChatId(c.id);
     post({ type: "select_chat", chatId: c.id });
@@ -2417,6 +2457,8 @@ export function App() {
       upsertConversationTab(previous, tab.id, chats, tab.title),
     );
     if (tab.id === chatIdRef.current) return;
+    persistDraftNow();
+    draftOwnerRef.current = undefined;
     chatIdRef.current = tab.id;
     setChatId(tab.id);
     post({ type: "select_chat", chatId: tab.id });
@@ -2432,6 +2474,8 @@ export function App() {
     const replacement = remaining[Math.min(closingIndex, remaining.length - 1)];
     if (replacement) {
       pendingNewChatRef.current = false;
+      persistDraftNow();
+      draftOwnerRef.current = undefined;
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
       setPanel("chat");
@@ -3034,27 +3078,27 @@ export function App() {
       return;
     }
     if (value === "/compact") {
-      setDraft("");
+      clearDraft();
       setCompactPhase("start");
       post({ type: "compact_chat" });
       return;
     }
     if (value === "/checkpoints") {
-      setDraft("");
+      clearDraft();
       openCheckpoints();
       return;
     }
     if (value === "/hunks" || value === "/review") {
-      setDraft("");
+      clearDraft();
       openHunks();
       return;
     }
     if (value === "/rewind") {
-      setDraft("");
+      clearDraft();
       openRewind();
       return;
     }
-    setDraft("");
+    clearDraft();
     if (busy) {
       post({ type: "interject", text: value });
       return;
@@ -3192,6 +3236,8 @@ export function App() {
               setOpenChatMenuId(undefined);
               setPendingDeleteChatId(undefined);
               pendingForkRef.current = true;
+              persistDraftNow();
+              draftOwnerRef.current = undefined;
               post({ type: "fork_chat", chatId: c.id });
             }}
           >
@@ -3912,6 +3958,8 @@ export function App() {
               className="primary"
               onClick={() => {
                 clearHistorySelection();
+                persistDraftNow();
+                draftOwnerRef.current = undefined;
                 pendingNewChatRef.current = true;
                 post({ type: "new_chat" });
               }}
@@ -5582,7 +5630,7 @@ export function App() {
                         className="chip"
                         disabled={busy || !hasApiKey}
                         onClick={() => {
-                          setDraft(q);
+                          clearDraft();
                           // Include current auto-approve / interaction so a chip
                           // click before the persist debounce cannot use stale host state.
                           post({
@@ -5955,6 +6003,8 @@ export function App() {
                 title="Fork current conversation into a new chat"
                 onClick={() => {
                   pendingForkRef.current = true;
+                  persistDraftNow();
+                  draftOwnerRef.current = undefined;
                   post({ type: "fork_chat" });
                 }}
               >
@@ -5966,6 +6016,8 @@ export function App() {
                 disabled={busy}
                 title="Start a new chat"
                 onClick={() => {
+                  persistDraftNow();
+                  draftOwnerRef.current = undefined;
                   pendingNewChatRef.current = true;
                   post({ type: "new_chat" });
                 }}
@@ -6178,7 +6230,7 @@ export function App() {
                         onClick={() => {
                           const value = draft.trim();
                           if (!value) return;
-                          setDraft("");
+                          clearDraft();
                           post({ type: "interject", text: value });
                         }}
                       >
