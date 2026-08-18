@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.165**
+Publisher **`clawagents`** · version **1.0.166**
 
+- [ ] clawagents **6.20.62** on GitHub + PyPI (Gemini 3.7: flatten no longer dumps commands as the answer; empty/command-only turns continue)
+- [ ] GitHub release `v1.0.166` + VSIX (Gemini 3.7 tool-loop answers; floor clawagents **6.20.62**)
 - [x] GitHub release `v1.0.165` + VSIX (sidecar floor probe uses dist-info, not stale `__version__`)
       · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
 - [x] clawagents **6.20.61** on GitHub + PyPI (`__version__` follows installed metadata)

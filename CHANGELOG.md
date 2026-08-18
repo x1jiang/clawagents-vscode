@@ -1,3 +1,7 @@
+## 1.0.166
+
+- **Gemini 3.7 Flash now answers after tools.** A history-400 flatten retry used to dump `[called write_file({…huge script…})]` into the chat, and an empty STOP after tools was treated as **Done**. Flatten no longer reprints tool arguments; empty or command-only turns ask the model to summarize the results. Requires **clawagents 6.20.62** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
+
 ## 1.0.165
 
 - **Fix sidecar refused after a successful 6.20.60 install.** The floor check read `clawagents.__version__`, which 6.20.60 left at `6.20.59`, so the host reported “Packages installed but clawagents 6.20.59 is still outside the required range (>=6.20.60, <7.0.0).” The probe now uses the installed distribution metadata (the version pip actually wrote). **Reload the window** — if 6.20.60 is already in the managed env, no extra pip step is needed.
