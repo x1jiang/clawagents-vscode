@@ -21,6 +21,8 @@ describe("pythonPathPin source", () => {
     assert.match(pinSrc, /export async function ensurePathPythonFloor/);
     assert.match(pinSrc, /CLAWAGENTS_PYTHON/);
     assert.match(pinSrc, /\["-a", name\]/);
+    assert.match(pinSrc, /metadata\.version\('clawagents'\)/);
+    assert.doesNotMatch(pinSrc, /getattr\(clawagents, '__version__'/);
   });
 
   it("pinPythonPathEnv puts interpreter dir first", () => {

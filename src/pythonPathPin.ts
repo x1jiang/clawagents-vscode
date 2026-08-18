@@ -87,7 +87,7 @@ export function probePathInterpreterDrift(sidecarPython: string): PathDriftHit[]
         resolved,
         [
           "-c",
-          "import clawagents; print(getattr(clawagents, '__version__', '?'))",
+          "import importlib.metadata as metadata; print(metadata.version('clawagents'))",
         ],
         { encoding: "utf8", timeout: 12_000 },
       );
