@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.169**
+Publisher **`clawagents`** · version **1.0.170**
 
+- [x] GitHub release `v1.0.170` + VSIX (Gemini CJK skill catalog; floor clawagents **6.20.65**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
+- [x] clawagents **6.20.65** on GitHub + PyPI (keep skill catalog on Chinese follow-ups)
 - [x] GitHub release `v1.0.169` + VSIX (fork restore + composer draft persist after failed nav / last-tab close)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.64** on GitHub + PyPI (scrub Gemini contents to SDK allow-list)
