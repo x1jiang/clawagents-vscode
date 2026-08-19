@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.171**
+Publisher **`clawagents`** · version **1.0.172**
 
+- [x] GitHub release `v1.0.172` + VSIX (execute-grounded counts; floor clawagents **6.20.67**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
+- [x] clawagents **6.20.67** on GitHub + PyPI (counts must appear in this-turn execute output)
 - [x] GitHub release `v1.0.171` + VSIX (reject invented SQL tables; floor clawagents **6.20.66**)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.66** on GitHub + PyPI (no-tool count tables are not a final answer)
