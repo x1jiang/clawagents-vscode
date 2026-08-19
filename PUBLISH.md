@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.168**
+Publisher **`clawagents`** · version **1.0.169**
 
+- [x] GitHub release `v1.0.169` + VSIX (fork restore + composer draft persist after failed nav / last-tab close)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.64** on GitHub + PyPI (scrub Gemini contents to SDK allow-list)
 - [x] GitHub release `v1.0.168` + VSIX (Gemini request-shape hardening; floor clawagents **6.20.64**)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
