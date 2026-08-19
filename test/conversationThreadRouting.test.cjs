@@ -86,6 +86,15 @@ test("late restore cannot replace the currently displayed chat", () => {
   assert.match(app, /pendingNewChatRef/);
   assert.match(
     app,
-    /msg\.chatId !== chatIdRef\.current &&\s*!pendingNew/,
+    /msg\.chatId !== chatIdRef\.current &&\s*!pendingNew &&\s*!intentionalForkRestore/,
+  );
+});
+
+test("an intentional fork restore switches to the newly created chat", () => {
+  const forkChat = section(provider, 'case "fork_chat":', 'case "select_chat":');
+  assert.match(forkChat, /postChatRestore\(res\.chat_id, chat, "", forkTitle, "fork"\)/);
+  assert.match(
+    app,
+    /const intentionalForkRestore =\s*msg\.restoreReason === "fork" && pendingForkRef\.current/,
   );
 });

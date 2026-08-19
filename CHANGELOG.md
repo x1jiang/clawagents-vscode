@@ -1,3 +1,7 @@
+## 1.0.169
+
+- **Fork now switches to the newly created conversation.** The webview's stale-restore guard previously discarded the fork's intentional chat-ID change, leaving the original conversation on screen even though the fork was created. Fork restores are now explicitly identified and allowed without weakening protection against unrelated late restores.
+
 ## 1.0.168
 
 - **Harden Gemini tool turns.** Contents are scrubbed to the google-genai allow-list before each request, so an extra field cannot abort the turn again. Requires **clawagents 6.20.64**.

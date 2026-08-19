@@ -1658,11 +1658,14 @@ export function App() {
         case "restore": {
           const pendingNew = pendingNewChatRef.current;
           pendingNewChatRef.current = false;
+          const intentionalForkRestore =
+            msg.restoreReason === "fork" && pendingForkRef.current;
           if (
             msg.chatId &&
             chatIdRef.current &&
             msg.chatId !== chatIdRef.current &&
-            !pendingNew
+            !pendingNew &&
+            !intentionalForkRestore
           ) {
             break;
           }
