@@ -1,3 +1,7 @@
+## 1.0.167
+
+- **Fix Gemini turn dying after the first tool.** 6.20.62 sent `call_id` on function responses; google-genai rejected it (`extra_forbidden`) and the UI called that an API-key failure. Requires **clawagents 6.20.63** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
+
 ## 1.0.166
 
 - **Gemini 3.7 Flash now answers after tools.** A history-400 flatten retry used to dump `[called write_file({…huge script…})]` into the chat, and an empty STOP after tools was treated as **Done**. Flatten no longer reprints tool arguments; empty or command-only turns ask the model to summarize the results. Requires **clawagents 6.20.62** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
