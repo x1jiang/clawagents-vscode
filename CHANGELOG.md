@@ -1,6 +1,8 @@
 ## 1.0.169
 
 - **Fork now switches to the newly created conversation.** The webview's stale-restore guard previously discarded the fork's intentional chat-ID change, leaving the original conversation on screen even though the fork was created. Fork restores are now explicitly identified and allowed without weakening protection against unrelated late restores.
+- **Composer drafts keep saving after a failed fork, New, or thread switch.** Navigation used to clear draft ownership before the host replied; on error the composer stayed visible but later keystrokes were never persisted.
+- **Closing the last tab (or all tabs) flushes the composer first.** Closing used to post `deselect_chat` without a persist, so a restore with an empty draft could wipe text still inside the 400ms debounce.
 
 ## 1.0.168
 

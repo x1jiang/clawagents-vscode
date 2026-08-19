@@ -15,7 +15,7 @@ test("conversation tabs open from history and select their owning chat", () => {
 
 test("conversation tabs can close, close all tabs, and pin a thread", () => {
   assert.match(app, /const closeConversationTab = \(closingId: string\)/);
-  assert.match(app, /const closeAllConversationTabs = \(\) => \{\s*setOpenConversationTabs\(\[\]\)/);
+  assert.match(app, /const closeAllConversationTabs = \(\) => \{\s*persistDraftNow\(\);/);
   assert.match(app, /post\(\{ type: "pin_chat", chatId: tab\.id, pinned \}\)/);
   assert.match(app, />\s*Close all\s*</);
   assert.match(app, /onContextMenu=/);

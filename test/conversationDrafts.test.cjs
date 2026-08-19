@@ -36,7 +36,11 @@ test("restoring a conversation returns only that conversation's draft", () => {
 test("thread navigation saves immediately without assigning the old draft to the new chat", () => {
   assert.match(
     app,
-    /persistDraftNow\(\);\s*draftOwnerRef\.current = undefined;\s*chatIdRef\.current = tab\.id/,
+    /beginDraftHandoff\(\);\s*chatIdRef\.current = tab\.id/,
+  );
+  assert.match(
+    app,
+    /persistDraftNow\(\);\s*draftOwnerBeforeNavRef\.current = draftOwnerRef\.current;\s*draftOwnerRef\.current = undefined/,
   );
   assert.match(app, /chatId: draftOwnerRef\.current/);
   assert.match(
@@ -44,4 +48,27 @@ test("thread navigation saves immediately without assigning the old draft to the
     /draftOwnerRef\.current = restoredChatId;[\s\S]*setDraft\(msg\.draft \|\| ""\)/,
   );
   assert.match(app, /const clearDraft = \(\) => \{\s*setDraft\(""\);\s*persistDraftNow\(""\)/);
+});
+
+test("failed navigation restores draft ownership so the composer keeps persisting", () => {
+  assert.match(app, /const draftOwnerBeforeNavRef = useRef<string \| undefined>\(\)/);
+  assert.match(
+    app,
+    /if \(draftOwnerRef\.current === undefined && draftOwnerBeforeNavRef\.current\) \{\s*draftOwnerRef\.current = draftOwnerBeforeNavRef\.current;\s*\}/,
+  );
+  assert.match(
+    app,
+    /draftOwnerRef\.current = restoredChatId;\s*draftOwnerBeforeNavRef\.current = undefined/,
+  );
+});
+
+test("closing the last tab or all tabs flushes the composer before deselect", () => {
+  assert.match(
+    app,
+    /persistDraftNow\(\);\s*draftOwnerRef\.current = undefined;\s*draftOwnerBeforeNavRef\.current = undefined;\s*chatIdRef\.current = undefined;\s*setChatId\(undefined\);\s*setPanel\("history"\);\s*post\(\{ type: "deselect_chat" \}\)/,
+  );
+  assert.match(
+    app,
+    /const closeAllConversationTabs = \(\) => \{\s*persistDraftNow\(\);/,
+  );
 });

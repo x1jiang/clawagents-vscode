@@ -953,6 +953,8 @@ export function App() {
   /** Draft ownership is cleared while a different conversation is loading,
    *  so the old text cannot be persisted under the newly selected chat ID. */
   const draftOwnerRef = useRef<string | undefined>();
+  /** Owner stashed by beginDraftHandoff so a failed fork/new/select can resume persist. */
+  const draftOwnerBeforeNavRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
@@ -1672,6 +1674,7 @@ export function App() {
           const restoredChatId =
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
           draftOwnerRef.current = restoredChatId;
+          draftOwnerBeforeNavRef.current = undefined;
           setItems((msg.items as ChatItem[]) || []);
           setRenderWindow(TRANSCRIPT_RENDER_CHUNK);
           setEventsHasMore(Boolean(msg.eventsHasMore));
@@ -2084,6 +2087,10 @@ export function App() {
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
+          if (draftOwnerRef.current === undefined && draftOwnerBeforeNavRef.current) {
+            draftOwnerRef.current = draftOwnerBeforeNavRef.current;
+          }
+          draftOwnerBeforeNavRef.current = undefined;
           markStalePlanApprovals(setItems);
           commitRunCost(runUsageRef.current);
           // A failed settings save posts type:"error" without saveOutcome —
@@ -2104,6 +2111,10 @@ export function App() {
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
+          if (draftOwnerRef.current === undefined && draftOwnerBeforeNavRef.current) {
+            draftOwnerRef.current = draftOwnerBeforeNavRef.current;
+          }
+          draftOwnerBeforeNavRef.current = undefined;
           markStalePlanApprovals(setItems);
           commitRunCost(runUsageRef.current);
           setItems((prev) => [...prev, { kind: "status", text: "Cancelled" }]);
@@ -2395,6 +2406,13 @@ export function App() {
     });
   };
 
+  /** Flush the current composer, then drop ownership until restore (or error) lands. */
+  const beginDraftHandoff = () => {
+    persistDraftNow();
+    draftOwnerBeforeNavRef.current = draftOwnerRef.current;
+    draftOwnerRef.current = undefined;
+  };
+
   const clearDraft = () => {
     setDraft("");
     persistDraftNow("");
@@ -2445,8 +2463,7 @@ export function App() {
     // a window where events from the old chat can enter the new transcript.
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
     setPanel("chat");
-    persistDraftNow();
-    draftOwnerRef.current = undefined;
+    beginDraftHandoff();
     chatIdRef.current = c.id;
     setChatId(c.id);
     post({ type: "select_chat", chatId: c.id });
@@ -2460,8 +2477,7 @@ export function App() {
       upsertConversationTab(previous, tab.id, chats, tab.title),
     );
     if (tab.id === chatIdRef.current) return;
-    persistDraftNow();
-    draftOwnerRef.current = undefined;
+    beginDraftHandoff();
     chatIdRef.current = tab.id;
     setChatId(tab.id);
     post({ type: "select_chat", chatId: tab.id });
@@ -2477,13 +2493,15 @@ export function App() {
     const replacement = remaining[Math.min(closingIndex, remaining.length - 1)];
     if (replacement) {
       pendingNewChatRef.current = false;
-      persistDraftNow();
-      draftOwnerRef.current = undefined;
+      beginDraftHandoff();
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
       setPanel("chat");
       post({ type: "select_chat", chatId: replacement.id });
     } else {
+      persistDraftNow();
+      draftOwnerRef.current = undefined;
+      draftOwnerBeforeNavRef.current = undefined;
       chatIdRef.current = undefined;
       setChatId(undefined);
       setPanel("history");
@@ -2492,6 +2510,9 @@ export function App() {
   };
 
   const closeAllConversationTabs = () => {
+    persistDraftNow();
+    draftOwnerRef.current = undefined;
+    draftOwnerBeforeNavRef.current = undefined;
     setOpenConversationTabs([]);
     setConversationTabMenu(null);
     chatIdRef.current = undefined;
@@ -3239,8 +3260,7 @@ export function App() {
               setOpenChatMenuId(undefined);
               setPendingDeleteChatId(undefined);
               pendingForkRef.current = true;
-              persistDraftNow();
-              draftOwnerRef.current = undefined;
+              beginDraftHandoff();
               post({ type: "fork_chat", chatId: c.id });
             }}
           >
@@ -3961,8 +3981,7 @@ export function App() {
               className="primary"
               onClick={() => {
                 clearHistorySelection();
-                persistDraftNow();
-                draftOwnerRef.current = undefined;
+                beginDraftHandoff();
                 pendingNewChatRef.current = true;
                 post({ type: "new_chat" });
               }}
@@ -6006,8 +6025,7 @@ export function App() {
                 title="Fork current conversation into a new chat"
                 onClick={() => {
                   pendingForkRef.current = true;
-                  persistDraftNow();
-                  draftOwnerRef.current = undefined;
+                  beginDraftHandoff();
                   post({ type: "fork_chat" });
                 }}
               >
@@ -6019,8 +6037,7 @@ export function App() {
                 disabled={busy}
                 title="Start a new chat"
                 onClick={() => {
-                  persistDraftNow();
-                  draftOwnerRef.current = undefined;
+                  beginDraftHandoff();
                   pendingNewChatRef.current = true;
                   post({ type: "new_chat" });
                 }}
