@@ -1,3 +1,7 @@
+## 1.0.168
+
+- **Harden Gemini tool turns.** Contents are scrubbed to the google-genai allow-list before each request, so an extra field cannot abort the turn again. Requires **clawagents 6.20.64**.
+
 ## 1.0.167
 
 - **Fix Gemini turn dying after the first tool.** 6.20.62 sent `call_id` on function responses; google-genai rejected it (`extra_forbidden`) and the UI called that an API-key failure. Requires **clawagents 6.20.63** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
