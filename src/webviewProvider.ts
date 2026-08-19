@@ -449,6 +449,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     chat: Record<string, unknown>,
     draft?: string,
     chatTitle?: string,
+    restoreReason?: "fork",
   ): Promise<void> {
     const events = (chat.events as Array<Record<string, unknown>>) || [];
     this.eventsOffset = Number(chat.events_offset ?? 0) || 0;
@@ -463,6 +464,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       mode: (chat.mode as AgentMode) || this.mode,
       chatId,
       chatTitle: title,
+      restoreReason,
       autoApprove: this.autoApprove,
       interaction: this.interaction,
       caveman: this.caveman,
@@ -1071,7 +1073,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           const forkTitle =
             (typeof res.chat?.title === "string" && res.chat.title) ||
             (typeof chat.title === "string" ? chat.title : undefined);
-          await this.postChatRestore(res.chat_id, chat, "", forkTitle);
+          await this.postChatRestore(res.chat_id, chat, "", forkTitle, "fork");
           await this.refreshChats();
         } catch (err) {
           this.post({
