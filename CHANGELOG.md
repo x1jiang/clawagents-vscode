@@ -1,3 +1,7 @@
+## 1.0.171
+
+- **Gemini cannot finish with an invented SQL table.** A count matrix or “I executed SQL” claim with no tool this turn is rejected and the model is told to call `execute` / `use_skill`. Requires **clawagents 6.20.66** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
+
 ## 1.0.170
 
 - **Gemini 3.7 no longer loses skills on Chinese follow-ups.** A question like “请问你是调用 sql 了？” used to wipe the in-prompt skill catalog (ASCII-only ranking), so the model answered in one iteration with invented SQL counts. Requires **clawagents 6.20.65** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
