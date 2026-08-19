@@ -1,7 +1,8 @@
 Publisher **`clawagents`** · version **1.0.167**
 
-- [ ] clawagents **6.20.63** on GitHub + PyPI (drop illegal FunctionResponse.call_id; stop mislabeling extra_forbidden as auth)
-- [ ] GitHub release `v1.0.167` + VSIX (Gemini tool-turn validation fix; floor clawagents **6.20.63**)
+- [x] clawagents **6.20.63** on GitHub + PyPI (drop illegal FunctionResponse.call_id; stop mislabeling extra_forbidden as auth)
+- [x] GitHub release `v1.0.167` + VSIX (Gemini tool-turn validation fix; floor clawagents **6.20.63**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.62** on GitHub + PyPI (Gemini 3.7: flatten no longer dumps commands as the answer; empty/command-only turns continue)
 - [x] GitHub release `v1.0.166` + VSIX (Gemini 3.7 tool-loop answers; floor clawagents **6.20.62**)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
