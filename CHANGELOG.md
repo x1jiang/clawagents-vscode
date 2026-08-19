@@ -1,3 +1,7 @@
+## 1.0.170
+
+- **Gemini 3.7 no longer loses skills on Chinese follow-ups.** A question like “请问你是调用 sql 了？” used to wipe the in-prompt skill catalog (ASCII-only ranking), so the model answered in one iteration with invented SQL counts. Requires **clawagents 6.20.65** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
+
 ## 1.0.169
 
 - **Fork now switches to the newly created conversation.** The webview's stale-restore guard previously discarded the fork's intentional chat-ID change, leaving the original conversation on screen even though the fork was created. Fork restores are now explicitly identified and allowed without weakening protection against unrelated late restores.
