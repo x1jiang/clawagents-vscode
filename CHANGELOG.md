@@ -1,3 +1,7 @@
+## 1.0.172
+
+- **Gemini count tables must match this-turn `execute` output.** `use_skill` is not evidence. Invented hour/day cells, fenced/HTML tables, and “305 patients” claims that are not in the tool output are rejected; after two nudges the harness publishes a refusal instead of the fake table. Requires **clawagents 6.20.67** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
+
 ## 1.0.171
 
 - **Gemini cannot finish with an invented SQL table.** A count matrix or “I executed SQL” claim with no tool this turn is rejected and the model is told to call `execute` / `use_skill`. Requires **clawagents 6.20.66** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
