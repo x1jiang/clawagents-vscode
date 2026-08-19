@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.170**
+Publisher **`clawagents`** · version **1.0.171**
 
+- [x] GitHub release `v1.0.171` + VSIX (reject invented SQL tables; floor clawagents **6.20.66**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
+- [x] clawagents **6.20.66** on GitHub + PyPI (no-tool count tables are not a final answer)
 - [x] GitHub release `v1.0.170` + VSIX (Gemini CJK skill catalog; floor clawagents **6.20.65**)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.65** on GitHub + PyPI (keep skill catalog on Chinese follow-ups)
