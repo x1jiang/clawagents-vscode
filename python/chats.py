@@ -1780,9 +1780,15 @@ async def run_chat_turn(
                 )
 
         bt = before_tool_factory(mode=mode, grants=GrantStore())
-        agent.before_tool = bt
+        from write_gate import workspace_write_gate
+
+        write_lease = workspace_write_gate.lease(
+            getattr(bt, "mutation_tools", frozenset())
+        )
+        agent.before_tool = write_lease.wrap_before(bt)
+        agent.after_tool = write_lease.wrap_after(agent.after_tool)
         # Route declarative permission "ask" into the VS Code approval UI.
-        ask_h = getattr(bt, "ask_handler", None)
+        ask_h = getattr(agent.before_tool, "ask_handler", None)
         pe = getattr(agent, "_permission_engine", None)
         if pe is None:
             pe = getattr(agent.tools, "_permission_engine", None)
@@ -1847,6 +1853,7 @@ async def run_chat_turn(
         try:
             res = await agent.invoke(augmented, **invoke_kwargs)
         finally:
+            write_lease.close()
             # Also on cancel/error: a job the turn started outlives the turn,
             # and a stopped turn is precisely when the user still wants it.
             try:

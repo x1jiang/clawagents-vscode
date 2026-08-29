@@ -788,6 +788,11 @@ def _make_before_tool(
         | _WEB_TOOLS
         | _BROWSER_TOOLS
     )
+    workspace_mutation_tools = (
+        frozenset(WRITE_CLASS_TOOLS)
+        | CONTEXT_MODE_WRITE_TOOLS
+        | GRAPHIFY_WRITE_TOOLS
+    )
 
     def _plan_unlocked() -> bool:
         if not run_id:
@@ -957,6 +962,7 @@ def _make_before_tool(
         return decision in ("allow_once", "allow_always")
 
     before_tool.ask_handler = ask_handler  # type: ignore[attr-defined]
+    before_tool.mutation_tools = workspace_mutation_tools  # type: ignore[attr-defined]
     return before_tool
 
 
