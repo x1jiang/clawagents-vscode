@@ -1,3 +1,7 @@
+## 1.0.173
+
+- **Skill workshop keeps a permanent reject log.** Apply / reject / quarantine / rollback append to `.clawagents/skill-workshop/skill-impact.md` (reason + `SKILL.md` diff). Undo does not erase that file. Requires **clawagents 6.20.68** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
+
 ## 1.0.172
 
 - **Gemini count tables must match this-turn `execute` output.** `use_skill` is not evidence. Invented hour/day cells, fenced/HTML tables, and “305 patients” claims that are not in the tool output are rejected; after two nudges the harness publishes a refusal instead of the fake table. Requires **clawagents 6.20.67** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
