@@ -342,7 +342,7 @@ export type WebviewToHost =
       caveman?: boolean;
       goal?: boolean;
     }
-  | { type: "cancel" }
+  | { type: "cancel"; chatId?: string }
   | {
       type: "permission";
       requestId: string;
@@ -473,7 +473,7 @@ export type WebviewToHost =
   | { type: "save_pinned"; text: string };
 
 const NO_PAYLOAD_MESSAGES = new Set([
-  "ready", "cancel", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
+  "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
   "load_stats", "bug_report_capture_screenshot", "load_older_chat",
@@ -553,6 +553,10 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost : undefined;
     case "queue_send":
       return text(value.text) ? value as WebviewToHost : undefined;
+    case "cancel":
+      return value.chatId === undefined || opaqueId(value.chatId)
+        ? value as WebviewToHost
+        : undefined;
     case "bug_report_submit":
       return text(value.text, 100_000)
         && Array.isArray(value.screenshots)

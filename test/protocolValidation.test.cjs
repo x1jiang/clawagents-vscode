@@ -39,6 +39,14 @@ test("accepts bounded side-chat fork and close requests", () => {
   assert.equal(parseWebviewToHost({ type: "close_side_chat", chatId: "../../outside" }), undefined);
 });
 
+test("cancel may target one opaque conversation id", () => {
+  assert.deepEqual(parseWebviewToHost({ type: "cancel", chatId: "chat-123" }), {
+    type: "cancel",
+    chatId: "chat-123",
+  });
+  assert.equal(parseWebviewToHost({ type: "cancel", chatId: "../escape" }), undefined);
+});
+
 test("settings saves require a positive integer revision", () => {
   const message = { type: "save_settings", revision: 7, settings: { provider: "openai" } };
   assert.deepEqual(parseWebviewToHost(message), message);

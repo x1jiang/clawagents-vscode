@@ -15,11 +15,26 @@ function section(source, start, end) {
   return source.slice(from, to);
 }
 
-test("queued turns retain their originating conversation", () => {
-  assert.match(provider, /private queue: QueuedTurn\[\]/);
+test("queued turns are isolated by originating conversation", () => {
+  assert.match(provider, /ThreadRunCoordinator<QueuedTurn>/);
   const drain = section(provider, "private drainQueueIfIdle", "private getHtml");
+  assert.match(drain, /this\.runs\.dequeue\(chatId\)/);
   assert.match(drain, /next\.chatId/);
   assert.doesNotMatch(drain, /this\.chatId\)/);
+});
+
+test("different conversations reserve independent run slots", () => {
+  const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
+  assert.match(runTask, /this\.runs\.start\(runChatId\)/);
+  assert.match(runTask, /this\.runs\.finish\(run\)/);
+  assert.doesNotMatch(runTask, /this\.abort/);
+});
+
+test("cancellation is scoped to the selected conversation", () => {
+  const cancel = section(provider, "async cancelTask", "async restartSidecar");
+  assert.match(cancel, /this\.runs\.abort\(targetChatId\)/);
+  assert.match(cancel, /this\.gateway\.cancel\(targetChatId\)/);
+  assert.match(cancel, /this\.runs\.clearQueue\(targetChatId\)/);
 });
 
 test("an active stream uses its stable chat owner", () => {
