@@ -144,16 +144,25 @@ def _cancel_run(run_id: str) -> None:
     _fire_canceller(cancel_fn)
 
 
-def _cancel_all_runs() -> list[str]:
-    """Cancel every active run; return stranded interject prompts (FIFO)."""
+def _cancel_runs(chat_id: str | None = None) -> tuple[list[str], set[str]]:
+    """Cancel matching runs and return (stranded prompts, cancelled run ids).
+
+    ``chat_id=None`` intentionally retains the legacy emergency-stop behavior.
+    Normal UI cancellation always supplies a conversation id so unrelated
+    streams and their human-in-the-loop requests remain untouched.
+    """
     with _run_lock:
-        runs = list(_active_runs.values())
-        for run in runs:
+        matches = [
+            (run_id, run)
+            for run_id, run in _active_runs.items()
+            if chat_id is None or run.get("chat_id") == chat_id
+        ]
+        for _, run in matches:
             run["ev"].set()
-    for run in runs:
+    for _, run in matches:
         _fire_canceller(run["cancel"])
     stranded: list[str] = []
-    for run in runs:
+    for _, run in matches:
         ctx = run.get("run_context")
         try:
             from clawagents.interjection import take_stranded_interjects
@@ -161,6 +170,12 @@ def _cancel_all_runs() -> list[str]:
             stranded.extend(take_stranded_interjects(ctx))
         except Exception:  # noqa: BLE001
             pass
+    return stranded, {run_id for run_id, _ in matches}
+
+
+def _cancel_all_runs() -> list[str]:
+    """Legacy process-wide emergency stop."""
+    stranded, _ = _cancel_runs()
     return stranded
 
 
@@ -258,6 +273,16 @@ class PermissionWaiter:
                     GrantStore().add(path_pattern="", scope="write", tool=tool)
         event.set()
 
+    def resolve_runs(self, run_ids: set[str], decision: Decision = "deny") -> None:
+        with _permission_lock:
+            ids = [
+                request_id
+                for request_id, meta in _permission_meta.items()
+                if meta.get("run_id") in run_ids
+            ]
+        for request_id in ids:
+            self.resolve(request_id, decision)
+
 
 _waiter = PermissionWaiter()
 
@@ -265,13 +290,23 @@ _waiter = PermissionWaiter()
 _ask_lock = threading.Lock()
 _ask_events: dict[str, threading.Event] = {}
 _ask_results: dict[str, str | None] = {}
+_ask_run_ids: dict[str, str] = {}
 
 
 class AskUserWaiter:
-    def ask(self, question: str, sse_fn, timeout: float = 600.0) -> str | None:
+    def ask(
+        self,
+        question: str,
+        sse_fn,
+        timeout: float = 600.0,
+        *,
+        run_id: str | None = None,
+    ) -> str | None:
         request_id = uuid.uuid4().hex
         with _ask_lock:
             _ask_events[request_id] = threading.Event()
+            if run_id:
+                _ask_run_ids[request_id] = run_id
         sse_fn(
             "ask_user_required",
             {"request_id": request_id, "question": question},
@@ -282,10 +317,15 @@ class AskUserWaiter:
             return None
         if not event.wait(timeout=timeout):
             self.resolve(request_id, None)
+            with _ask_lock:
+                _ask_results.pop(request_id, None)
+                _ask_events.pop(request_id, None)
+                _ask_run_ids.pop(request_id, None)
             return None
         with _ask_lock:
             answer = _ask_results.pop(request_id, None)
             _ask_events.pop(request_id, None)
+            _ask_run_ids.pop(request_id, None)
         return answer
 
     def resolve(self, request_id: str, answer: str | None) -> None:
@@ -294,6 +334,12 @@ class AskUserWaiter:
             event = _ask_events.get(request_id)
         if event is not None:
             event.set()
+
+    def resolve_runs(self, run_ids: set[str]) -> None:
+        with _ask_lock:
+            ids = [rid for rid, owner in _ask_run_ids.items() if owner in run_ids]
+        for request_id in ids:
+            self.resolve(request_id, None)
 
 
 _ask_waiter = AskUserWaiter()
@@ -309,6 +355,7 @@ _plan_lock = threading.Lock()
 _plan_pending: dict[str, Any] = {}  # None | asyncio.Future | str (pre-resolved)
 _plan_loops: dict[str, asyncio.AbstractEventLoop] = {}
 _plan_comments: dict[str, str] = {}
+_plan_run_ids: dict[str, str] = {}
 
 
 def _safe_plan_set_result(fut: "asyncio.Future[PlanDecision]", value: PlanDecision) -> None:
@@ -317,10 +364,12 @@ def _safe_plan_set_result(fut: "asyncio.Future[PlanDecision]", value: PlanDecisi
 
 
 class PlanApprovalWaiter:
-    def create(self) -> str:
+    def create(self, *, run_id: str | None = None) -> str:
         request_id = uuid.uuid4().hex
         with _plan_lock:
             _plan_pending[request_id] = None
+            if run_id:
+                _plan_run_ids[request_id] = run_id
         return request_id
 
     async def wait(
@@ -332,6 +381,7 @@ class PlanApprovalWaiter:
             if isinstance(entry, str):
                 _plan_pending.pop(request_id, None)
                 comment = _plan_comments.pop(request_id, "")
+                _plan_run_ids.pop(request_id, None)
                 return entry, comment  # type: ignore[return-value]
             if entry is None:
                 fut: asyncio.Future[PlanDecision] = loop.create_future()
@@ -349,6 +399,7 @@ class PlanApprovalWaiter:
                 _plan_pending.pop(request_id, None)
                 _plan_loops.pop(request_id, None)
                 _plan_comments.pop(request_id, None)
+                _plan_run_ids.pop(request_id, None)
 
     def resolve(
         self,
@@ -388,6 +439,12 @@ class PlanApprovalWaiter:
         for rid in ids:
             self.resolve(rid, "reject", comment=comment)
 
+    def reject_runs(self, run_ids: set[str], comment: str = "cancelled") -> None:
+        with _plan_lock:
+            ids = [rid for rid, owner in _plan_run_ids.items() if owner in run_ids]
+        for request_id in ids:
+            self.resolve(request_id, "reject", comment=comment)
+
 
 _plan_waiter = PlanApprovalWaiter()
 
@@ -426,11 +483,11 @@ def _build_ask_user_tool(ask_fn):
         return tool
 
 
-def make_ask_user_tool(sse_fn):
+def make_ask_user_tool(sse_fn, *, run_id: str | None = None):
     """Replace the default stdin ask_user with a webview-backed one."""
 
     def ask_fn(question: str) -> str | None:
-        return _ask_waiter.ask(question, sse_fn)
+        return _ask_waiter.ask(question, sse_fn, run_id=run_id)
 
     return _build_ask_user_tool(ask_fn)
 
@@ -526,6 +583,10 @@ class ChatBody(BaseModel):
     # "media_type": "application/pdf", "name": "report.pdf"}. Forwarded to
     # agent.invoke(files=…); ignored on older clawagents.
     files: list[dict[str, Any]] | None = None
+
+
+class CancelBody(BaseModel):
+    chat_id: str | None = None
 
 
 # File-writing tools (the "Edit" auto-approve category); everything else in
@@ -832,7 +893,9 @@ def _make_before_tool(
         if grants.match(file_path, tool=name, scope="write"):
             return True
 
-        request_id = _waiter.create({"tool": name, "file_path": file_path})
+        request_id = _waiter.create(
+            {"tool": name, "file_path": file_path, "run_id": run_id}
+        )
         sse_fn(
             "permission_required",
             {
@@ -873,7 +936,9 @@ def _make_before_tool(
         # category toggles).
         if _pre_approved(category, file_path):
             return True
-        request_id = _waiter.create({"tool": tool_name, "file_path": file_path})
+        request_id = _waiter.create(
+            {"tool": tool_name, "file_path": file_path, "run_id": run_id}
+        )
         sse_fn(
             "permission_required",
             {
@@ -1322,23 +1387,39 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/cancel")
-    async def cancel(request: Request):
+    async def cancel(request: Request, body: CancelBody | None = None):
         denied = _auth_or_401(request)
         if denied:
             return denied
-        stranded = _cancel_all_runs()
-        with _permission_lock:
-            ids = list(_permission_events.keys())
-        for rid in ids:
-            _waiter.resolve(rid, "deny")
-        # Unblock any agent turn waiting on an ask_user prompt.
-        with _ask_lock:
-            ask_ids = list(_ask_events.keys())
-        for rid in ask_ids:
-            _ask_waiter.resolve(rid, None)
-        # Unblock exit_plan_mode approval waiters.
-        _plan_waiter.reject_all(comment="cancelled")
-        return {"ok": True, "stranded_prompts": stranded}
+        chat_id = body.chat_id if body else None
+        if chat_id:
+            bad = _validate_chat_id(chat_id)
+            if bad:
+                return bad
+
+        stranded, run_ids = _cancel_runs(chat_id)
+        if chat_id:
+            _waiter.resolve_runs(run_ids)
+            _ask_waiter.resolve_runs(run_ids)
+            _plan_waiter.reject_runs(run_ids, comment="cancelled")
+        else:
+            # Backward-compatible process-wide emergency stop for old clients.
+            with _permission_lock:
+                ids = list(_permission_events.keys())
+            for request_id in ids:
+                _waiter.resolve(request_id, "deny")
+            with _ask_lock:
+                ask_ids = list(_ask_events.keys())
+            for request_id in ask_ids:
+                _ask_waiter.resolve(request_id, None)
+            _plan_waiter.reject_all(comment="cancelled")
+
+        return {
+            "ok": True,
+            "chat_id": chat_id,
+            "cancelled_runs": len(run_ids),
+            "stranded_prompts": stranded,
+        }
 
     @app.post("/interject")
     async def interject(body: InterjectBody, request: Request):
@@ -1656,7 +1737,7 @@ def create_app() -> FastAPI:
                 PlanApprovalDecision,
             )
 
-            request_id = _plan_waiter.create()
+            request_id = _plan_waiter.create(run_id=run_id)
             sse(
                 "plan_approval_required",
                 {
@@ -1702,7 +1783,7 @@ def create_app() -> FastAPI:
                 def ask_factory():
                     if effective_interaction == "auto":
                         return make_auto_ask_user_tool()
-                    return make_ask_user_tool(sse)
+                    return make_ask_user_tool(sse, run_id=run_id)
 
                 task = worker_loop.create_task(
                     run_chat_turn(
