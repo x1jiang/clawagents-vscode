@@ -1383,8 +1383,30 @@ button.threads-row-main {
   background: var(--accent);
 }
 
+.threads-row-status.running,
+.chat-running-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--vscode-progressBar-background, var(--accent));
+  animation: pulse-running 1.2s ease-in-out infinite;
+}
+
+.chat-running-dot {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+@keyframes pulse-running {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 .threads-row-status.attention {
   background: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+  animation: none;
 }
 
 .threads-row-title {

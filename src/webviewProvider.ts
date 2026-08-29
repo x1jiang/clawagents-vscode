@@ -475,6 +475,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       goal: this.goalMode,
+      busy: this.runs.isActive(chatId),
       sessionCostUsd: sessionCostFromChat(chat),
       eventsOffset: this.eventsOffset,
       eventsTotal: Number(chat.events_total ?? events.length) || events.length,
@@ -628,6 +629,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         interaction: this.interaction,
         caveman: this.caveman,
         goal: this.goalMode,
+        busy: false,
         sessionCostUsd: 0,
       });
       await this.persistLocal(this.persistState());
@@ -734,7 +736,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   private async refreshChats(query?: string): Promise<void> {
     try {
-      const chats = (await this.gateway.listChats(query)) as ChatSummary[];
+      const chats = ((await this.gateway.listChats(query)) as ChatSummary[]).map((chat) => ({
+        ...chat,
+        running: this.runs.isActive(chat.id),
+      }));
       this.post({ type: "chats", chats, chatId: this.chatId });
     } catch {
       /* ignore until sidecar up */
@@ -755,6 +760,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       goal: this.goalMode,
+      busy: false,
       sessionCostUsd: 0,
     });
   }
@@ -2946,6 +2952,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const signal = run.controller.signal;
+    this.post({ type: "thread_run_state", chatId: runChatId, running: true });
     this.post({ type: "user_echo", text: trimmed, chatId: runChatId });
 
     // Claim attachments synchronously with the run slot. Without this, two
@@ -3079,6 +3086,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     } finally {
       this.runs.finish(run);
+      this.post({ type: "thread_run_state", chatId: runChatId, running: false });
       // A job the turn detached is now unattended: the run's event stream is
       // closed, so polling is the only thing that will notice it finishing.
       void this.refreshJobs();

@@ -37,6 +37,23 @@ test("cancellation is scoped to the selected conversation", () => {
   assert.match(cancel, /this\.runs\.clearQueue\(targetChatId\)/);
 });
 
+test("run state follows its conversation through navigation", () => {
+  const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
+  assert.match(
+    runTask,
+    /thread_run_state[\s\S]*chatId: runChatId,[\s\S]*running: true/,
+  );
+  assert.match(
+    runTask,
+    /thread_run_state[\s\S]*chatId: runChatId,[\s\S]*running: false/,
+  );
+  assert.match(provider, /busy: this\.runs\.isActive\(chatId\)/);
+  assert.match(app, /case "thread_run_state":/);
+  assert.match(app, /chat\.id === msg\.chatId \? \{ \.\.\.chat, running: msg\.running \}/);
+  assert.match(app, /setBusy\(Boolean\(msg\.busy\)\)/);
+  assert.match(app, /type: "cancel", chatId: chatIdRef\.current/);
+});
+
 test("an active stream uses its stable chat owner", () => {
   const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
   assert.match(runTask, /streamChat\(\s*task,\s*runChatId,/);

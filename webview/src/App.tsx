@@ -176,6 +176,7 @@ type ConversationTab = {
   id: string;
   title: string;
   pinned: boolean;
+  running?: boolean;
 };
 
 type SideChat = {
@@ -208,6 +209,7 @@ function persistedConversationTabs(): ConversationTab[] {
             ? value.title.trim()
             : id,
         pinned: Boolean(value.pinned),
+        running: false,
       });
     }
     return tabs;
@@ -230,6 +232,7 @@ function reconcileConversationTabs(
       id: tab.id,
       title: summary.title?.trim() || tab.title || tab.id,
       pinned: Boolean(summary.pinned),
+      running: Boolean(summary.running),
     }];
   });
 }
@@ -247,6 +250,7 @@ function upsertConversationTab(
     id: chatId,
     title: title?.trim() || summary?.title?.trim() || previous?.title || chatId,
     pinned: summary?.pinned === undefined ? Boolean(previous?.pinned) : Boolean(summary.pinned),
+    running: summary?.running === undefined ? Boolean(previous?.running) : Boolean(summary.running),
   };
   if (index < 0) return [...current, next];
   const updated = [...current];
@@ -1689,6 +1693,13 @@ export function App() {
         }
         case "chats":
           setChats(msg.chats || []);
+          if (chatIdRef.current) {
+            const visible = (msg.chats || []).find((chat) => chat.id === chatIdRef.current);
+            if (visible) {
+              setBusy(Boolean(visible.running));
+              if (!visible.running) streamingRef.current = false;
+            }
+          }
           setOpenConversationTabs((previous) => {
             const reconciled = reconcileConversationTabs(previous, msg.chats || []);
             if (
@@ -1710,6 +1721,16 @@ export function App() {
           ) {
             chatIdRef.current = msg.chatId;
             setChatId(msg.chatId);
+          }
+          break;
+        case "thread_run_state":
+          setChats((previous) => previous.map((chat) =>
+            chat.id === msg.chatId ? { ...chat, running: msg.running } : chat));
+          setOpenConversationTabs((previous) => previous.map((tab) =>
+            tab.id === msg.chatId ? { ...tab, running: msg.running } : tab));
+          if (chatIdRef.current === msg.chatId) {
+            setBusy(msg.running);
+            if (!msg.running) streamingRef.current = false;
           }
           break;
         case "settings": {
@@ -1961,7 +1982,7 @@ export function App() {
           resetSessionCost(
             typeof msg.sessionCostUsd === "number" ? msg.sessionCostUsd : 0,
           );
-          setBusy(false);
+          setBusy(Boolean(msg.busy));
           streamingRef.current = false;
           if (pendingForkRef.current) {
             pendingForkRef.current = false;
@@ -3484,6 +3505,9 @@ export function App() {
               {chatAttention.has(c.id) && (
                 <span className="chat-attention-dot" title="Needs your attention" />
               )}
+              {c.running && !chatAttention.has(c.id) ? (
+                <span className="chat-running-dot" title="Running" />
+              ) : null}
               {title}
             </div>
             <div className="muted tiny">{meta}</div>
@@ -3895,6 +3919,7 @@ export function App() {
                   <div className="threads-list" role="list">
                     {openConversationTabs.map((tab) => {
                       const needsAttention = chatAttention.has(tab.id);
+                      const running = Boolean(tab.running);
                       const active = tab.id === chatId && panel === "chat";
                       return (
                         <div
@@ -3909,8 +3934,16 @@ export function App() {
                             onClick={() => selectConversationTab(tab)}
                           >
                             <span
-                              className={`threads-row-status${needsAttention ? " attention" : ""}`}
-                              aria-label={needsAttention ? "Needs attention" : active ? "Current thread" : undefined}
+                              className={`threads-row-status${needsAttention ? " attention" : running ? " running" : ""}`}
+                              aria-label={
+                                needsAttention
+                                  ? "Needs attention"
+                                  : running
+                                    ? "Running"
+                                    : active
+                                      ? "Current thread"
+                                      : undefined
+                              }
                             />
                             <span className="threads-row-title">{tab.title}</span>
                           </button>
@@ -6505,7 +6538,7 @@ export function App() {
                       post({ type: "dictation_toggle", target: "composer" });
                     } else if (e.key === "Escape" && busy) {
                       e.preventDefault();
-                      post({ type: "cancel" });
+                      post({ type: "cancel", chatId: chatIdRef.current });
                     }
                   }}
                 />
@@ -6558,7 +6591,7 @@ export function App() {
                         className="icon-btn danger"
                         title="Stop generation (Esc)"
                         aria-label="Stop generation"
-                        onClick={() => post({ type: "cancel" })}
+                        onClick={() => post({ type: "cancel", chatId: chatIdRef.current })}
                       >
                         <IconStop />
                       </button>

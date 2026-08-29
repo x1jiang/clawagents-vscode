@@ -32,6 +32,8 @@ export type ChatSummary = {
   session_prompt_tokens?: number;
   session_completion_tokens?: number;
   session_total_tokens?: number;
+  /** Ephemeral extension-host state; never persisted by the sidecar. */
+  running?: boolean;
 };
 
 export type HostToWebview =
@@ -166,6 +168,8 @@ export type HostToWebview =
       interaction?: InteractionStyle;
       caveman?: boolean;
       goal?: boolean;
+      /** Whether this conversation currently owns an active stream. */
+      busy?: boolean;
       sessionCostUsd?: number;
       /** Absolute offset of first restored event in the UI log. */
       eventsOffset?: number;
@@ -188,6 +192,7 @@ export type HostToWebview =
       items: unknown[];
       mode: AgentMode;
     }
+  | { type: "thread_run_state"; chatId: string; running: boolean }
   | {
       type: "settings";
       settings: Record<string, unknown>;
