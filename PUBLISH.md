@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.172**
+Publisher **`clawagents`** · version **1.0.173**
 
+- [x] GitHub release `v1.0.173` + VSIX (skill-impact ledger; floor clawagents **6.20.68**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
+- [x] clawagents **6.20.68** on GitHub + PyPI (skill-workshop reject diffs persist)
 - [x] GitHub release `v1.0.172` + VSIX (execute-grounded counts; floor clawagents **6.20.67**)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.67** on GitHub + PyPI (counts must appear in this-turn execute output)
