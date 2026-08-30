@@ -47,6 +47,17 @@ test("cancel may target one opaque conversation id", () => {
   assert.equal(parseWebviewToHost({ type: "cancel", chatId: "../escape" }), undefined);
 });
 
+test("redirect and queued recovery messages may target one conversation", () => {
+  for (const type of ["interject", "queue_send"]) {
+    const message = { type, text: "follow up", chatId: "chat-123" };
+    assert.deepEqual(parseWebviewToHost(message), message);
+    assert.equal(
+      parseWebviewToHost({ type, text: "follow up", chatId: "../escape" }),
+      undefined,
+    );
+  }
+});
+
 test("settings saves require a positive integer revision", () => {
   const message = { type: "save_settings", revision: 7, settings: { provider: "openai" } };
   assert.deepEqual(parseWebviewToHost(message), message);

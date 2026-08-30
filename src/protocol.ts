@@ -403,7 +403,7 @@ export type WebviewToHost =
   | { type: "reject_hunk"; hunkId: string }
   | { type: "list_rewind"; open?: boolean }
   | { type: "rewind_to"; promptIndex: number }
-  | { type: "interject"; text: string }
+  | { type: "interject"; text: string; chatId?: string }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
   | { type: "save_settings"; revision: number; settings: Record<string, unknown> }
@@ -457,7 +457,7 @@ export type WebviewToHost =
       /** @deprecated host ignores transcript items */
       items?: unknown[];
     }
-  | { type: "queue_send"; text: string }
+  | { type: "queue_send"; text: string; chatId?: string }
   | { type: "bug_report_capture_screenshot" }
   | {
       type: "bug_report_submit";
@@ -526,6 +526,10 @@ function opaqueId(value: unknown): value is string {
   return typeof value === "string" && OPAQUE_ID.test(value) && !value.includes("..");
 }
 
+function optionalOpaqueId(value: unknown): boolean {
+  return value === undefined || opaqueId(value);
+}
+
 function opaqueIds(value: unknown): value is string[] {
   return Array.isArray(value)
     && value.length > 0
@@ -550,16 +554,17 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
   switch (type) {
     case "send":
       return text(value.text) && AGENT_MODES.has(String(value.mode))
-        && typeof value.includeContext === "boolean" && optionalText(value.chatId, 128)
+        && typeof value.includeContext === "boolean" && optionalOpaqueId(value.chatId)
         && autoApprove(value.autoApprove) && optionalText(value.model, 256)
         && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
         && (value.caveman === undefined || typeof value.caveman === "boolean")
         && (value.goal === undefined || typeof value.goal === "boolean")
         ? value as WebviewToHost : undefined;
     case "queue_send":
-      return text(value.text) ? value as WebviewToHost : undefined;
+      return text(value.text) && optionalOpaqueId(value.chatId)
+        ? value as WebviewToHost : undefined;
     case "cancel":
-      return value.chatId === undefined || opaqueId(value.chatId)
+      return optionalOpaqueId(value.chatId)
         ? value as WebviewToHost
         : undefined;
     case "bug_report_submit":
@@ -678,7 +683,7 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return typeof value.promptIndex === "number" && Number.isFinite(value.promptIndex) && value.promptIndex >= 0
         ? value as WebviewToHost : undefined;
     case "interject":
-      return text(value.text) && optionalText(value.chatId, 128)
+      return text(value.text) && optionalOpaqueId(value.chatId)
         ? value as WebviewToHost : undefined;
     case "job_output": case "stop_job": case "report_job":
       return opaqueId(value.jobId) ? value as WebviewToHost : undefined;

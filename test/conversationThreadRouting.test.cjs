@@ -23,6 +23,29 @@ test("queued turns are isolated by originating conversation", () => {
   assert.doesNotMatch(drain, /this\.chatId\)/);
 });
 
+test("redirects and recovered queue sends retain their conversation owner", () => {
+  const queueSend = section(provider, 'case "queue_send":', 'case "interject":');
+  const interject = section(provider, 'case "interject":', 'case "cancel":');
+  assert.match(queueSend, /const targetChatId = msg\.chatId \|\| this\.chatId/);
+  assert.match(queueSend, /this\.runs\.enqueue\(targetChatId/);
+  assert.match(queueSend, /this\.drainQueueIfIdle\(targetChatId\)/);
+  assert.match(interject, /const targetChatId = msg\.chatId \|\| this\.chatId/);
+  assert.match(interject, /this\.gateway\.interject\(msg\.text, targetChatId\)/);
+  assert.match(app, /type: "interject", text: value, chatId: chatIdRef\.current/);
+  assert.match(app, /type: "queue_send", text, chatId: chatIdRef\.current/);
+});
+
+test("conversation navigation updates busy state before asynchronous restore", () => {
+  assert.match(
+    app,
+    /chatIdRef\.current = c\.id;\s*setChatId\(c\.id\);\s*setBusy\(Boolean\(c\.running\)\)/,
+  );
+  assert.match(
+    app,
+    /chatIdRef\.current = tab\.id;\s*setChatId\(tab\.id\);\s*setBusy\(Boolean\(tab\.running\)\)/,
+  );
+});
+
 test("different conversations reserve independent run slots", () => {
   const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
   assert.match(runTask, /this\.runs\.start\(runChatId\)/);
@@ -65,7 +88,10 @@ test("an active stream uses its stable chat owner", () => {
 test("late selection responses and old events cannot replace the current chat", () => {
   const selectChat = section(provider, 'case "select_chat":', 'case "load_older_chat":');
   assert.match(selectChat, /if \(this\.chatId !== msg\.chatId\)/);
-  assert.match(app, /chatIdRef\.current = c\.id;\s*setChatId\(c\.id\);\s*post\(\{ type: "select_chat"/);
+  assert.match(
+    app,
+    /chatIdRef\.current = c\.id;\s*setChatId\(c\.id\);\s*setBusy\(Boolean\(c\.running\)\);\s*post\(\{ type: "select_chat"/,
+  );
 });
 
 test("every run-scoped event, including the canonical final response, is stale-guarded", () => {

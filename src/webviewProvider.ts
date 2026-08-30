@@ -953,72 +953,79 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         await this.saveSettingsChain.catch(() => undefined);
         await this.runTask(msg.text, msg.includeContext, msg.chatId, msg.model, turnSettings);
         break;
-      case "queue_send":
+      case "queue_send": {
         // Prefer mid-turn redirect when a run is active; else queue for next turn.
-        if (!this.chatId) {
+        const targetChatId = msg.chatId || this.chatId;
+        if (!targetChatId) {
           this.post({ type: "status", message: "Start a conversation first." });
           break;
         }
         try {
-          const res = await this.gateway.interject(msg.text, this.chatId);
+          const res = await this.gateway.interject(msg.text, targetChatId);
           if (res.ok && (res.applied ?? 0) > 0) {
             this.post({
               type: "status",
               message: "Redirected mid-turn",
+              chatId: targetChatId,
             });
             break;
           }
         } catch {
           /* fall through to queue */
         }
-        const queuedCount = this.runs.enqueue(this.chatId, {
+        const queuedCount = this.runs.enqueue(targetChatId, {
           text: msg.text,
-          chatId: this.chatId,
+          chatId: targetChatId,
           includeContext: this.config.includeContextByDefault,
           settings: this.currentTurnSettings(),
         });
         this.post({
           type: "status",
           message: `Queued (${queuedCount})`,
-          chatId: this.chatId,
+          chatId: targetChatId,
         });
         // If the run finished while interject raced, finally already drained —
         // start the queued turn now so the message is not stranded.
-        this.drainQueueIfIdle(this.chatId);
+        this.drainQueueIfIdle(targetChatId);
         break;
-      case "interject":
-        if (!this.chatId) {
+      }
+      case "interject": {
+        const targetChatId = msg.chatId || this.chatId;
+        if (!targetChatId) {
           this.post({ type: "status", message: "Start a conversation first." });
           break;
         }
         try {
-          const res = await this.gateway.interject(msg.text, this.chatId);
+          const res = await this.gateway.interject(msg.text, targetChatId);
           if (res.ok && (res.applied ?? 0) > 0) {
             this.post({
               type: "status",
               message: "Redirected mid-turn",
+              chatId: targetChatId,
             });
             break;
           }
-          this.runs.enqueue(this.chatId, {
+          this.runs.enqueue(targetChatId, {
             text: msg.text,
-            chatId: this.chatId,
+            chatId: targetChatId,
             includeContext: this.config.includeContextByDefault,
             settings: this.currentTurnSettings(),
           });
           this.post({
             type: "status",
             message: "No active run to redirect — queued for next turn",
-            chatId: this.chatId,
+            chatId: targetChatId,
           });
-          this.drainQueueIfIdle(this.chatId);
+          this.drainQueueIfIdle(targetChatId);
         } catch (err) {
           this.post({
             type: "error",
             message: err instanceof Error ? err.message : String(err),
+            chatId: targetChatId,
           });
         }
         break;
+      }
       case "cancel":
         await this.cancelTask(msg.chatId || this.chatId);
         break;

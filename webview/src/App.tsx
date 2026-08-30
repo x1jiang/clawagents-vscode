@@ -1686,7 +1686,7 @@ export function App() {
               },
             ]);
             for (const text of prompts) {
-              post({ type: "queue_send", text });
+              post({ type: "queue_send", text, chatId: chatIdRef.current });
             }
           }
           break;
@@ -2736,6 +2736,7 @@ export function App() {
     beginDraftHandoff();
     chatIdRef.current = c.id;
     setChatId(c.id);
+    setBusy(Boolean(c.running));
     post({ type: "select_chat", chatId: c.id });
   };
 
@@ -2751,6 +2752,7 @@ export function App() {
     beginDraftHandoff();
     chatIdRef.current = tab.id;
     setChatId(tab.id);
+    setBusy(Boolean(tab.running));
     post({ type: "select_chat", chatId: tab.id });
   };
 
@@ -2770,6 +2772,7 @@ export function App() {
       beginDraftHandoff();
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
+      setBusy(Boolean(replacement.running));
       setPanel("chat");
       post({ type: "select_chat", chatId: replacement.id });
     } else {
@@ -3398,7 +3401,7 @@ export function App() {
     }
     clearDraft();
     if (busy) {
-      post({ type: "interject", text: value });
+      post({ type: "interject", text: value, chatId: chatIdRef.current });
       return;
     }
     flushPendingSettingsSave();
@@ -6581,7 +6584,7 @@ export function App() {
                           const value = draft.trim();
                           if (!value) return;
                           clearDraft();
-                          post({ type: "interject", text: value });
+                          post({ type: "interject", text: value, chatId: chatIdRef.current });
                         }}
                       >
                         <IconRedirect />
