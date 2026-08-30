@@ -44,6 +44,9 @@ test("conversation navigation updates busy state before asynchronous restore", (
     app,
     /chatIdRef\.current = tab\.id;\s*setChatId\(tab\.id\);\s*setBusy\(Boolean\(tab\.running\)\)/,
   );
+  const send = section(app, "const send = () =>", "const beginAttachmentRequest");
+  assert.match(send, /chatId: chatIdRef\.current/);
+  assert.doesNotMatch(send, /\n\s*chatId,\n/);
 });
 
 test("different conversations reserve independent run slots", () => {

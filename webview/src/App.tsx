@@ -3440,7 +3440,9 @@ export function App() {
       text: value,
       mode: sendMode,
       includeContext,
-      chatId,
+      // Navigation updates the ref synchronously; React state can still point
+      // at the previous conversation until the next render.
+      chatId: chatIdRef.current,
       autoApprove,
       model: sendModel,
       interaction: effectiveInteraction,
@@ -5984,7 +5986,7 @@ export function App() {
                             text: q,
                             mode,
                             includeContext,
-                            chatId,
+                            chatId: chatIdRef.current,
                             autoApprove,
                             model: activeModelId || undefined,
                             interaction: effectiveInteraction,
