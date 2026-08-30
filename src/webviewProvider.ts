@@ -1249,6 +1249,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "close_side_chat":
+        // Release the overlay slot before cancel/delete so a new side chat
+        // can open immediately. The webview already cleared its overlay.
+        if (this.sideChatId === msg.chatId) {
+          this.sideChatId = undefined;
+        }
         try {
           if (this.runs.isActive(msg.chatId) || this.runs.isCancelling(msg.chatId)) {
             await this.cancelTask(msg.chatId);
@@ -1258,10 +1263,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.refreshChats();
         } catch (err) {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
-        } finally {
-          if (this.sideChatId === msg.chatId) {
-            this.sideChatId = undefined;
-          }
         }
         break;
       case "select_chat":
