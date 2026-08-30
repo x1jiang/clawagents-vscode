@@ -47,6 +47,7 @@ import type {
   WebviewToHost,
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
+import { isBareFileName, isWorkspaceSearchCandidate } from "./pathReferences";
 import { SidecarManager } from "./sidecar";
 import { ThreadRunCoordinator } from "./threadRunCoordinator";
 
@@ -2709,6 +2710,49 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Resolve a requested path only when it remains inside a workspace root. */
+  private workspaceUriForPath(
+    filePath: string,
+    folders: readonly vscode.WorkspaceFolder[],
+  ): vscode.Uri | undefined {
+    const roots = path.isAbsolute(filePath)
+      ? folders
+      : folders.filter((folder) => path.resolve(folder.uri.fsPath) === path.resolve(workspaceRoot() || ""));
+    for (const folder of roots) {
+      const resolved = pathUnderRoot(folder.uri.fsPath, filePath);
+      if (resolved) return vscode.Uri.file(resolved);
+    }
+    return undefined;
+  }
+
+  /** Find an inline-code file by basename when its displayed path is stale or incomplete. */
+  private async findWorkspaceFileByBasename(filePath: string): Promise<vscode.Uri | undefined> {
+    const fileName = path.basename(filePath);
+    if (!isBareFileName(fileName)) return undefined;
+    const results = await vscode.workspace.findFiles(
+      `**/${fileName}`,
+      undefined,
+      200,
+    );
+    // Do this after the search as well as avoiding a glob dependency: snapshots
+    // are historical copies, never the file the user intends to open.
+    const matches = results.filter((uri) =>
+      isWorkspaceSearchCandidate(vscode.workspace.asRelativePath(uri, false)),
+    );
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        matches.map((uri) => ({
+          label: vscode.workspace.asRelativePath(uri, false),
+          uri,
+        })),
+        { placeHolder: `Choose a file named ${fileName}` },
+      );
+      return picked?.uri;
+    }
+    return undefined;
+  }
+
   private async openPath(
     filePath: string,
     line?: number,
@@ -2728,20 +2772,28 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         fail("Open a workspace folder before opening paths from chat.");
         return;
       }
-      let uri: vscode.Uri;
-      if (path.isAbsolute(filePath)) {
-        uri = vscode.Uri.file(filePath);
-      } else {
-        const root = workspaceRoot();
-        uri = vscode.Uri.file(root ? path.join(root, filePath) : filePath);
+      let uri = this.workspaceUriForPath(filePath, folders);
+      let stat: vscode.FileStat | undefined;
+      if (uri) {
+        try {
+          stat = await vscode.workspace.fs.stat(uri);
+        } catch {
+          // A stale or incomplete agent path may still identify one workspace file.
+        }
       }
-      const resolved = path.resolve(uri.fsPath);
-      const inWorkspace = folders.some((f) => {
-        const root = path.resolve(f.uri.fsPath);
-        return resolved === root || resolved.startsWith(root + path.sep);
-      });
-      if (!inWorkspace) {
+      if (!stat) {
+        const matched = await this.findWorkspaceFileByBasename(filePath);
+        if (matched) {
+          uri = matched;
+          stat = await vscode.workspace.fs.stat(uri);
+        }
+      }
+      if (!uri) {
         fail(`Refusing to open path outside the workspace: ${filePath}`);
+        return;
+      }
+      if (stat?.type === vscode.FileType.Directory) {
+        await vscode.commands.executeCommand("revealInExplorer", uri);
         return;
       }
       const doc = await vscode.workspace.openTextDocument(uri);

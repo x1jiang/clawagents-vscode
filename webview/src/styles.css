@@ -539,6 +539,27 @@ body,
   font-size: 12px;
 }
 
+button.inline-path-link {
+  background: color-mix(in srgb, var(--accent) 13%, var(--input-bg));
+  border: 0;
+  border-radius: 4px;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 1px 4px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+button.inline-path-link:hover,
+button.inline-path-link:focus-visible {
+  background: color-mix(in srgb, var(--accent) 24%, var(--input-bg));
+}
+
+button.inline-path-link code {
+  color: inherit;
+}
+
 .cursor {
   display: inline-block;
   width: 7px;
@@ -755,7 +776,7 @@ button.side-chat-peek {
   align-items: center;
   justify-content: center;
   width: 34px;
-  height: 42px;
+  height: 32px;
   padding: 0;
   border: 1px solid var(--border);
   border-right: 0;
@@ -772,6 +793,30 @@ button.side-chat-peek:hover,
 button.side-chat-peek:focus-visible {
   background: color-mix(in srgb, var(--accent) 13%, var(--input-bg));
   color: var(--fg);
+}
+
+button.side-chat-peek::before {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: calc(100% + 7px);
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+button.side-chat-peek:hover::before,
+button.side-chat-peek:focus-visible::before {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 button.side-chat-peek:active {
@@ -1202,6 +1247,61 @@ button.send:not(.icon-btn) {
   align-items: center;
 }
 
+.changed-files-summary {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--input-bg));
+  overflow: hidden;
+}
+
+.changed-files-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.changed-files-title strong {
+  font-size: 13px;
+}
+
+.changed-files-title span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.changed-files-list {
+  display: grid;
+}
+
+button.changed-file-link {
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 12px;
+  padding: 7px 10px;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.changed-file-link:last-child {
+  border-bottom: 0;
+}
+
+button.changed-file-link:hover,
+button.changed-file-link:focus-visible {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .tabs {
   display: flex;
   flex-wrap: nowrap;
@@ -1280,12 +1380,20 @@ button.threads-trigger.active {
   line-height: 16px;
 }
 
-.threads-attention-dot {
+.threads-trigger-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
+}
+
+.threads-trigger-dot.unread {
   background: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.threads-trigger-dot.attention {
+  background: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #cca700 18%, transparent);
 }
 
 .threads-popover {
@@ -1379,12 +1487,8 @@ button.threads-row-main {
   background: transparent;
 }
 
-.threads-row.active .threads-row-status {
-  background: var(--accent);
-}
-
 .threads-row-status.running,
-.chat-running-dot {
+.chat-activity-dot.running {
   display: inline-block;
   width: 7px;
   height: 7px;
@@ -1394,9 +1498,18 @@ button.threads-row-main {
   animation: pulse-running 1.2s ease-in-out infinite;
 }
 
-.chat-running-dot {
+.chat-activity-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
   margin-right: 6px;
   vertical-align: middle;
+}
+
+.chat-activity-dot.unread {
+  background: var(--accent);
 }
 
 @keyframes pulse-running {
@@ -1406,6 +1519,11 @@ button.threads-row-main {
 
 .threads-row-status.attention {
   background: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+  animation: none;
+}
+
+.threads-row-status.unread {
+  background: var(--accent);
   animation: none;
 }
 
@@ -1434,6 +1552,11 @@ button.threads-row-action.pinned {
 
 button.threads-row-action.pinned {
   color: var(--accent);
+}
+
+button.threads-row-action.pinned svg {
+  transform: rotate(90deg);
+  transition: transform 120ms ease;
 }
 
 button.threads-row-close {
@@ -2299,16 +2422,9 @@ button.chat-pin.active {
   background: color-mix(in srgb, var(--bg) 80%, transparent);
 }
 
-/* ── Chat attention badge (pending interaction) ─────────────────────── */
-.chat-attention-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+/* Pending interaction outranks unread and uses a warmer, animated badge. */
+.chat-activity-dot.attention {
   background: var(--vscode-notificationsWarningIcon-foreground, #cca700);
-  margin-right: 6px;
-  flex-shrink: 0;
-  vertical-align: middle;
   animation: pulse-attention 1.5s ease-in-out infinite;
 }
 

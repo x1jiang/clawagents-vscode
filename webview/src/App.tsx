@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   getVsCodeApi,
@@ -24,6 +24,12 @@ import {
   type InteractionStyle,
   type JobSummary,
 } from "./vscodeApi";
+import { parseInlinePathReference } from "../../src/pathReferences";
+import {
+  collectTurnChangedFiles,
+  isTurnTerminal,
+  type ChangedFile,
+} from "./changedFiles";
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
@@ -34,6 +40,16 @@ import {
   settingsPatchMismatches,
   settingsSaveKey,
 } from "./settingsSync";
+import {
+  THREAD_UNREAD_STATE_KEY,
+  acknowledgeThreadUnread,
+  markThreadUnread,
+  readPersistedUnreadThreads,
+  retainAvailableUnreadThreads,
+  serializeUnreadThreads,
+  threadActivity,
+  threadActivityLabel,
+} from "./threadUnread";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -262,6 +278,12 @@ const INTERACTIVE_EVENT_TYPES = new Set<HostToWebview["type"]>([
   "permission_required",
   "ask_user_required",
   "plan_approval_required",
+]);
+
+/** Assistant output that should mark a thread unread while it is not visible. */
+const BACKGROUND_OUTPUT_EVENT_TYPES = new Set<HostToWebview["type"]>([
+  "assistant_delta",
+  "assistant_message",
 ]);
 
 function resolvePerm(
@@ -591,6 +613,7 @@ const BackgroundJobs = memo(function BackgroundJobs({
 
 type TranscriptItemProps = {
   item: ChatItem;
+  changedFiles?: ChangedFile[];
   showStreamingCursor: boolean;
   setItems: Dispatch<SetStateAction<ChatItem[]>>;
   onAskDraftChange: (requestId: string, draft: string) => void;
@@ -598,8 +621,55 @@ type TranscriptItemProps = {
   onPlanFeedbackToggle: (requestId: string, open: boolean) => void;
 };
 
+function ChangedFilesSummary({ files }: { files: ChangedFile[] }) {
+  return (
+    <section className="changed-files-summary" aria-label={`Edited ${files.length} files`}>
+      <div className="changed-files-title">
+        <strong>Edited {files.length} file{files.length === 1 ? "" : "s"}</strong>
+        <span>Click a file to open it</span>
+      </div>
+      <div className="changed-files-list">
+        {files.map((file) => (
+          <button
+            key={file.path}
+            type="button"
+            className="changed-file-link"
+            title={`Open ${file.path}`}
+            onClick={() => post({ type: "open_file", path: file.path })}
+          >
+            {file.path}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Make unambiguous inline-code file references openable without changing agent output. */
+const assistantMarkdownComponents: Components = {
+  code({ children, className, node: _node, ...props }) {
+    const text = typeof children === "string" ? children : "";
+    const reference = !className ? parseInlinePathReference(text) : undefined;
+    if (!reference) {
+      return <code className={className} {...props}>{children}</code>;
+    }
+    const target = reference.line ? `${reference.path}:${reference.line}` : reference.path;
+    return (
+      <button
+        type="button"
+        className="inline-path-link"
+        title={`Open ${target}`}
+        onClick={() => post({ type: "open_file", path: reference.path, line: reference.line })}
+      >
+        <code className={className} {...props}>{children}</code>
+      </button>
+    );
+  },
+};
+
 const TranscriptItem = memo(function TranscriptItem({
   item,
+  changedFiles,
   showStreamingCursor,
   setItems,
   onAskDraftChange,
@@ -628,7 +698,9 @@ const TranscriptItem = memo(function TranscriptItem({
             </button>
           </div>
           <div className="md">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+              {item.text}
+            </ReactMarkdown>
             {showStreamingCursor && <span className="cursor" />}
           </div>
         </>
@@ -905,8 +977,18 @@ const TranscriptItem = memo(function TranscriptItem({
           )}
         </div>
       )}
-      {item.kind === "status" && <div className="status">{item.text}</div>}
-      {item.kind === "error" && <div className="error">{item.text}</div>}
+      {item.kind === "status" && (
+        <>
+          {changedFiles?.length ? <ChangedFilesSummary files={changedFiles} /> : null}
+          <div className="status">{item.text}</div>
+        </>
+      )}
+      {item.kind === "error" && (
+        <>
+          {changedFiles?.length ? <ChangedFilesSummary files={changedFiles} /> : null}
+          <div className="error">{item.text}</div>
+        </>
+      )}
     </div>
   );
 });
@@ -979,6 +1061,16 @@ function SideChatOverlay({
     return () => window.cancelAnimationFrame(frame);
   }, [sideChat.chatId, sideChat.items.length, sideChat.minimized]);
 
+  useEffect(() => {
+    if (sideChat.minimized) return;
+    const collapseWhenLeaving = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".side-chat")) onMinimize();
+    };
+    window.addEventListener("pointerdown", collapseWhenLeaving);
+    return () => window.removeEventListener("pointerdown", collapseWhenLeaving);
+  }, [onMinimize, sideChat.minimized]);
+
   if (sideChat.minimized) {
     return (
       <button
@@ -998,8 +1090,9 @@ function SideChatOverlay({
         }}
         title="Drag vertically · click to expand side chat"
         aria-label="Expand side chat"
+        data-tooltip="Side chat"
       >
-        <IconFork size={15} />
+        <IconMessageCirclePlus size={17} />
       </button>
     );
   }
@@ -1019,26 +1112,33 @@ function SideChatOverlay({
         </div>
       </header>
       <div className="side-chat-messages">
-        {sideChat.items.map((item, index) => (
-          <TranscriptItem
-            key={index}
-            item={item}
-            setItems={setItems}
-            onAskDraftChange={(requestId, value) => setItems((current) =>
-              current.map((candidate) => candidate.kind === "ask" && candidate.requestId === requestId
-                ? { ...candidate, draft: value }
-                : candidate))}
-            onPlanFeedbackChange={(requestId, value) => setItems((current) =>
-              current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
-                ? { ...candidate, feedbackDraft: value }
-                : candidate))}
-            onPlanFeedbackToggle={(requestId, open) => setItems((current) =>
-              current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
-                ? { ...candidate, feedbackOpen: open }
-                : candidate))}
-            showStreamingCursor={sideChat.busy && index === sideChat.items.length - 1 && item.kind === "assistant"}
-          />
-        ))}
+        {sideChat.items.map((item, index) => {
+          const terminalText = item.kind === "status" || item.kind === "error" ? item.text : undefined;
+          const changedFiles = isTurnTerminal(item.kind, terminalText)
+            ? collectTurnChangedFiles(sideChat.items, index)
+            : undefined;
+          return (
+            <TranscriptItem
+              key={index}
+              item={item}
+              changedFiles={changedFiles}
+              setItems={setItems}
+              onAskDraftChange={(requestId, value) => setItems((current) =>
+                current.map((candidate) => candidate.kind === "ask" && candidate.requestId === requestId
+                  ? { ...candidate, draft: value }
+                  : candidate))}
+              onPlanFeedbackChange={(requestId, value) => setItems((current) =>
+                current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
+                  ? { ...candidate, feedbackDraft: value }
+                  : candidate))}
+              onPlanFeedbackToggle={(requestId, open) => setItems((current) =>
+                current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
+                  ? { ...candidate, feedbackOpen: open }
+                  : candidate))}
+              showStreamingCursor={sideChat.busy && index === sideChat.items.length - 1 && item.kind === "assistant"}
+            />
+          );
+        })}
         <div ref={sideChatBottomRef} />
       </div>
       <div className="side-chat-compose">
@@ -1128,12 +1228,17 @@ export function App() {
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   /** Conversations with pending interactive prompts (permission / ask / plan approval). */
   const [chatAttention, setChatAttention] = useState<Map<string, string>>(new Map());
+  /** Persisted webview-local unread state. Entering a visible thread acknowledges it. */
+  const [unreadChatIds, setUnreadChatIds] = useState<Set<string>>(() =>
+    readPersistedUnreadThreads(getVsCodeApi().getState()),
+  );
   const [openConversationTabs, setOpenConversationTabs] = useState<ConversationTab[]>(
     persistedConversationTabs,
   );
   const [threadsPopoverOpen, setThreadsPopoverOpen] = useState(false);
   const [threadsPopoverPinned, setThreadsPopoverPinned] = useState(false);
   const [panel, setPanel] = useState<Panel>("chat");
+  const panelRef = useRef<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
   const pendingForkRef = useRef(false);
   /** New chat does not know the created id yet; restore may legally change chatId. */
@@ -1429,6 +1534,17 @@ export function App() {
     "cancelled",
   ]);
 
+  const acknowledgeUnread = useCallback((id: string | undefined) => {
+    if (!id) return;
+    setUnreadChatIds((previous) => acknowledgeThreadUnread(previous, id));
+  }, []);
+
+  const showPanel = useCallback((next: Panel) => {
+    panelRef.current = next;
+    setPanel(next);
+    if (next === "chat") acknowledgeUnread(chatIdRef.current);
+  }, [acknowledgeUnread]);
+
   // Keep chatIdRef in sync so the onMessage closure (which never
   // re-creates thanks to the [] deps array) can read the latest value.
   useEffect(() => {
@@ -1445,8 +1561,19 @@ export function App() {
     api.setState({
       ...(previous && typeof previous === "object" ? previous : {}),
       conversationTabs: openConversationTabs,
+      [THREAD_UNREAD_STATE_KEY]: serializeUnreadThreads(unreadChatIds),
     });
-  }, [openConversationTabs]);
+  }, [openConversationTabs, unreadChatIds]);
+
+  useEffect(() => {
+    const acknowledgeVisibleThread = () => {
+      if (document.visibilityState === "visible" && panelRef.current === "chat") {
+        acknowledgeUnread(chatIdRef.current);
+      }
+    };
+    document.addEventListener("visibilitychange", acknowledgeVisibleThread);
+    return () => document.removeEventListener("visibilitychange", acknowledgeVisibleThread);
+  }, [acknowledgeUnread]);
 
   useEffect(() => {
     if (!forkNotice) return;
@@ -1551,17 +1678,28 @@ export function App() {
         return;
       }
       if (applySideChatEvent(msg)) return;
+      const ownerChatId = (msg as { chatId?: string }).chatId;
+      const outputIsVisible =
+        ownerChatId === chatIdRef.current &&
+        panelRef.current === "chat" &&
+        document.visibilityState === "visible";
+      if (
+        ownerChatId &&
+        BACKGROUND_OUTPUT_EVENT_TYPES.has(msg.type) &&
+        !outputIsVisible
+      ) {
+        setUnreadChatIds((previous) => markThreadUnread(previous, ownerChatId));
+      }
       if (runScopedEventTypes.has(msg.type) && isStaleEvent(msg)) {
         if (INTERACTIVE_EVENT_TYPES.has(msg.type)) {
-          const id = (msg as { chatId?: string }).chatId;
-          if (id) {
+          if (ownerChatId) {
             const reason =
               msg.type === "permission_required" ? "permission"
               : msg.type === "ask_user_required" ? "ask"
               : "plan_approval";
             setChatAttention((prev) => {
               const next = new Map(prev);
-              next.set(id, reason);
+              next.set(ownerChatId, reason);
               return next;
             });
           }
@@ -1633,6 +1771,15 @@ export function App() {
           chatIdRef.current = msg.chatId;
           setChatId(msg.chatId);
           setChats(msg.chats || []);
+          setUnreadChatIds((previous) => {
+            const retained = retainAvailableUnreadThreads(
+              previous,
+              new Set((msg.chats || []).map((chat) => chat.id)),
+            );
+            return panelRef.current === "chat" && document.visibilityState === "visible" && msg.chatId
+              ? acknowledgeThreadUnread(retained, msg.chatId)
+              : retained;
+          });
           setOpenConversationTabs((previous) => {
             const reconciled = reconcileConversationTabs(previous, msg.chats || []);
             return msg.chatId
@@ -1694,6 +1841,10 @@ export function App() {
         }
         case "chats":
           setChats(msg.chats || []);
+          setUnreadChatIds((previous) => retainAvailableUnreadThreads(
+            previous,
+            new Set((msg.chats || []).map((chat) => chat.id)),
+          ));
           if (chatIdRef.current) {
             const visible = (msg.chats || []).find((chat) => chat.id === chatIdRef.current);
             if (visible) {
@@ -1998,7 +2149,7 @@ export function App() {
             setForkNotice({ title: displayTitle, chatId: (msg.chatId as string) || "" });
           }
           if (msg.chatId) {
-            setPanel("chat");
+            showPanel("chat");
           }
           break;
         }
@@ -2630,6 +2781,15 @@ export function App() {
     () => [...pinnedChats, ...regularChats, ...archivedChats],
     [pinnedChats, regularChats, archivedChats],
   );
+  const orderedOpenConversationTabs = useMemo(
+    () => [...openConversationTabs].sort((a, b) => Number(b.pinned) - Number(a.pinned)),
+    [openConversationTabs],
+  );
+  const openThreadsActivity = useMemo(() => threadActivity(
+    openConversationTabs.some((tab) => chatAttention.has(tab.id)),
+    openConversationTabs.some((tab) => unreadChatIds.has(tab.id)),
+    false,
+  ), [chatAttention, openConversationTabs, unreadChatIds]);
   const selectedChats = useMemo(
     () => orderedHistoryChats.filter((chat) => selectedChatIds.has(chat.id)),
     [orderedHistoryChats, selectedChatIds],
@@ -2729,11 +2889,12 @@ export function App() {
     }
 
     setSelectedChatIds(new Set());
+    acknowledgeUnread(c.id);
     pendingNewChatRef.current = false;
     // Change the routing guard immediately; waiting for React's effect leaves
     // a window where events from the old chat can enter the new transcript.
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
-    setPanel("chat");
+    showPanel("chat");
     beginDraftHandoff();
     chatIdRef.current = c.id;
     setChatId(c.id);
@@ -2745,7 +2906,8 @@ export function App() {
     setThreadsPopoverOpen(false);
     setThreadsPopoverPinned(false);
     pendingNewChatRef.current = false;
-    setPanel("chat");
+    acknowledgeUnread(tab.id);
+    showPanel("chat");
     setOpenConversationTabs((previous) =>
       upsertConversationTab(previous, tab.id, chats, tab.title),
     );
@@ -2774,7 +2936,7 @@ export function App() {
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
       setBusy(Boolean(replacement.running));
-      setPanel("chat");
+      showPanel("chat");
       post({ type: "select_chat", chatId: replacement.id });
     } else {
       persistDraftNow();
@@ -2782,7 +2944,7 @@ export function App() {
       draftOwnerBeforeNavRef.current = undefined;
       chatIdRef.current = undefined;
       setChatId(undefined);
-      setPanel("history");
+      showPanel("history");
       post({ type: "deselect_chat" });
     }
   };
@@ -2796,7 +2958,7 @@ export function App() {
     setThreadsPopoverPinned(false);
     chatIdRef.current = undefined;
     setChatId(undefined);
-    setPanel("history");
+    showPanel("history");
     post({ type: "deselect_chat" });
   };
 
@@ -3376,7 +3538,7 @@ export function App() {
           text: "Add a provider API key first — open Settings or run ClawAgents: Set API Key.",
         },
       ]);
-      setPanel("settings");
+      showPanel("settings");
       return;
     }
     if (value === "/compact") {
@@ -3469,6 +3631,11 @@ export function App() {
     const menuOpen = openChatMenuId === c.id;
     const deletePending = pendingDeleteChatId === c.id;
     const isSelected = selectedChatIds.has(c.id);
+    const activity = threadActivity(
+      chatAttention.has(c.id),
+      unreadChatIds.has(c.id),
+      Boolean(c.running),
+    );
     const meta = `${c.message_count || 0} msgs${
       c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""
     }`;
@@ -3508,11 +3675,11 @@ export function App() {
           >
             <div className="chat-title" title={title}>
               {isSelected ? <span className="chat-selected-check" aria-hidden="true">✓</span> : null}
-              {chatAttention.has(c.id) && (
-                <span className="chat-attention-dot" title="Needs your attention" />
-              )}
-              {c.running && !chatAttention.has(c.id) ? (
-                <span className="chat-running-dot" title="Running" />
+              {activity ? (
+                <span
+                  className={`chat-activity-dot ${activity}`}
+                  title={threadActivityLabel(activity)}
+                />
               ) : null}
               {title}
             </div>
@@ -3850,7 +4017,7 @@ export function App() {
                 aria-selected={panel === p}
                 className={panel === p ? "tab active" : "tab"}
                 onClick={() => {
-                  setPanel(p);
+                  showPanel(p);
                   if (p === "chat" && chatIdRef.current) {
                     setOpenConversationTabs((previous) =>
                       upsertConversationTab(previous, chatIdRef.current!, chats),
@@ -3906,9 +4073,12 @@ export function App() {
               >
                 Threads
                 <span className="threads-trigger-count">{openConversationTabs.length}</span>
-                {openConversationTabs.some((tab) => chatAttention.has(tab.id))
-                  ? <span className="threads-attention-dot" aria-label="Thread needs attention" />
-                  : null}
+                {openThreadsActivity ? (
+                  <span
+                    className={`threads-trigger-dot ${openThreadsActivity}`}
+                    aria-label={threadActivityLabel(openThreadsActivity)}
+                  />
+                ) : null}
               </button>
               {threadsPopoverOpen ? (
                 <div className="threads-popover" role="dialog" aria-label="Open threads">
@@ -3923,10 +4093,13 @@ export function App() {
                     </button>
                   </div>
                   <div className="threads-list" role="list">
-                    {openConversationTabs.map((tab) => {
-                      const needsAttention = chatAttention.has(tab.id);
-                      const running = Boolean(tab.running);
+                    {orderedOpenConversationTabs.map((tab) => {
                       const active = tab.id === chatId && panel === "chat";
+                      const activity = threadActivity(
+                        chatAttention.has(tab.id),
+                        unreadChatIds.has(tab.id),
+                        Boolean(tab.running),
+                      );
                       return (
                         <div
                           className={`threads-row${active ? " active" : ""}`}
@@ -3940,16 +4113,8 @@ export function App() {
                             onClick={() => selectConversationTab(tab)}
                           >
                             <span
-                              className={`threads-row-status${needsAttention ? " attention" : running ? " running" : ""}`}
-                              aria-label={
-                                needsAttention
-                                  ? "Needs attention"
-                                  : running
-                                    ? "Running"
-                                    : active
-                                      ? "Current thread"
-                                      : undefined
-                              }
+                              className={`threads-row-status${activity ? ` ${activity}` : ""}`}
+                              aria-label={threadActivityLabel(activity)}
                             />
                             <span className="threads-row-title">{tab.title}</span>
                           </button>
@@ -4041,7 +4206,7 @@ export function App() {
               type="button"
               className="linkish"
               onClick={() => {
-                setPanel("settings");
+                showPanel("settings");
                 post({ type: "load_settings" });
               }}
             >
@@ -6023,10 +6188,15 @@ export function App() {
             )}
             {items.slice(Math.max(0, items.length - renderWindow)).map((item, i, arr) => {
               const absoluteIndex = items.length - arr.length + i;
+              const terminalText = item.kind === "status" || item.kind === "error" ? item.text : undefined;
+              const changedFiles = isTurnTerminal(item.kind, terminalText)
+                ? collectTurnChangedFiles(items, absoluteIndex)
+                : undefined;
               return (
                 <TranscriptItem
                   key={absoluteIndex}
                   item={item}
+                  changedFiles={changedFiles}
                   setItems={setItems}
                   onAskDraftChange={handleAskDraftChange}
                   onPlanFeedbackChange={handlePlanFeedbackChange}
@@ -6801,6 +6971,22 @@ function IconComment() {
         strokeWidth="2"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+/** Lucide's MessageCirclePlus glyph, kept inline to avoid another runtime dependency. */
+function IconMessageCirclePlus({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M8 12h8M12 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

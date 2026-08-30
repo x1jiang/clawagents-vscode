@@ -43,6 +43,6 @@ test("tabs drop deleted or archived chats and clear chatId when the last tab clo
   assert.match(app, /post\(\{ type: "deselect_chat" \}\)/);
   assert.match(
     app,
-    /chatIdRef\.current = undefined;\s*setChatId\(undefined\);\s*setPanel\("history"\);\s*post\(\{ type: "deselect_chat" \}\)/,
+    /chatIdRef\.current = undefined;\s*setChatId\(undefined\);\s*showPanel\("history"\);\s*post\(\{ type: "deselect_chat" \}\)/,
   );
 });
