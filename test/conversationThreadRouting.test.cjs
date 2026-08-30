@@ -15,11 +15,86 @@ function section(source, start, end) {
   return source.slice(from, to);
 }
 
-test("queued turns retain their originating conversation", () => {
-  assert.match(provider, /private queue: QueuedTurn\[\]/);
+test("queued turns are isolated by originating conversation", () => {
+  assert.match(provider, /ThreadRunCoordinator<QueuedTurn>/);
   const drain = section(provider, "private drainQueueIfIdle", "private getHtml");
+  assert.match(drain, /this\.runs\.dequeue\(chatId\)/);
   assert.match(drain, /next\.chatId/);
   assert.doesNotMatch(drain, /this\.chatId\)/);
+});
+
+test("redirects and recovered queue sends retain their conversation owner", () => {
+  const queueSend = section(provider, 'case "queue_send":', 'case "interject":');
+  const interject = section(provider, 'case "interject":', 'case "cancel":');
+  assert.match(queueSend, /const targetChatId = msg\.chatId \|\| this\.chatId/);
+  assert.match(queueSend, /this\.runs\.enqueue\(targetChatId/);
+  assert.match(queueSend, /this\.drainQueueIfIdle\(targetChatId\)/);
+  assert.match(interject, /const targetChatId = msg\.chatId \|\| this\.chatId/);
+  assert.match(interject, /this\.gateway\.interject\(msg\.text, targetChatId\)/);
+  assert.match(app, /type: "interject", text: value, chatId: chatIdRef\.current/);
+  assert.match(app, /type: "queue_send", text, chatId: chatIdRef\.current/);
+});
+
+test("conversation navigation updates busy state before asynchronous restore", () => {
+  assert.match(
+    app,
+    /chatIdRef\.current = c\.id;\s*setChatId\(c\.id\);\s*setBusy\(Boolean\(c\.running\)\)/,
+  );
+  assert.match(
+    app,
+    /chatIdRef\.current = tab\.id;\s*setChatId\(tab\.id\);\s*setBusy\(Boolean\(tab\.running\)\)/,
+  );
+  const send = section(app, "const send = () =>", "const beginAttachmentRequest");
+  assert.match(send, /chatId: chatIdRef\.current/);
+  assert.doesNotMatch(send, /\n\s*chatId,\n/);
+});
+
+test("different conversations reserve independent run slots", () => {
+  const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
+  assert.match(runTask, /this\.runs\.start\(runChatId\)/);
+  assert.match(runTask, /this\.runs\.finish\(run\)/);
+  assert.doesNotMatch(runTask, /this\.abort/);
+});
+
+test("cancellation is scoped to the selected conversation", () => {
+  const cancel = section(provider, "async cancelTask", "async restartSidecar");
+  assert.match(cancel, /this\.runs\.abort\(targetChatId\)/);
+  assert.match(cancel, /this\.gateway\.cancel\(targetChatId\)/);
+  assert.match(cancel, /this\.runs\.clearQueue\(targetChatId\)/);
+});
+
+test("run state follows its conversation through navigation", () => {
+  const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
+  assert.match(
+    runTask,
+    /thread_run_state[\s\S]*chatId: runChatId,[\s\S]*running: true/,
+  );
+  assert.match(
+    runTask,
+    /thread_run_state[\s\S]*chatId: runChatId,[\s\S]*running: false/,
+  );
+  assert.match(provider, /busy: this\.runs\.isActive\(chatId\)/);
+  assert.match(app, /case "thread_run_state":/);
+  assert.match(app, /chat\.id === msg\.chatId \? \{ \.\.\.chat, running: msg\.running \}/);
+  assert.match(app, /setBusy\(Boolean\(msg\.busy\)\)/);
+  assert.match(app, /type: "cancel", chatId: chatIdRef\.current/);
+});
+
+test("switching back replays the complete unfinished turn over persisted history", () => {
+  assert.match(provider, /private liveRunEvents: Map<string, HostToWebview\[]>/);
+  const remember = section(provider, "private rememberLiveRunEvent", "/** Replay the active turn");
+  assert.match(remember, /last\.delta \+ event\.delta/);
+  const replay = section(provider, "private replayLiveRun", "async openChat");
+  assert.match(replay, /event\.type === "user_echo" && event\.text === lastPersistedUser/);
+  assert.match(replay, /event\.text === lastPersistedAssistant/);
+  assert.match(replay, /this\.post\(event\)/);
+  const selectChat = section(provider, 'case "select_chat":', 'case "load_older_chat":');
+  assert.match(selectChat, /if \(wasRunning && !this\.runs\.isActive\(msg\.chatId\)\)/);
+  assert.match(selectChat, /this\.replayLiveRun\(msg\.chatId, chat\)/);
+  const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
+  assert.match(runTask, /this\.liveRunEvents\.set\(runChatId, \[userEcho\]\)/);
+  assert.match(runTask, /this\.rememberLiveRunEvent\(runChatId, tagged\)/);
+  assert.match(runTask, /this\.liveRunEvents\.delete\(runChatId\)/);
 });
 
 test("an active stream uses its stable chat owner", () => {
@@ -33,7 +108,10 @@ test("an active stream uses its stable chat owner", () => {
 test("late selection responses and old events cannot replace the current chat", () => {
   const selectChat = section(provider, 'case "select_chat":', 'case "load_older_chat":');
   assert.match(selectChat, /if \(this\.chatId !== msg\.chatId\)/);
-  assert.match(app, /chatIdRef\.current = c\.id;\s*setChatId\(c\.id\);\s*post\(\{ type: "select_chat"/);
+  assert.match(
+    app,
+    /chatIdRef\.current = c\.id;\s*setChatId\(c\.id\);\s*setBusy\(Boolean\(c\.running\)\);\s*post\(\{ type: "select_chat"/,
+  );
 });
 
 test("every run-scoped event, including the canonical final response, is stale-guarded", () => {
@@ -75,7 +153,10 @@ test("stale interactive prompts badge the owner instead of disappearing", () => 
   assert.match(app, /next\.set\(id, reason\)/);
   const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
   assert.match(runTask, /this\.pendingInteractions\.set\(runChatId, buf\)/);
-  assert.match(runTask, /if \(runChatId !== this\.chatId\)/);
+  assert.match(
+    runTask,
+    /if \(runChatId !== this\.chatId && runChatId !== this\.sideChatId\)/,
+  );
   assert.doesNotMatch(
     runTask,
     /isInteractive && runChatId && runChatId !== this\.chatId/,

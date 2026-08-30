@@ -47,7 +47,9 @@ import type {
   WebviewToHost,
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
+import { isBareFileName, isWorkspaceSearchCandidate } from "./pathReferences";
 import { SidecarManager } from "./sidecar";
+import { ThreadRunCoordinator } from "./threadRunCoordinator";
 
 export const SIDEBAR_ID = "clawagents.sidebar";
 export const SIDEBAR_ACTIVITY_ID = "clawagents.sidebarActivity";
@@ -135,11 +137,19 @@ type PersistedState = {
 
 type QueuedTurn = {
   text: string;
-  chatId?: string;
+  chatId: string;
   includeContext: boolean;
   modelOverride?: string;
+  settings?: TurnSettings;
 };
 
+type TurnSettings = Readonly<{
+  mode: AgentMode;
+  autoApprove: AutoApprove;
+  interaction: InteractionStyle;
+  caveman: boolean;
+  goal: boolean;
+}>;
 
 function sessionCostFromChat(chat: Record<string, unknown> | undefined): number | undefined {
   if (!chat) return undefined;
@@ -151,8 +161,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = SIDEBAR_ID;
 
   private view?: vscode.WebviewView;
-  private abort?: AbortController;
   private chatId: string | undefined;
+  /** Temporary fork currently owned by the side-chat overlay. */
+  private sideChatId: string | undefined;
+  private sideChatOpening = false;
   /** Composer drafts are workspace-local because chat IDs are workspace-local. */
   private readonly drafts: Record<string, string> = Object.create(null) as Record<
     string,
@@ -168,19 +180,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private caveman = true;
   private goalMode = false;
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
-  /** Follow-up turns retain the conversation that owned the send. Without
-   *  this, switching chats while another turn runs reroutes every queued
-   *  prompt to whichever chat happens to be selected when the lane drains. */
-  private queue: QueuedTurn[] = [];
-  /** Stable owner of the one active HTTP stream. `this.chatId` is only the
-   *  conversation currently displayed and may change while the run continues. */
-  private activeRunChatId: string | undefined;
+  /** Run ownership and follow-up queues are isolated by conversation. */
+  private readonly runs = new ThreadRunCoordinator<QueuedTurn>();
+  /** Coalesce concurrent first sends before a brand-new chat has an id. */
+  private pendingRunChatPromise?: Promise<string>;
   /** Buffered interactive events (permission / ask / plan approval) for
    *  conversations that are not currently displayed. Keyed by chatId.
    *  Flushed to the webview when the user switches back to that chat. */
   private pendingInteractions: Map<string, HostToWebview[]> = new Map();
-  /** True while Stop is clearing/promoting stranded redirects. */
-  private cancelling = false;
+  /** Ephemeral events for each active turn. Assistant deltas are coalesced so
+   *  switching away and back can reconstruct the unfinished response without
+   *  retaining one object per streamed token. */
+  private liveRunEvents: Map<string, HostToWebview[]> = new Map();
   /** Image attachments staged for the next send (base64 stays host-side). */
   private pendingImages: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   /** File attachments (PDF/DOCX) staged for the next send — same contract. */
@@ -469,11 +480,67 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       goal: this.goalMode,
+      busy: this.runs.isActive(chatId),
       sessionCostUsd: sessionCostFromChat(chat),
       eventsOffset: this.eventsOffset,
       eventsTotal: Number(chat.events_total ?? events.length) || events.length,
       eventsHasMore: this.eventsHasMore,
     });
+  }
+
+  private rememberLiveRunEvent(chatId: string, event: HostToWebview): void {
+    const events = this.liveRunEvents.get(chatId);
+    if (!events) return;
+    // Blocking prompts have their own durable buffer and attention badge.
+    if (
+      event.type === "permission_required" ||
+      event.type === "ask_user_required" ||
+      event.type === "plan_approval_required"
+    ) {
+      return;
+    }
+    const last = events[events.length - 1];
+    if (last?.type === "assistant_delta" && event.type === "assistant_delta") {
+      events[events.length - 1] = { ...last, delta: last.delta + event.delta };
+      return;
+    }
+    events.push(event);
+  }
+
+  /** Replay the active turn after persisted history has replaced the webview.
+   *  User/final messages already present on disk are not emitted twice. */
+  private replayLiveRun(chatId: string, chat: Record<string, unknown>): void {
+    const buffered = this.liveRunEvents.get(chatId);
+    if (!buffered?.length) return;
+    const persisted = (chat.events as Array<Record<string, unknown>>) || [];
+
+    let lastPersistedUser: string | undefined;
+    let lastPersistedAssistant: string | undefined;
+    for (let index = persisted.length - 1; index >= 0; index -= 1) {
+      const event = persisted[index];
+      if (lastPersistedAssistant === undefined && event.kind === "assistant") {
+        lastPersistedAssistant = String(event.text || "");
+      }
+      if (lastPersistedUser === undefined && event.kind === "user") {
+        lastPersistedUser = String(event.text || "");
+      }
+      if (lastPersistedUser !== undefined && lastPersistedAssistant !== undefined) break;
+    }
+
+    // The canonical assistant message is appended to disk before it is emitted.
+    // If it is already present, the persisted restore is the complete answer.
+    for (let index = buffered.length - 1; index >= 0; index -= 1) {
+      const event = buffered[index];
+      if (event.type === "assistant_message") {
+        if (event.text === lastPersistedAssistant) return;
+        break;
+      }
+    }
+
+    for (const event of buffered) {
+      if (event.type === "user_echo" && event.text === lastPersistedUser) continue;
+      this.post(event);
+    }
   }
 
   private async loadOlderChatEvents(): Promise<void> {
@@ -497,7 +564,48 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   get busy(): boolean {
-    return this.abort !== undefined;
+    return this.runs.hasActiveRuns;
+  }
+
+  private currentTurnSettings(): TurnSettings {
+    return {
+      mode: this.mode,
+      autoApprove: { ...this.autoApprove },
+      interaction: this.mode === "read_only" ? "interactive" : this.interaction,
+      caveman: this.caveman,
+      goal: this.goalMode,
+    };
+  }
+
+  private async resolveRunChatId(
+    requestedChatId: string | undefined,
+    mode: AgentMode,
+  ): Promise<string> {
+    if (requestedChatId) {
+      return requestedChatId;
+    }
+    if (this.pendingRunChatPromise) {
+      return this.pendingRunChatPromise;
+    }
+
+    const pending = (async () => {
+      const chat = await this.gateway.createChat(mode);
+      const chatId = String(chat.id);
+      if (!this.chatId) {
+        this.chatId = chatId;
+        await this.persistLocal(this.persistState());
+      }
+      await this.refreshChats();
+      return chatId;
+    })();
+    this.pendingRunChatPromise = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.pendingRunChatPromise === pending) {
+        this.pendingRunChatPromise = undefined;
+      }
+    }
   }
 
   async openChat(): Promise<void> {
@@ -581,6 +689,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         interaction: this.interaction,
         caveman: this.caveman,
         goal: this.goalMode,
+        busy: false,
         sessionCostUsd: 0,
       });
       await this.persistLocal(this.persistState());
@@ -610,62 +719,55 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  async cancelTask(): Promise<void> {
+  async cancelTask(chatId?: string): Promise<void> {
+    const activeIds = this.runs.activeChatIds();
+    const targetChatId = chatId || this.chatId || (activeIds.length === 1 ? activeIds[0] : undefined);
+    if (!targetChatId) {
+      this.post({ type: "cancelled" });
+      return;
+    }
     // Stop clears user-queued follow-ups, but stranded mid-turn interjects
     // are promoted afterward. Gate stream finally so it cannot drain the
     // queue before promotion lands (or auto-start an unrelated prompt).
-    this.cancelling = true;
-    const hadQueued = this.queue.length;
+    this.runs.beginCancel(targetChatId);
+    const hadQueued = this.runs.clearQueue(targetChatId).length;
     if (hadQueued > 0) {
-      this.queue = [];
-      this.post({ type: "status", message: "Queue cleared" });
+      this.post({ type: "status", message: "Queue cleared", chatId: targetChatId });
     }
-    const hadStream = this.abort !== undefined;
-    this.abort?.abort();
-    this.abort = undefined;
+    const hadStream = this.runs.abort(targetChatId);
     try {
-      const res = await this.gateway.cancel();
+      const res = await this.gateway.cancel(targetChatId);
       const stranded = (res.stranded_prompts || [])
         .map((p) => String(p).trim())
         .filter(Boolean);
       if (stranded.length) {
         // Dedupe against anything SSE already promoted.
-        const seen = new Set(this.queue.map((turn) => turn.text));
+        const seen = new Set(this.runs.queued(targetChatId).map((turn) => turn.text));
         const unique = stranded.filter((p) => !seen.has(p));
-        const targetChatId = this.activeRunChatId || this.chatId;
-        this.queue = [
-          ...unique.map((text) => ({
+        for (const text of unique.reverse()) {
+          this.runs.enqueue(targetChatId, {
             text,
             chatId: targetChatId,
             includeContext: this.config.includeContextByDefault,
-          })),
-          ...this.queue,
-        ];
+          }, true);
+        }
+        const queueLength = this.runs.queued(targetChatId).length;
         this.post({
           type: "status",
-          message: `Queued stranded redirect${this.queue.length > 1 ? "s" : ""} (${this.queue.length})`,
+          message: `Queued stranded redirect${queueLength > 1 ? "s" : ""} (${queueLength})`,
+          chatId: targetChatId,
         });
       }
     } catch {
       /* ignore */
     } finally {
-      this.cancelling = false;
+      this.runs.endCancel(targetChatId);
     }
     if (!hadStream) {
-      this.post({ type: "cancelled" });
+      this.post({ type: "cancelled", chatId: targetChatId });
     }
     // If idle after cancel, start the stranded redirect immediately.
-    if (!this.abort && this.queue.length > 0) {
-      const next = this.queue.shift();
-      if (next) {
-        void this.runTask(
-          next.text,
-          next.includeContext,
-          next.chatId,
-          next.modelOverride,
-        );
-      }
-    }
+    this.drainQueueIfIdle(targetChatId);
   }
 
   async restartSidecar(): Promise<void> {
@@ -694,7 +796,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   private async refreshChats(query?: string): Promise<void> {
     try {
-      const chats = (await this.gateway.listChats(query)) as ChatSummary[];
+      const chats = ((await this.gateway.listChats(query)) as ChatSummary[]).map((chat) => ({
+        ...chat,
+        running: this.runs.isActive(chat.id),
+      }));
       this.post({ type: "chats", chats, chatId: this.chatId });
     } catch {
       /* ignore until sidecar up */
@@ -715,6 +820,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       goal: this.goalMode,
+      busy: false,
       sessionCostUsd: 0,
     });
   }
@@ -902,68 +1008,86 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         if (this.mode === "read_only") {
           this.interaction = "interactive";
         }
+        const turnSettings = this.currentTurnSettings();
         // Drain in-flight settings saves first — sidecar reads disk per turn.
         await this.saveSettingsChain.catch(() => undefined);
-        await this.runTask(msg.text, msg.includeContext, msg.chatId, msg.model);
+        await this.runTask(msg.text, msg.includeContext, msg.chatId, msg.model, turnSettings);
         break;
-      case "queue_send":
+      case "queue_send": {
         // Prefer mid-turn redirect when a run is active; else queue for next turn.
+        const targetChatId = msg.chatId || this.chatId;
+        if (!targetChatId) {
+          this.post({ type: "status", message: "Start a conversation first." });
+          break;
+        }
         try {
-          const res = await this.gateway.interject(msg.text, this.chatId);
+          const res = await this.gateway.interject(msg.text, targetChatId);
           if (res.ok && (res.applied ?? 0) > 0) {
             this.post({
               type: "status",
               message: "Redirected mid-turn",
+              chatId: targetChatId,
             });
             break;
           }
         } catch {
           /* fall through to queue */
         }
-        this.queue.push({
+        const queuedCount = this.runs.enqueue(targetChatId, {
           text: msg.text,
-          chatId: this.chatId,
+          chatId: targetChatId,
           includeContext: this.config.includeContextByDefault,
+          settings: this.currentTurnSettings(),
         });
         this.post({
           type: "status",
-          message: `Queued (${this.queue.length})`,
-          chatId: this.chatId,
+          message: `Queued (${queuedCount})`,
+          chatId: targetChatId,
         });
         // If the run finished while interject raced, finally already drained —
         // start the queued turn now so the message is not stranded.
-        this.drainQueueIfIdle(true);
+        this.drainQueueIfIdle(targetChatId);
         break;
-      case "interject":
+      }
+      case "interject": {
+        const targetChatId = msg.chatId || this.chatId;
+        if (!targetChatId) {
+          this.post({ type: "status", message: "Start a conversation first." });
+          break;
+        }
         try {
-          const res = await this.gateway.interject(msg.text, this.chatId);
+          const res = await this.gateway.interject(msg.text, targetChatId);
           if (res.ok && (res.applied ?? 0) > 0) {
             this.post({
               type: "status",
               message: "Redirected mid-turn",
+              chatId: targetChatId,
             });
             break;
           }
-          this.queue.push({
+          this.runs.enqueue(targetChatId, {
             text: msg.text,
-            chatId: this.chatId,
+            chatId: targetChatId,
             includeContext: this.config.includeContextByDefault,
+            settings: this.currentTurnSettings(),
           });
           this.post({
             type: "status",
             message: "No active run to redirect — queued for next turn",
-            chatId: this.chatId,
+            chatId: targetChatId,
           });
-          this.drainQueueIfIdle(true);
+          this.drainQueueIfIdle(targetChatId);
         } catch (err) {
           this.post({
             type: "error",
             message: err instanceof Error ? err.message : String(err),
+            chatId: targetChatId,
           });
         }
         break;
+      }
       case "cancel":
-        await this.cancelTask();
+        await this.cancelTask(msg.chatId || this.chatId);
         break;
       case "list_jobs":
         await this.refreshJobs();
@@ -1057,7 +1181,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.newChat();
           break;
         }
-        if (this.abort) {
+        if (this.runs.isActive(targetId)) {
           // Use error so the webview clears pendingForkRef (status would leave it set).
           this.post({
             type: "error",
@@ -1083,17 +1207,83 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "open_side_chat": {
+        const targetId = msg.chatId || this.chatId;
+        if (!targetId) {
+          this.post({ type: "error", message: "Start a conversation before opening a side chat." });
+          break;
+        }
+        if (this.runs.isActive(targetId)) {
+          this.post({
+            type: "error",
+            message: "Stop the source conversation before forking it into a side chat.",
+            chatId: targetId,
+          });
+          break;
+        }
+        if (this.sideChatOpening || this.sideChatId) {
+          this.post({ type: "error", message: "A side chat is already open." });
+          break;
+        }
+        this.sideChatOpening = true;
+        try {
+          const res = await this.gateway.forkChat(targetId);
+          const chat = await this.gateway.getChat(res.chat_id, { tail: 400 });
+          const title =
+            (typeof res.chat?.title === "string" && res.chat.title) ||
+            (typeof chat.title === "string" ? chat.title : undefined);
+          this.post({
+            type: "side_chat_open",
+            chatId: res.chat_id,
+            title,
+            items: eventsToItems((chat.events as Array<Record<string, unknown>>) || []),
+            mode: (chat.mode as AgentMode) || this.mode,
+          });
+          this.sideChatId = res.chat_id;
+          await this.refreshChats();
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        } finally {
+          this.sideChatOpening = false;
+        }
+        break;
+      }
+      case "close_side_chat":
+        try {
+          if (this.runs.isActive(msg.chatId) || this.runs.isCancelling(msg.chatId)) {
+            await this.cancelTask(msg.chatId);
+          }
+          await this.gateway.deleteChat(msg.chatId);
+          this.pendingInteractions.delete(msg.chatId);
+          await this.refreshChats();
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        } finally {
+          if (this.sideChatId === msg.chatId) {
+            this.sideChatId = undefined;
+          }
+        }
+        break;
       case "select_chat":
         this.chatId = msg.chatId;
         await this.persistLocal(this.persistState());
         try {
-          const chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          const wasRunning = this.runs.isActive(msg.chatId);
+          let chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          // If the run completed while history was loading, fetch once more so
+          // the final assistant message wins over a now-expired live snapshot.
+          if (wasRunning && !this.runs.isActive(msg.chatId)) {
+            chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          }
           // Selection requests can overlap. A slow response for an older click
           // must not replace the transcript chosen more recently.
           if (this.chatId !== msg.chatId) {
             break;
           }
           await this.postChatRestore(msg.chatId, chat);
+          if (this.runs.isActive(msg.chatId)) {
+            this.replayLiveRun(msg.chatId, chat);
+          }
           // Flush any buffered interactive events (permission / ask / plan
           // approval) that arrived while this chat was in the background.
           const pending = this.pendingInteractions.get(msg.chatId);
@@ -1202,7 +1392,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
           break;
         }
-        if (this.abort) {
+        if (this.runs.isActive(this.chatId)) {
           this.post({
             type: "status",
             message: "Stop the current run before regenerating.",
@@ -2520,6 +2710,49 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Resolve a requested path only when it remains inside a workspace root. */
+  private workspaceUriForPath(
+    filePath: string,
+    folders: readonly vscode.WorkspaceFolder[],
+  ): vscode.Uri | undefined {
+    const roots = path.isAbsolute(filePath)
+      ? folders
+      : folders.filter((folder) => path.resolve(folder.uri.fsPath) === path.resolve(workspaceRoot() || ""));
+    for (const folder of roots) {
+      const resolved = pathUnderRoot(folder.uri.fsPath, filePath);
+      if (resolved) return vscode.Uri.file(resolved);
+    }
+    return undefined;
+  }
+
+  /** Find an inline-code file by basename when its displayed path is stale or incomplete. */
+  private async findWorkspaceFileByBasename(filePath: string): Promise<vscode.Uri | undefined> {
+    const fileName = path.basename(filePath);
+    if (!isBareFileName(fileName)) return undefined;
+    const results = await vscode.workspace.findFiles(
+      `**/${fileName}`,
+      undefined,
+      200,
+    );
+    // Do this after the search as well as avoiding a glob dependency: snapshots
+    // are historical copies, never the file the user intends to open.
+    const matches = results.filter((uri) =>
+      isWorkspaceSearchCandidate(vscode.workspace.asRelativePath(uri, false)),
+    );
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        matches.map((uri) => ({
+          label: vscode.workspace.asRelativePath(uri, false),
+          uri,
+        })),
+        { placeHolder: `Choose a file named ${fileName}` },
+      );
+      return picked?.uri;
+    }
+    return undefined;
+  }
+
   private async openPath(
     filePath: string,
     line?: number,
@@ -2539,20 +2772,28 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         fail("Open a workspace folder before opening paths from chat.");
         return;
       }
-      let uri: vscode.Uri;
-      if (path.isAbsolute(filePath)) {
-        uri = vscode.Uri.file(filePath);
-      } else {
-        const root = workspaceRoot();
-        uri = vscode.Uri.file(root ? path.join(root, filePath) : filePath);
+      let uri = this.workspaceUriForPath(filePath, folders);
+      let stat: vscode.FileStat | undefined;
+      if (uri) {
+        try {
+          stat = await vscode.workspace.fs.stat(uri);
+        } catch {
+          // A stale or incomplete agent path may still identify one workspace file.
+        }
       }
-      const resolved = path.resolve(uri.fsPath);
-      const inWorkspace = folders.some((f) => {
-        const root = path.resolve(f.uri.fsPath);
-        return resolved === root || resolved.startsWith(root + path.sep);
-      });
-      if (!inWorkspace) {
+      if (!stat) {
+        const matched = await this.findWorkspaceFileByBasename(filePath);
+        if (matched) {
+          uri = matched;
+          stat = await vscode.workspace.fs.stat(uri);
+        }
+      }
+      if (!uri) {
         fail(`Refusing to open path outside the workspace: ${filePath}`);
+        return;
+      }
+      if (stat?.type === vscode.FileType.Directory) {
+        await vscode.commands.executeCommand("revealInExplorer", uri);
         return;
       }
       const doc = await vscode.workspace.openTextDocument(uri);
@@ -2685,17 +2926,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     } catch {
       /* fall through to queueing */
     }
-    this.queue.push({
+    if (!this.chatId) {
+      return;
+    }
+    this.runs.enqueue(this.chatId, {
       text: prompt,
       chatId: this.chatId,
       includeContext: false,
+      settings: this.currentTurnSettings(),
     });
     this.post({
       type: "status",
       message: "Job result queued for the next turn",
       chatId: this.chatId,
     });
-    this.drainQueueIfIdle(false);
+    this.drainQueueIfIdle(this.chatId);
   }
 
   private async diffSnapshot(
@@ -2756,28 +3001,31 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     includeContext: boolean,
     chatId?: string,
     modelOverride?: string,
+    settingsOverride?: TurnSettings,
   ): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) {
       return;
     }
-    if (this.abort) {
-      const targetChatId = chatId || this.chatId;
-      this.queue.push({
+    const turnSettings = settingsOverride ?? this.currentTurnSettings();
+    const requestedChatId = chatId || this.chatId;
+    if (requestedChatId && (
+      this.runs.isActive(requestedChatId) || this.runs.isCancelling(requestedChatId)
+    )) {
+      const queueLength = this.runs.enqueue(requestedChatId, {
         text: trimmed,
-        chatId: targetChatId,
+        chatId: requestedChatId,
         includeContext,
         modelOverride,
+        settings: turnSettings,
       });
       this.post({
         type: "status",
-        message: `Queued (${this.queue.length})`,
-        chatId: targetChatId,
+        message: `Queued (${queueLength})`,
+        chatId: requestedChatId,
       });
       return;
     }
-
-    const requestedChatId = chatId || this.chatId;
 
     let task = trimmed;
     if (includeContext) {
@@ -2787,21 +3035,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // Reserve the run slot before await points so concurrent drainQueueIfIdle
-    // / interject cannot start a second turn in parallel.
-    const controller = new AbortController();
-    this.abort = controller;
-    const signal = controller.signal;
-
     this.post({ type: "sidecar", state: "starting" });
 
     try {
       await this.sidecar.ensureStarted();
       this.post({ type: "sidecar", state: "running" });
     } catch (err) {
-      if (this.abort === controller) {
-        this.abort = undefined;
-      }
       this.post({
         type: "sidecar",
         state: "error",
@@ -2811,37 +3050,69 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         type: "error",
         message: `Failed to start Python sidecar: ${err instanceof Error ? err.message : String(err)}`,
       });
-      this.drainQueueIfIdle(includeContext);
       return;
     }
 
-    // A brand-new conversation needs an ID before the stream starts. This
-    // gives every event and queued follow-up a stable owner even if the user
-    // switches conversations while createChat is in flight.
-    let runChatId = requestedChatId;
-    if (!runChatId) {
-      try {
-        const chat = await this.gateway.createChat(this.mode);
-        runChatId = String(chat.id);
-        if (!this.chatId) {
-          this.chatId = runChatId;
-          await this.persistLocal(this.persistState());
-        }
-        await this.refreshChats();
-      } catch (err) {
-        if (this.abort === controller) {
-          this.abort = undefined;
-        }
-        this.post({
-          type: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
-        this.drainQueueIfIdle(includeContext);
-        return;
-      }
+    let runChatId: string;
+    try {
+      runChatId = await this.resolveRunChatId(requestedChatId, turnSettings.mode);
+    } catch (err) {
+      this.post({
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return;
     }
-    this.activeRunChatId = runChatId;
-    this.post({ type: "user_echo", text: trimmed, chatId: runChatId });
+
+    // Chat creation and navigation are asynchronous, so re-check ownership
+    // after the stable id is known. Concurrent first sends converge here.
+    const run = this.runs.start(runChatId);
+    if (!run) {
+      const queueLength = this.runs.enqueue(runChatId, {
+        text: trimmed,
+        chatId: runChatId,
+        includeContext,
+        modelOverride,
+        settings: turnSettings,
+      });
+      this.post({
+        type: "status",
+        message: `Queued (${queueLength})`,
+        chatId: runChatId,
+      });
+      return;
+    }
+    const signal = run.controller.signal;
+    const userEcho = {
+      type: "user_echo",
+      text: trimmed,
+      chatId: runChatId,
+    } as HostToWebview;
+    this.liveRunEvents.set(runChatId, [userEcho]);
+    this.post({ type: "thread_run_state", chatId: runChatId, running: true });
+    this.post(userEcho);
+
+    // Claim attachments synchronously with the run slot. Without this, two
+    // conversations racing through getSettings() could attach the visible
+    // composer's files to whichever request resumed first.
+    const images = this.pendingImages.map((i) => ({
+      data: i.data,
+      media_type: i.mediaType,
+    }));
+    if (this.pendingImages.length > 0) {
+      this.pendingImages = [];
+      this.postImagesPending();
+    }
+    const files = this.pendingFiles.map((f) => ({
+      data: f.data,
+      media_type: f.mediaType,
+      name: f.name,
+    }));
+    if (this.pendingFiles.length > 0) {
+      this.pendingFiles = [];
+      this.postFilesPending();
+    }
+
     try {
       const settings = await this.gateway
         .getSettings()
@@ -2851,29 +3122,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         (typeof settings.model === "string" && settings.model
           ? settings.model
           : this.config.model || undefined);
-      // Attach any staged images/files to THIS turn, then clear them so they
-      // don't leak into a later message.
-      const images = this.pendingImages.map((i) => ({
-        data: i.data,
-        media_type: i.mediaType,
-      }));
-      if (this.pendingImages.length > 0) {
-        this.pendingImages = [];
-        this.postImagesPending();
-      }
-      const files = this.pendingFiles.map((f) => ({
-        data: f.data,
-        media_type: f.mediaType,
-        name: f.name,
-      }));
-      if (this.pendingFiles.length > 0) {
-        this.pendingFiles = [];
-        this.postFilesPending();
-      }
       const newId = await this.gateway.streamChat(
         task,
         runChatId,
-        this.mode,
+        turnSettings.mode,
         {
           signal,
           onEvent: (ev) => {
@@ -2881,18 +3133,19 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               const prompts = ev.prompts.map((p) => String(p).trim()).filter(Boolean);
               if (prompts.length) {
                 // Front of queue — send-now semantics for stranded redirects.
-                this.queue = [
-                  ...prompts.map((text) => ({
-                    text,
+                for (const prompt of [...prompts].reverse()) {
+                  this.runs.enqueue(runChatId, {
+                    text: prompt,
                     chatId: runChatId,
                     includeContext,
                     modelOverride,
-                  })),
-                  ...this.queue,
-                ];
+                    settings: turnSettings,
+                  }, true);
+                }
+                const queueLength = this.runs.queued(runChatId).length;
                 this.post({
                   type: "status",
-                  message: `Queued stranded redirect${prompts.length > 1 ? "s" : ""} (${this.queue.length})`,
+                  message: `Queued stranded redirect${prompts.length > 1 ? "s" : ""} (${queueLength})`,
                   chatId: runChatId,
                 });
               }
@@ -2904,6 +3157,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             // Tag every event with the originating chatId so the webview
             // can route it to the correct conversation thread.
             const tagged = { ...ev, chatId: runChatId } as HostToWebview;
+            this.rememberLiveRunEvent(runChatId, tagged);
 
             // Interactive events that block the agent must not be silently
             // dropped when the user is viewing a different conversation.
@@ -2923,7 +3177,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 ev.type === "permission_required" ? "permission" as const
                 : ev.type === "ask_user_required" ? "ask" as const
                 : "plan_approval" as const;
-              if (runChatId !== this.chatId) {
+              if (runChatId !== this.chatId && runChatId !== this.sideChatId) {
                 this.post({ type: "chat_attention", chatId: runChatId, reason });
                 return;
               }
@@ -2944,10 +3198,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           },
         },
         model,
-        this.autoApprove,
-        this.mode === "read_only" ? "interactive" : this.interaction,
-        this.caveman,
-        this.goalMode,
+        turnSettings.autoApprove,
+        turnSettings.interaction,
+        turnSettings.caveman,
+        turnSettings.goal,
         images,
         files,
       );
@@ -2962,41 +3216,42 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       if (!signal.aborted) {
-        this.post({
+        const errorEvent = {
           type: "error",
           message: err instanceof Error ? err.message : String(err),
-        });
+          chatId: runChatId,
+        } as HostToWebview;
+        this.rememberLiveRunEvent(runChatId, errorEvent);
+        this.post(errorEvent);
       }
     } finally {
-      if (this.abort === controller) {
-        this.abort = undefined;
-      }
-      if (this.activeRunChatId === runChatId) {
-        this.activeRunChatId = undefined;
-      }
+      this.runs.finish(run);
+      this.liveRunEvents.delete(runChatId);
+      this.post({ type: "thread_run_state", chatId: runChatId, running: false });
       // A job the turn detached is now unattended: the run's event stream is
       // closed, so polling is the only thing that will notice it finishing.
       void this.refreshJobs();
       // cancelTask owns queue drain while Stop is in flight.
-      if (this.cancelling) {
+      if (this.runs.isCancelling(runChatId)) {
         return;
       }
-      this.drainQueueIfIdle(includeContext);
+      this.drainQueueIfIdle(runChatId);
     }
   }
 
-  /** Start the next queued turn when no run is active (fixes interject race). */
-  private drainQueueIfIdle(includeContext = true): void {
-    if (this.abort || this.cancelling) {
+  /** Start one conversation's next turn when its current run has ended. */
+  private drainQueueIfIdle(chatId: string): void {
+    if (this.runs.isActive(chatId) || this.runs.isCancelling(chatId)) {
       return;
     }
-    const next = this.queue.shift();
+    const next = this.runs.dequeue(chatId);
     if (next) {
       void this.runTask(
         next.text,
         next.includeContext,
         next.chatId,
         next.modelOverride,
+        next.settings,
       );
     }
   }

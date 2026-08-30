@@ -28,6 +28,36 @@ test("accepts deselect_chat with no payload", () => {
   assert.deepEqual(parseWebviewToHost({ type: "deselect_chat" }), { type: "deselect_chat" });
 });
 
+test("accepts bounded side-chat fork and close requests", () => {
+  for (const message of [
+    { type: "open_side_chat", chatId: "chat-1" },
+    { type: "open_side_chat" },
+    { type: "close_side_chat", chatId: "chat-1" },
+  ]) {
+    assert.deepEqual(parseWebviewToHost(message), message);
+  }
+  assert.equal(parseWebviewToHost({ type: "close_side_chat", chatId: "../../outside" }), undefined);
+});
+
+test("cancel may target one opaque conversation id", () => {
+  assert.deepEqual(parseWebviewToHost({ type: "cancel", chatId: "chat-123" }), {
+    type: "cancel",
+    chatId: "chat-123",
+  });
+  assert.equal(parseWebviewToHost({ type: "cancel", chatId: "../escape" }), undefined);
+});
+
+test("redirect and queued recovery messages may target one conversation", () => {
+  for (const type of ["interject", "queue_send"]) {
+    const message = { type, text: "follow up", chatId: "chat-123" };
+    assert.deepEqual(parseWebviewToHost(message), message);
+    assert.equal(
+      parseWebviewToHost({ type, text: "follow up", chatId: "../escape" }),
+      undefined,
+    );
+  }
+});
+
 test("settings saves require a positive integer revision", () => {
   const message = { type: "save_settings", revision: 7, settings: { provider: "openai" } };
   assert.deepEqual(parseWebviewToHost(message), message);

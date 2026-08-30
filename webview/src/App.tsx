@@ -7,9 +7,10 @@ import {
   useState,
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   getVsCodeApi,
@@ -23,6 +24,12 @@ import {
   type InteractionStyle,
   type JobSummary,
 } from "./vscodeApi";
+import { parseInlinePathReference } from "../../src/pathReferences";
+import {
+  collectTurnChangedFiles,
+  isTurnTerminal,
+  type ChangedFile,
+} from "./changedFiles";
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
@@ -33,6 +40,16 @@ import {
   settingsPatchMismatches,
   settingsSaveKey,
 } from "./settingsSync";
+import {
+  THREAD_UNREAD_STATE_KEY,
+  acknowledgeThreadUnread,
+  markThreadUnread,
+  readPersistedUnreadThreads,
+  retainAvailableUnreadThreads,
+  serializeUnreadThreads,
+  threadActivity,
+  threadActivityLabel,
+} from "./threadUnread";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -175,12 +192,18 @@ type ConversationTab = {
   id: string;
   title: string;
   pinned: boolean;
+  running?: boolean;
 };
 
-type ConversationTabMenu = {
+type SideChat = {
   chatId: string;
-  x: number;
-  y: number;
+  title: string;
+  mode: AgentMode;
+  items: ChatItem[];
+  busy: boolean;
+  minimized: boolean;
+  /** Vertical position of the minimized side-chat launcher, in viewport pixels. */
+  peekY?: number;
 };
 
 function persistedConversationTabs(): ConversationTab[] {
@@ -202,6 +225,7 @@ function persistedConversationTabs(): ConversationTab[] {
             ? value.title.trim()
             : id,
         pinned: Boolean(value.pinned),
+        running: false,
       });
     }
     return tabs;
@@ -224,6 +248,7 @@ function reconcileConversationTabs(
       id: tab.id,
       title: summary.title?.trim() || tab.title || tab.id,
       pinned: Boolean(summary.pinned),
+      running: Boolean(summary.running),
     }];
   });
 }
@@ -241,6 +266,7 @@ function upsertConversationTab(
     id: chatId,
     title: title?.trim() || summary?.title?.trim() || previous?.title || chatId,
     pinned: summary?.pinned === undefined ? Boolean(previous?.pinned) : Boolean(summary.pinned),
+    running: summary?.running === undefined ? Boolean(previous?.running) : Boolean(summary.running),
   };
   if (index < 0) return [...current, next];
   const updated = [...current];
@@ -252,6 +278,12 @@ const INTERACTIVE_EVENT_TYPES = new Set<HostToWebview["type"]>([
   "permission_required",
   "ask_user_required",
   "plan_approval_required",
+]);
+
+/** Assistant output that should mark a thread unread while it is not visible. */
+const BACKGROUND_OUTPUT_EVENT_TYPES = new Set<HostToWebview["type"]>([
+  "assistant_delta",
+  "assistant_message",
 ]);
 
 function resolvePerm(
@@ -581,6 +613,7 @@ const BackgroundJobs = memo(function BackgroundJobs({
 
 type TranscriptItemProps = {
   item: ChatItem;
+  changedFiles?: ChangedFile[];
   showStreamingCursor: boolean;
   setItems: Dispatch<SetStateAction<ChatItem[]>>;
   onAskDraftChange: (requestId: string, draft: string) => void;
@@ -588,8 +621,55 @@ type TranscriptItemProps = {
   onPlanFeedbackToggle: (requestId: string, open: boolean) => void;
 };
 
+function ChangedFilesSummary({ files }: { files: ChangedFile[] }) {
+  return (
+    <section className="changed-files-summary" aria-label={`Edited ${files.length} files`}>
+      <div className="changed-files-title">
+        <strong>Edited {files.length} file{files.length === 1 ? "" : "s"}</strong>
+        <span>Click a file to open it</span>
+      </div>
+      <div className="changed-files-list">
+        {files.map((file) => (
+          <button
+            key={file.path}
+            type="button"
+            className="changed-file-link"
+            title={`Open ${file.path}`}
+            onClick={() => post({ type: "open_file", path: file.path })}
+          >
+            {file.path}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Make unambiguous inline-code file references openable without changing agent output. */
+const assistantMarkdownComponents: Components = {
+  code({ children, className, node: _node, ...props }) {
+    const text = typeof children === "string" ? children : "";
+    const reference = !className ? parseInlinePathReference(text) : undefined;
+    if (!reference) {
+      return <code className={className} {...props}>{children}</code>;
+    }
+    const target = reference.line ? `${reference.path}:${reference.line}` : reference.path;
+    return (
+      <button
+        type="button"
+        className="inline-path-link"
+        title={`Open ${target}`}
+        onClick={() => post({ type: "open_file", path: reference.path, line: reference.line })}
+      >
+        <code className={className} {...props}>{children}</code>
+      </button>
+    );
+  },
+};
+
 const TranscriptItem = memo(function TranscriptItem({
   item,
+  changedFiles,
   showStreamingCursor,
   setItems,
   onAskDraftChange,
@@ -618,7 +698,9 @@ const TranscriptItem = memo(function TranscriptItem({
             </button>
           </div>
           <div className="md">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+              {item.text}
+            </ReactMarkdown>
             {showStreamingCursor && <span className="cursor" />}
           </div>
         </>
@@ -895,14 +977,191 @@ const TranscriptItem = memo(function TranscriptItem({
           )}
         </div>
       )}
-      {item.kind === "status" && <div className="status">{item.text}</div>}
-      {item.kind === "error" && <div className="error">{item.text}</div>}
+      {item.kind === "status" && (
+        <>
+          {changedFiles?.length ? <ChangedFilesSummary files={changedFiles} /> : null}
+          <div className="status">{item.text}</div>
+        </>
+      )}
+      {item.kind === "error" && (
+        <>
+          {changedFiles?.length ? <ChangedFilesSummary files={changedFiles} /> : null}
+          <div className="error">{item.text}</div>
+        </>
+      )}
     </div>
   );
 });
 
 /** Cap DOM nodes for long transcripts; "Show more" expands the window. */
 const TRANSCRIPT_RENDER_CHUNK = 120;
+
+function SideChatOverlay({
+  sideChat,
+  hasApiKey,
+  setItems,
+  onSend,
+  onClose,
+  onMinimize,
+  onPeekYChange,
+}: {
+  sideChat: SideChat;
+  hasApiKey: boolean;
+  setItems: Dispatch<SetStateAction<ChatItem[]>>;
+  onSend: (text: string) => void;
+  onClose: () => void;
+  onMinimize: () => void;
+  onPeekYChange: (y: number) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const sideChatBottomRef = useRef<HTMLDivElement>(null);
+  const peekDragRef = useRef<{
+    pointerId: number;
+    startPointerY: number;
+    startTop: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressPeekClickRef = useRef(false);
+
+  const beginPeekDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    peekDragRef.current = {
+      pointerId: event.pointerId,
+      startPointerY: event.clientY,
+      startTop: event.currentTarget.getBoundingClientRect().top,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const movePeekDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = peekDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientY - drag.startPointerY;
+    if (Math.abs(delta) > 3) drag.moved = true;
+    const maxTop = Math.max(8, window.innerHeight - 44);
+    onPeekYChange(Math.max(8, Math.min(maxTop, drag.startTop + delta)));
+  };
+
+  const endPeekDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = peekDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    suppressPeekClickRef.current = drag.moved;
+    peekDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  useEffect(() => {
+    if (sideChat.minimized) return;
+    const frame = window.requestAnimationFrame(() => {
+      sideChatBottomRef.current?.scrollIntoView({ block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sideChat.chatId, sideChat.items.length, sideChat.minimized]);
+
+  useEffect(() => {
+    if (sideChat.minimized) return;
+    const collapseWhenLeaving = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".side-chat")) onMinimize();
+    };
+    window.addEventListener("pointerdown", collapseWhenLeaving);
+    return () => window.removeEventListener("pointerdown", collapseWhenLeaving);
+  }, [onMinimize, sideChat.minimized]);
+
+  if (sideChat.minimized) {
+    return (
+      <button
+        type="button"
+        className="side-chat-peek"
+        style={sideChat.peekY == null ? undefined : { top: sideChat.peekY, bottom: "auto" }}
+        onPointerDown={beginPeekDrag}
+        onPointerMove={movePeekDrag}
+        onPointerUp={endPeekDrag}
+        onPointerCancel={endPeekDrag}
+        onClick={() => {
+          if (suppressPeekClickRef.current) {
+            suppressPeekClickRef.current = false;
+            return;
+          }
+          onMinimize();
+        }}
+        title="Drag vertically · click to expand side chat"
+        aria-label="Expand side chat"
+        data-tooltip="Side chat"
+      >
+        <IconMessageCirclePlus size={17} />
+      </button>
+    );
+  }
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || sideChat.busy || !hasApiKey) return;
+    setDraft("");
+    onSend(text);
+  };
+  return (
+    <aside className="side-chat" aria-label="Temporary side chat">
+      <header className="side-chat-head">
+        <span title={sideChat.title}><IconFork size={14} /> Side chat</span>
+        <div>
+          <button type="button" className="ghost tiny" onClick={onMinimize} title="Minimize side chat">—</button>
+          <button type="button" className="ghost tiny" onClick={onClose} title="Close and delete side chat">✕</button>
+        </div>
+      </header>
+      <div className="side-chat-messages">
+        {sideChat.items.map((item, index) => {
+          const terminalText = item.kind === "status" || item.kind === "error" ? item.text : undefined;
+          const changedFiles = isTurnTerminal(item.kind, terminalText)
+            ? collectTurnChangedFiles(sideChat.items, index)
+            : undefined;
+          return (
+            <TranscriptItem
+              key={index}
+              item={item}
+              changedFiles={changedFiles}
+              setItems={setItems}
+              onAskDraftChange={(requestId, value) => setItems((current) =>
+                current.map((candidate) => candidate.kind === "ask" && candidate.requestId === requestId
+                  ? { ...candidate, draft: value }
+                  : candidate))}
+              onPlanFeedbackChange={(requestId, value) => setItems((current) =>
+                current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
+                  ? { ...candidate, feedbackDraft: value }
+                  : candidate))}
+              onPlanFeedbackToggle={(requestId, open) => setItems((current) =>
+                current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
+                  ? { ...candidate, feedbackOpen: open }
+                  : candidate))}
+              showStreamingCursor={sideChat.busy && index === sideChat.items.length - 1 && item.kind === "assistant"}
+            />
+          );
+        })}
+        <div ref={sideChatBottomRef} />
+      </div>
+      <div className="side-chat-compose">
+        <textarea
+          rows={2}
+          value={draft}
+          disabled={sideChat.busy || !hasApiKey}
+          placeholder={hasApiKey ? "Ask the fork…" : "Add a provider API key first"}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <button type="button" className="primary tiny" disabled={!draft.trim() || sideChat.busy || !hasApiKey} onClick={submit}>
+          {sideChat.busy ? "Working…" : "Send"}
+        </button>
+      </div>
+    </aside>
+  );
+}
 
 export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -956,6 +1215,8 @@ export function App() {
   /** Owner stashed by beginDraftHandoff so a failed fork/new/select can resume persist. */
   const draftOwnerBeforeNavRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [sideChat, setSideChat] = useState<SideChat | null>(null);
+  const sideChatRef = useRef<SideChat | null>(null);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
   const [openChatMenuId, setOpenChatMenuId] = useState<string | undefined>();
@@ -967,12 +1228,17 @@ export function App() {
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
   /** Conversations with pending interactive prompts (permission / ask / plan approval). */
   const [chatAttention, setChatAttention] = useState<Map<string, string>>(new Map());
+  /** Persisted webview-local unread state. Entering a visible thread acknowledges it. */
+  const [unreadChatIds, setUnreadChatIds] = useState<Set<string>>(() =>
+    readPersistedUnreadThreads(getVsCodeApi().getState()),
+  );
   const [openConversationTabs, setOpenConversationTabs] = useState<ConversationTab[]>(
     persistedConversationTabs,
   );
-  const [conversationTabMenu, setConversationTabMenu] =
-    useState<ConversationTabMenu | null>(null);
+  const [threadsPopoverOpen, setThreadsPopoverOpen] = useState(false);
+  const [threadsPopoverPinned, setThreadsPopoverPinned] = useState(false);
   const [panel, setPanel] = useState<Panel>("chat");
+  const panelRef = useRef<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
   const pendingForkRef = useRef(false);
   /** New chat does not know the created id yet; restore may legally change chatId. */
@@ -1268,6 +1534,17 @@ export function App() {
     "cancelled",
   ]);
 
+  const acknowledgeUnread = useCallback((id: string | undefined) => {
+    if (!id) return;
+    setUnreadChatIds((previous) => acknowledgeThreadUnread(previous, id));
+  }, []);
+
+  const showPanel = useCallback((next: Panel) => {
+    panelRef.current = next;
+    setPanel(next);
+    if (next === "chat") acknowledgeUnread(chatIdRef.current);
+  }, [acknowledgeUnread]);
+
   // Keep chatIdRef in sync so the onMessage closure (which never
   // re-creates thanks to the [] deps array) can read the latest value.
   useEffect(() => {
@@ -1275,24 +1552,49 @@ export function App() {
   }, [chatId]);
 
   useEffect(() => {
+    sideChatRef.current = sideChat;
+  }, [sideChat]);
+
+  useEffect(() => {
     const api = getVsCodeApi();
     const previous = api.getState();
     api.setState({
       ...(previous && typeof previous === "object" ? previous : {}),
       conversationTabs: openConversationTabs,
+      [THREAD_UNREAD_STATE_KEY]: serializeUnreadThreads(unreadChatIds),
     });
-  }, [openConversationTabs]);
+  }, [openConversationTabs, unreadChatIds]);
 
   useEffect(() => {
-    if (!conversationTabMenu) return;
+    const acknowledgeVisibleThread = () => {
+      if (document.visibilityState === "visible" && panelRef.current === "chat") {
+        acknowledgeUnread(chatIdRef.current);
+      }
+    };
+    document.addEventListener("visibilitychange", acknowledgeVisibleThread);
+    return () => document.removeEventListener("visibilitychange", acknowledgeVisibleThread);
+  }, [acknowledgeUnread]);
+
+  useEffect(() => {
+    if (!forkNotice) return;
+    const timer = window.setTimeout(() => setForkNotice(null), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [forkNotice]);
+
+  useEffect(() => {
+    if (!threadsPopoverOpen) return;
     const dismiss = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (!target?.closest(".conversation-tab-menu")) {
-        setConversationTabMenu(null);
+      if (!target?.closest(".threads-popover-root")) {
+        setThreadsPopoverOpen(false);
+        setThreadsPopoverPinned(false);
       }
     };
     const dismissWithEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setConversationTabMenu(null);
+      if (event.key === "Escape") {
+        setThreadsPopoverOpen(false);
+        setThreadsPopoverPinned(false);
+      }
     };
     window.addEventListener("pointerdown", dismiss);
     window.addEventListener("keydown", dismissWithEscape);
@@ -1300,7 +1602,7 @@ export function App() {
       window.removeEventListener("pointerdown", dismiss);
       window.removeEventListener("keydown", dismissWithEscape);
     };
-  }, [conversationTabMenu]);
+  }, [threadsPopoverOpen]);
 
   useEffect(() => {
     // Returns true when an incoming streaming event belongs to a different
@@ -1312,22 +1614,92 @@ export function App() {
       return Boolean(id && chatIdRef.current && id !== chatIdRef.current);
     };
 
+    const applySideChatEvent = (msg: HostToWebview): boolean => {
+      const owner = (msg as { chatId?: string }).chatId;
+      if (!owner || sideChatRef.current?.chatId !== owner) return false;
+      setSideChat((current) => {
+        if (!current || current.chatId !== owner) return current;
+        const append = (item: ChatItem) => ({ ...current, items: [...current.items, item] });
+        switch (msg.type) {
+          case "thread_run_state": return { ...current, busy: msg.running };
+          case "user_echo": return { ...append({ kind: "user", text: msg.text }), busy: true };
+          case "status": {
+            const items = [...current.items];
+            const last = items[items.length - 1];
+            if (last?.kind === "status") items[items.length - 1] = { kind: "status", text: msg.message };
+            else items.push({ kind: "status", text: msg.message });
+            return { ...current, items };
+          }
+          case "assistant_delta": {
+            const items = [...current.items];
+            const last = items[items.length - 1];
+            if (last?.kind === "assistant") items[items.length - 1] = { kind: "assistant", text: last.text + msg.delta };
+            else items.push({ kind: "assistant", text: msg.delta });
+            return { ...current, items };
+          }
+          case "assistant_message": {
+            if (!msg.text.trim()) return current;
+            const items = [...current.items];
+            const last = items[items.length - 1];
+            if (last?.kind === "assistant") items[items.length - 1] = { kind: "assistant", text: msg.text };
+            else items.push({ kind: "assistant", text: msg.text });
+            return { ...current, items };
+          }
+          case "tool_started": return append({ kind: "tool", id: msg.id, name: msg.name, status: "running" });
+          case "tool_completed": {
+            let matched = false;
+            const items = current.items.map((item) => {
+              if (item.kind === "tool" && item.id === msg.id) {
+                matched = true;
+                return { ...item, status: "done" as const, success: msg.success, output: msg.output };
+              }
+              return item;
+            });
+            if (!matched) items.push({ kind: "tool", id: msg.id || msg.name, name: msg.name, status: "done", success: msg.success, output: msg.output });
+            return { ...current, items };
+          }
+          case "permission_required": return append({ kind: "permission", requestId: msg.requestId, tool: msg.tool, filePath: msg.filePath, command: msg.command, reason: msg.reason });
+          case "ask_user_required": return append({ kind: "ask", requestId: msg.requestId, question: msg.question });
+          case "plan_approval_required": return append({ kind: "plan_approval", requestId: msg.requestId, planText: msg.planText });
+          case "plan_approved": return { ...current, items: current.items.map((item) => item.kind === "plan_approval" && !item.resolved ? { ...item, resolved: "approve" as const } : item) };
+          case "file_changed": return append({ kind: "file", path: msg.path });
+          case "done": return { ...append({ kind: "status", text: `Done · ${msg.status}` }), busy: false };
+          case "error": return { ...append({ kind: "error", text: msg.message }), busy: false };
+          case "cancelled": return { ...append({ kind: "status", text: "Cancelled" }), busy: false };
+          default: return current;
+        }
+      });
+      return true;
+    };
+
     const onMessage = (event: MessageEvent<HostToWebview>) => {
       const msg = event.data;
       if (!msg || typeof msg !== "object" || !("type" in msg)) {
         return;
       }
+      if (applySideChatEvent(msg)) return;
+      const ownerChatId = (msg as { chatId?: string }).chatId;
+      const outputIsVisible =
+        ownerChatId === chatIdRef.current &&
+        panelRef.current === "chat" &&
+        document.visibilityState === "visible";
+      if (
+        ownerChatId &&
+        BACKGROUND_OUTPUT_EVENT_TYPES.has(msg.type) &&
+        !outputIsVisible
+      ) {
+        setUnreadChatIds((previous) => markThreadUnread(previous, ownerChatId));
+      }
       if (runScopedEventTypes.has(msg.type) && isStaleEvent(msg)) {
         if (INTERACTIVE_EVENT_TYPES.has(msg.type)) {
-          const id = (msg as { chatId?: string }).chatId;
-          if (id) {
+          if (ownerChatId) {
             const reason =
               msg.type === "permission_required" ? "permission"
               : msg.type === "ask_user_required" ? "ask"
               : "plan_approval";
             setChatAttention((prev) => {
               const next = new Map(prev);
-              next.set(id, reason);
+              next.set(ownerChatId, reason);
               return next;
             });
           }
@@ -1335,6 +1707,22 @@ export function App() {
         return;
       }
       switch (msg.type) {
+        case "side_chat_open":
+          {
+            const nextSideChat: SideChat = {
+            chatId: msg.chatId,
+            title: msg.title || "Forked conversation",
+            mode: msg.mode,
+            items: (msg.items as ChatItem[]) || [],
+            busy: false,
+            minimized: false,
+            };
+            // A user can submit immediately after the overlay is painted;
+            // make the event owner visible before the state effect runs.
+            sideChatRef.current = nextSideChat;
+            setSideChat(nextSideChat);
+          }
+          break;
         case "ready":
           setWorkspace(msg.workspace);
           setModel(msg.model || "default");
@@ -1383,6 +1771,15 @@ export function App() {
           chatIdRef.current = msg.chatId;
           setChatId(msg.chatId);
           setChats(msg.chats || []);
+          setUnreadChatIds((previous) => {
+            const retained = retainAvailableUnreadThreads(
+              previous,
+              new Set((msg.chats || []).map((chat) => chat.id)),
+            );
+            return panelRef.current === "chat" && document.visibilityState === "visible" && msg.chatId
+              ? acknowledgeThreadUnread(retained, msg.chatId)
+              : retained;
+          });
           setOpenConversationTabs((previous) => {
             const reconciled = reconcileConversationTabs(previous, msg.chats || []);
             return msg.chatId
@@ -1437,13 +1834,24 @@ export function App() {
               },
             ]);
             for (const text of prompts) {
-              post({ type: "queue_send", text });
+              post({ type: "queue_send", text, chatId: chatIdRef.current });
             }
           }
           break;
         }
         case "chats":
           setChats(msg.chats || []);
+          setUnreadChatIds((previous) => retainAvailableUnreadThreads(
+            previous,
+            new Set((msg.chats || []).map((chat) => chat.id)),
+          ));
+          if (chatIdRef.current) {
+            const visible = (msg.chats || []).find((chat) => chat.id === chatIdRef.current);
+            if (visible) {
+              setBusy(Boolean(visible.running));
+              if (!visible.running) streamingRef.current = false;
+            }
+          }
           setOpenConversationTabs((previous) => {
             const reconciled = reconcileConversationTabs(previous, msg.chats || []);
             if (
@@ -1465,6 +1873,16 @@ export function App() {
           ) {
             chatIdRef.current = msg.chatId;
             setChatId(msg.chatId);
+          }
+          break;
+        case "thread_run_state":
+          setChats((previous) => previous.map((chat) =>
+            chat.id === msg.chatId ? { ...chat, running: msg.running } : chat));
+          setOpenConversationTabs((previous) => previous.map((tab) =>
+            tab.id === msg.chatId ? { ...tab, running: msg.running } : tab));
+          if (chatIdRef.current === msg.chatId) {
+            setBusy(msg.running);
+            if (!msg.running) streamingRef.current = false;
           }
           break;
         case "settings": {
@@ -1676,6 +2094,10 @@ export function App() {
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
           setItems((msg.items as ChatItem[]) || []);
+          // Selecting or forking into a conversation should reveal its newest
+          // turn immediately, even when the previously viewed chat was scrolled up.
+          stickToBottomRef.current = true;
+          window.requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: "end" }));
           setRenderWindow(TRANSCRIPT_RENDER_CHUNK);
           setEventsHasMore(Boolean(msg.eventsHasMore));
           setDraft(msg.draft || "");
@@ -1712,7 +2134,7 @@ export function App() {
           resetSessionCost(
             typeof msg.sessionCostUsd === "number" ? msg.sessionCostUsd : 0,
           );
-          setBusy(false);
+          setBusy(Boolean(msg.busy));
           streamingRef.current = false;
           if (pendingForkRef.current) {
             pendingForkRef.current = false;
@@ -1727,7 +2149,7 @@ export function App() {
             setForkNotice({ title: displayTitle, chatId: (msg.chatId as string) || "" });
           }
           if (msg.chatId) {
-            setPanel("chat");
+            showPanel("chat");
           }
           break;
         }
@@ -2340,8 +2762,8 @@ export function App() {
   }, [historyQuery, panel]);
 
   const visibleChats = useMemo(
-    () => chats.filter((c) => !c.archived),
-    [chats],
+    () => chats.filter((c) => !c.archived && c.id !== sideChat?.chatId),
+    [chats, sideChat?.chatId],
   );
   const pinnedChats = useMemo(
     () => visibleChats.filter((c) => c.pinned),
@@ -2359,6 +2781,15 @@ export function App() {
     () => [...pinnedChats, ...regularChats, ...archivedChats],
     [pinnedChats, regularChats, archivedChats],
   );
+  const orderedOpenConversationTabs = useMemo(
+    () => [...openConversationTabs].sort((a, b) => Number(b.pinned) - Number(a.pinned)),
+    [openConversationTabs],
+  );
+  const openThreadsActivity = useMemo(() => threadActivity(
+    openConversationTabs.some((tab) => chatAttention.has(tab.id)),
+    openConversationTabs.some((tab) => unreadChatIds.has(tab.id)),
+    false,
+  ), [chatAttention, openConversationTabs, unreadChatIds]);
   const selectedChats = useMemo(
     () => orderedHistoryChats.filter((chat) => selectedChatIds.has(chat.id)),
     [orderedHistoryChats, selectedChatIds],
@@ -2458,21 +2889,25 @@ export function App() {
     }
 
     setSelectedChatIds(new Set());
+    acknowledgeUnread(c.id);
     pendingNewChatRef.current = false;
     // Change the routing guard immediately; waiting for React's effect leaves
     // a window where events from the old chat can enter the new transcript.
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
-    setPanel("chat");
+    showPanel("chat");
     beginDraftHandoff();
     chatIdRef.current = c.id;
     setChatId(c.id);
+    setBusy(Boolean(c.running));
     post({ type: "select_chat", chatId: c.id });
   };
 
   const selectConversationTab = (tab: ConversationTab) => {
-    setConversationTabMenu(null);
+    setThreadsPopoverOpen(false);
+    setThreadsPopoverPinned(false);
     pendingNewChatRef.current = false;
-    setPanel("chat");
+    acknowledgeUnread(tab.id);
+    showPanel("chat");
     setOpenConversationTabs((previous) =>
       upsertConversationTab(previous, tab.id, chats, tab.title),
     );
@@ -2480,6 +2915,7 @@ export function App() {
     beginDraftHandoff();
     chatIdRef.current = tab.id;
     setChatId(tab.id);
+    setBusy(Boolean(tab.running));
     post({ type: "select_chat", chatId: tab.id });
   };
 
@@ -2488,7 +2924,10 @@ export function App() {
     if (closingIndex < 0) return;
     const remaining = openConversationTabs.filter((tab) => tab.id !== closingId);
     setOpenConversationTabs(remaining);
-    setConversationTabMenu(null);
+    if (remaining.length === 0) {
+      setThreadsPopoverOpen(false);
+      setThreadsPopoverPinned(false);
+    }
     if (chatIdRef.current !== closingId) return;
     const replacement = remaining[Math.min(closingIndex, remaining.length - 1)];
     if (replacement) {
@@ -2496,7 +2935,8 @@ export function App() {
       beginDraftHandoff();
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
-      setPanel("chat");
+      setBusy(Boolean(replacement.running));
+      showPanel("chat");
       post({ type: "select_chat", chatId: replacement.id });
     } else {
       persistDraftNow();
@@ -2504,7 +2944,7 @@ export function App() {
       draftOwnerBeforeNavRef.current = undefined;
       chatIdRef.current = undefined;
       setChatId(undefined);
-      setPanel("history");
+      showPanel("history");
       post({ type: "deselect_chat" });
     }
   };
@@ -2514,10 +2954,11 @@ export function App() {
     draftOwnerRef.current = undefined;
     draftOwnerBeforeNavRef.current = undefined;
     setOpenConversationTabs([]);
-    setConversationTabMenu(null);
+    setThreadsPopoverOpen(false);
+    setThreadsPopoverPinned(false);
     chatIdRef.current = undefined;
     setChatId(undefined);
-    setPanel("history");
+    showPanel("history");
     post({ type: "deselect_chat" });
   };
 
@@ -2528,7 +2969,6 @@ export function App() {
         candidate.id === tab.id ? { ...candidate, pinned } : candidate,
       ),
     );
-    setConversationTabMenu(null);
     post({ type: "pin_chat", chatId: tab.id, pinned });
   };
 
@@ -3098,7 +3538,7 @@ export function App() {
           text: "Add a provider API key first — open Settings or run ClawAgents: Set API Key.",
         },
       ]);
-      setPanel("settings");
+      showPanel("settings");
       return;
     }
     if (value === "/compact") {
@@ -3124,7 +3564,7 @@ export function App() {
     }
     clearDraft();
     if (busy) {
-      post({ type: "interject", text: value });
+      post({ type: "interject", text: value, chatId: chatIdRef.current });
       return;
     }
     flushPendingSettingsSave();
@@ -3163,7 +3603,9 @@ export function App() {
       text: value,
       mode: sendMode,
       includeContext,
-      chatId,
+      // Navigation updates the ref synchronously; React state can still point
+      // at the previous conversation until the next render.
+      chatId: chatIdRef.current,
       autoApprove,
       model: sendModel,
       interaction: effectiveInteraction,
@@ -3189,6 +3631,11 @@ export function App() {
     const menuOpen = openChatMenuId === c.id;
     const deletePending = pendingDeleteChatId === c.id;
     const isSelected = selectedChatIds.has(c.id);
+    const activity = threadActivity(
+      chatAttention.has(c.id),
+      unreadChatIds.has(c.id),
+      Boolean(c.running),
+    );
     const meta = `${c.message_count || 0} msgs${
       c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""
     }`;
@@ -3228,9 +3675,12 @@ export function App() {
           >
             <div className="chat-title" title={title}>
               {isSelected ? <span className="chat-selected-check" aria-hidden="true">✓</span> : null}
-              {chatAttention.has(c.id) && (
-                <span className="chat-attention-dot" title="Needs your attention" />
-              )}
+              {activity ? (
+                <span
+                  className={`chat-activity-dot ${activity}`}
+                  title={threadActivityLabel(activity)}
+                />
+              ) : null}
               {title}
             </div>
             <div className="muted tiny">{meta}</div>
@@ -3567,7 +4017,7 @@ export function App() {
                 aria-selected={panel === p}
                 className={panel === p ? "tab active" : "tab"}
                 onClick={() => {
-                  setPanel(p);
+                  showPanel(p);
                   if (p === "chat" && chatIdRef.current) {
                     setOpenConversationTabs((previous) =>
                       upsertConversationTab(previous, chatIdRef.current!, chats),
@@ -3588,71 +4038,113 @@ export function App() {
             ))}
           </div>
           {openConversationTabs.length ? (
-            <>
+            <div
+              className="threads-popover-root"
+              onMouseEnter={() => setThreadsPopoverOpen(true)}
+              onMouseLeave={() => {
+                if (!threadsPopoverPinned) setThreadsPopoverOpen(false);
+              }}
+              onFocus={() => setThreadsPopoverOpen(true)}
+              onBlur={(event) => {
+                if (
+                  !threadsPopoverPinned &&
+                  !event.currentTarget.contains(event.relatedTarget as Node | null)
+                ) {
+                  setThreadsPopoverOpen(false);
+                }
+              }}
+            >
               <span className="tabs-divider" aria-hidden="true">|</span>
-              <div className="conversation-tabs" role="tablist" aria-label="Open conversations">
-                {openConversationTabs.map((tab) => (
-                  <div
-                    className={`conversation-tab${tab.id === chatId && panel === "chat" ? " active" : ""}`}
-                    key={tab.id}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setConversationTabMenu({
-                        chatId: tab.id,
-                        x: Math.max(8, Math.min(event.clientX, window.innerWidth - 172)),
-                        y: Math.max(8, Math.min(event.clientY, window.innerHeight - 118)),
-                      });
-                    }}
-                  >
+              <button
+                type="button"
+                className={`threads-trigger${threadsPopoverPinned ? " active" : ""}`}
+                aria-haspopup="dialog"
+                aria-expanded={threadsPopoverOpen}
+                title="Open threads"
+                onClick={() => {
+                  if (threadsPopoverPinned) {
+                    setThreadsPopoverOpen(false);
+                    setThreadsPopoverPinned(false);
+                  } else {
+                    setThreadsPopoverOpen(true);
+                    setThreadsPopoverPinned(true);
+                  }
+                }}
+              >
+                Threads
+                <span className="threads-trigger-count">{openConversationTabs.length}</span>
+                {openThreadsActivity ? (
+                  <span
+                    className={`threads-trigger-dot ${openThreadsActivity}`}
+                    aria-label={threadActivityLabel(openThreadsActivity)}
+                  />
+                ) : null}
+              </button>
+              {threadsPopoverOpen ? (
+                <div className="threads-popover" role="dialog" aria-label="Open threads">
+                  <div className="threads-popover-header">
+                    <strong>Open threads</strong>
                     <button
                       type="button"
-                      role="tab"
-                      aria-selected={tab.id === chatId && panel === "chat"}
-                      aria-label={tab.title}
-                      className="conversation-tab-main"
-                      title={tab.title}
-                      onClick={() => selectConversationTab(tab)}
+                      className="threads-close-all"
+                      onClick={closeAllConversationTabs}
                     >
-                      {tab.pinned ? <span className="conversation-tab-pin" aria-label="Pinned">●</span> : null}
-                      <span className="conversation-tab-title">{tab.title}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="conversation-tab-close"
-                      title={`Close ${tab.title}`}
-                      aria-label={`Close ${tab.title}`}
-                      onClick={() => closeConversationTab(tab.id)}
-                    >
-                      ×
+                      Close all
                     </button>
                   </div>
-                ))}
-              </div>
-            </>
+                  <div className="threads-list" role="list">
+                    {orderedOpenConversationTabs.map((tab) => {
+                      const active = tab.id === chatId && panel === "chat";
+                      const activity = threadActivity(
+                        chatAttention.has(tab.id),
+                        unreadChatIds.has(tab.id),
+                        Boolean(tab.running),
+                      );
+                      return (
+                        <div
+                          className={`threads-row${active ? " active" : ""}`}
+                          key={tab.id}
+                          role="listitem"
+                        >
+                          <button
+                            type="button"
+                            className="threads-row-main"
+                            title={tab.title}
+                            onClick={() => selectConversationTab(tab)}
+                          >
+                            <span
+                              className={`threads-row-status${activity ? ` ${activity}` : ""}`}
+                              aria-label={threadActivityLabel(activity)}
+                            />
+                            <span className="threads-row-title">{tab.title}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`threads-row-action${tab.pinned ? " pinned" : ""}`}
+                            title={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
+                            aria-label={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
+                            onClick={() => toggleConversationTabPin(tab)}
+                          >
+                            <IconPin size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="threads-row-action threads-row-close"
+                            title={`Close ${tab.title}`}
+                            aria-label={`Close ${tab.title}`}
+                            onClick={() => closeConversationTab(tab.id)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </nav>
-        {conversationTabMenu ? (() => {
-          const tab = openConversationTabs.find((candidate) => candidate.id === conversationTabMenu.chatId);
-          if (!tab) return null;
-          return (
-            <div
-              className="conversation-tab-menu"
-              role="menu"
-              aria-label={`${tab.title} tab options`}
-              style={{ left: conversationTabMenu.x, top: conversationTabMenu.y }}
-            >
-              <button type="button" role="menuitem" onClick={() => toggleConversationTabPin(tab)}>
-                {tab.pinned ? "Unpin thread" : "Pin thread"}
-              </button>
-              <button type="button" role="menuitem" onClick={() => closeConversationTab(tab.id)}>
-                Close
-              </button>
-              <button type="button" role="menuitem" onClick={closeAllConversationTabs}>
-                Close all
-              </button>
-            </div>
-          );
-        })() : null}
         {panel === "chat" && (
           <PinnedContext
             text={pinnedText}
@@ -3714,7 +4206,7 @@ export function App() {
               type="button"
               className="linkish"
               onClick={() => {
-                setPanel("settings");
+                showPanel("settings");
                 post({ type: "load_settings" });
               }}
             >
@@ -5660,7 +6152,7 @@ export function App() {
                             text: q,
                             mode,
                             includeContext,
-                            chatId,
+                            chatId: chatIdRef.current,
                             autoApprove,
                             model: activeModelId || undefined,
                             interaction: effectiveInteraction,
@@ -5696,10 +6188,15 @@ export function App() {
             )}
             {items.slice(Math.max(0, items.length - renderWindow)).map((item, i, arr) => {
               const absoluteIndex = items.length - arr.length + i;
+              const terminalText = item.kind === "status" || item.kind === "error" ? item.text : undefined;
+              const changedFiles = isTurnTerminal(item.kind, terminalText)
+                ? collectTurnChangedFiles(items, absoluteIndex)
+                : undefined;
               return (
                 <TranscriptItem
                   key={absoluteIndex}
                   item={item}
+                  changedFiles={changedFiles}
                   setItems={setItems}
                   onAskDraftChange={handleAskDraftChange}
                   onPlanFeedbackChange={handlePlanFeedbackChange}
@@ -6034,6 +6531,15 @@ export function App() {
               <button
                 type="button"
                 className="ghost tiny"
+                disabled={busy || !chatId || Boolean(sideChat)}
+                title="Fork this conversation into a temporary side chat"
+                onClick={() => post({ type: "open_side_chat", chatId })}
+              >
+                <IconFork size={12} /> Side chat
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
                 disabled={busy}
                 title="Start a new chat"
                 onClick={() => {
@@ -6208,7 +6714,7 @@ export function App() {
                       post({ type: "dictation_toggle", target: "composer" });
                     } else if (e.key === "Escape" && busy) {
                       e.preventDefault();
-                      post({ type: "cancel" });
+                      post({ type: "cancel", chatId: chatIdRef.current });
                     }
                   }}
                 />
@@ -6251,7 +6757,7 @@ export function App() {
                           const value = draft.trim();
                           if (!value) return;
                           clearDraft();
-                          post({ type: "interject", text: value });
+                          post({ type: "interject", text: value, chatId: chatIdRef.current });
                         }}
                       >
                         <IconRedirect />
@@ -6261,7 +6767,7 @@ export function App() {
                         className="icon-btn danger"
                         title="Stop generation (Esc)"
                         aria-label="Stop generation"
-                        onClick={() => post({ type: "cancel" })}
+                        onClick={() => post({ type: "cancel", chatId: chatIdRef.current })}
                       >
                         <IconStop />
                       </button>
@@ -6420,6 +6926,38 @@ export function App() {
           ) : null}
         </>
       )}
+      {sideChat ? (
+        <SideChatOverlay
+          sideChat={sideChat}
+          hasApiKey={hasApiKey}
+          setItems={(update) => setSideChat((current) => {
+            if (!current) return current;
+            const items = typeof update === "function" ? update(current.items) : update;
+            return { ...current, items };
+          })}
+          onSend={(text) => {
+            post({
+              type: "send",
+              text,
+              mode: sideChat.mode,
+              includeContext: false,
+              chatId: sideChat.chatId,
+              autoApprove,
+              model: activeModelId || undefined,
+              interaction: effectiveInteraction,
+              caveman,
+              goal: goalMode,
+            });
+          }}
+          onMinimize={() => setSideChat((current) => current ? { ...current, minimized: !current.minimized } : null)}
+          onPeekYChange={(peekY) => setSideChat((current) => current ? { ...current, peekY } : null)}
+          onClose={() => {
+            post({ type: "close_side_chat", chatId: sideChat.chatId });
+            sideChatRef.current = null;
+            setSideChat(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -6433,6 +6971,22 @@ function IconComment() {
         strokeWidth="2"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+/** Lucide's MessageCirclePlus glyph, kept inline to avoid another runtime dependency. */
+function IconMessageCirclePlus({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M8 12h8M12 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

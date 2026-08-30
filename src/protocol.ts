@@ -32,6 +32,8 @@ export type ChatSummary = {
   session_prompt_tokens?: number;
   session_completion_tokens?: number;
   session_total_tokens?: number;
+  /** Ephemeral extension-host state; never persisted by the sidecar. */
+  running?: boolean;
 };
 
 export type HostToWebview =
@@ -166,6 +168,8 @@ export type HostToWebview =
       interaction?: InteractionStyle;
       caveman?: boolean;
       goal?: boolean;
+      /** Whether this conversation currently owns an active stream. */
+      busy?: boolean;
       sessionCostUsd?: number;
       /** Absolute offset of first restored event in the UI log. */
       eventsOffset?: number;
@@ -180,6 +184,15 @@ export type HostToWebview =
       eventsHasMore: boolean;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
+  /** A temporary fork rendered in the webview's side-chat overlay. */
+  | {
+      type: "side_chat_open";
+      chatId: string;
+      title?: string;
+      items: unknown[];
+      mode: AgentMode;
+    }
+  | { type: "thread_run_state"; chatId: string; running: boolean }
   | {
       type: "settings";
       settings: Record<string, unknown>;
@@ -334,7 +347,7 @@ export type WebviewToHost =
       caveman?: boolean;
       goal?: boolean;
     }
-  | { type: "cancel" }
+  | { type: "cancel"; chatId?: string }
   | {
       type: "permission";
       requestId: string;
@@ -351,6 +364,8 @@ export type WebviewToHost =
   | { type: "new_chat" }
   | { type: "deselect_chat" }
   | { type: "fork_chat"; chatId?: string }
+  | { type: "open_side_chat"; chatId?: string }
+  | { type: "close_side_chat"; chatId: string }
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
@@ -388,7 +403,7 @@ export type WebviewToHost =
   | { type: "reject_hunk"; hunkId: string }
   | { type: "list_rewind"; open?: boolean }
   | { type: "rewind_to"; promptIndex: number }
-  | { type: "interject"; text: string }
+  | { type: "interject"; text: string; chatId?: string }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
   | { type: "save_settings"; revision: number; settings: Record<string, unknown> }
@@ -442,7 +457,7 @@ export type WebviewToHost =
       /** @deprecated host ignores transcript items */
       items?: unknown[];
     }
-  | { type: "queue_send"; text: string }
+  | { type: "queue_send"; text: string; chatId?: string }
   | { type: "bug_report_capture_screenshot" }
   | {
       type: "bug_report_submit";
@@ -463,7 +478,7 @@ export type WebviewToHost =
   | { type: "save_pinned"; text: string };
 
 const NO_PAYLOAD_MESSAGES = new Set([
-  "ready", "cancel", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
+  "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
   "load_stats", "bug_report_capture_screenshot", "load_older_chat",
@@ -511,6 +526,10 @@ function opaqueId(value: unknown): value is string {
   return typeof value === "string" && OPAQUE_ID.test(value) && !value.includes("..");
 }
 
+function optionalOpaqueId(value: unknown): boolean {
+  return value === undefined || opaqueId(value);
+}
+
 function opaqueIds(value: unknown): value is string[] {
   return Array.isArray(value)
     && value.length > 0
@@ -535,14 +554,19 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
   switch (type) {
     case "send":
       return text(value.text) && AGENT_MODES.has(String(value.mode))
-        && typeof value.includeContext === "boolean" && optionalText(value.chatId, 128)
+        && typeof value.includeContext === "boolean" && optionalOpaqueId(value.chatId)
         && autoApprove(value.autoApprove) && optionalText(value.model, 256)
         && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
         && (value.caveman === undefined || typeof value.caveman === "boolean")
         && (value.goal === undefined || typeof value.goal === "boolean")
         ? value as WebviewToHost : undefined;
     case "queue_send":
-      return text(value.text) ? value as WebviewToHost : undefined;
+      return text(value.text) && optionalOpaqueId(value.chatId)
+        ? value as WebviewToHost : undefined;
+    case "cancel":
+      return optionalOpaqueId(value.chatId)
+        ? value as WebviewToHost
+        : undefined;
     case "bug_report_submit":
       return text(value.text, 100_000)
         && Array.isArray(value.screenshots)
@@ -604,8 +628,11 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost
         : undefined;
     case "fork_chat":
+    case "open_side_chat":
       return (value.chatId === undefined || opaqueId(value.chatId))
         ? value as WebviewToHost : undefined;
+    case "close_side_chat":
+      return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
     case "search_chats":
       return text(value.query, 10_000) ? value as WebviewToHost : undefined;
     case "set_mode":
@@ -656,7 +683,7 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return typeof value.promptIndex === "number" && Number.isFinite(value.promptIndex) && value.promptIndex >= 0
         ? value as WebviewToHost : undefined;
     case "interject":
-      return text(value.text) && optionalText(value.chatId, 128)
+      return text(value.text) && optionalOpaqueId(value.chatId)
         ? value as WebviewToHost : undefined;
     case "job_output": case "stop_job": case "report_job":
       return opaqueId(value.jobId) ? value as WebviewToHost : undefined;

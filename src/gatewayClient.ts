@@ -757,16 +757,27 @@ export class GatewayClient {
     );
   }
 
-  async cancel(): Promise<{ ok: boolean; stranded_prompts?: string[] }> {
+  async cancel(chatId?: string): Promise<{
+    ok: boolean;
+    chat_id?: string;
+    cancelled_runs?: number;
+    stranded_prompts?: string[];
+  }> {
     const handle = this.getHandle();
     if (!handle) {
       return { ok: false };
     }
     try {
-      return await requestJson<{ ok: boolean; stranded_prompts?: string[] }>(
+      return await requestJson<{
+        ok: boolean;
+        chat_id?: string;
+        cancelled_runs?: number;
+        stranded_prompts?: string[];
+      }>(
         handle,
         "POST",
         "/cancel",
+        chatId ? { chat_id: chatId } : {},
       );
     } catch {
       return { ok: false };
