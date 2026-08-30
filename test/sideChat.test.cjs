@@ -34,6 +34,20 @@ test("side chat routes its events locally and deletes its fork when closed", () 
   assert.match(app, /case "thread_run_state": return \{ \.\.\.current, busy: msg\.running \}/);
 });
 
+test("host releases the side-chat slot before async close cleanup", () => {
+  const closeCase = provider.slice(
+    provider.indexOf('case "close_side_chat":'),
+    provider.indexOf('case "select_chat":'),
+  );
+  const clearIdx = closeCase.indexOf("this.sideChatId = undefined");
+  const cancelIdx = closeCase.indexOf("this.cancelTask");
+  const deleteIdx = closeCase.indexOf("this.gateway.deleteChat");
+  assert.ok(clearIdx >= 0, "close_side_chat must clear sideChatId");
+  assert.ok(clearIdx < cancelIdx, "sideChatId must be cleared before cancelTask");
+  assert.ok(clearIdx < deleteIdx, "sideChatId must be cleared before deleteChat");
+  assert.doesNotMatch(closeCase, /finally \{/);
+});
+
 test("host coalesces repeated side-chat opens", () => {
   assert.match(provider, /private sideChatOpening = false/);
   assert.match(provider, /if \(this\.sideChatOpening \|\| this\.sideChatId\)/);

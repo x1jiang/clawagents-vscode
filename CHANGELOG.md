@@ -1,14 +1,15 @@
-## 1.0.173
-
-- **Skill workshop keeps a permanent reject log.** Apply / reject / quarantine / rollback append to `.clawagents/skill-workshop/skill-impact.md` (reason + `SKILL.md` diff). Undo does not erase that file. Requires **clawagents 6.20.68** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
-
-## Unreleased
+## 1.0.174
 
 - **Independent concurrent conversations.** Each chat now owns its own run slot and queue, so work can continue in multiple threads at once. Cancellation applies only to the selected conversation, while workspace-mutating turns remain serialised to prevent concurrent edits from colliding.
 - **Thread switching preserves live work.** A running thread retains its busy state while you navigate away; returning replays its complete unfinished turn over the persisted transcript. Sends, late events, and final responses remain bound to the conversation that started them.
 - **Forked side chat.** Open a temporary side-chat overlay without replacing the main conversation. Its events stay isolated, and closing it removes only the forked conversation.
+- **Re-opening a side chat after close no longer races the host.** The overlay slot is released before cancel/delete, so “A side chat is already open” cannot block a new overlay while cleanup is still in flight.
 - **Open files directly from chat.** Unambiguous inline file paths and line references in assistant replies are clickable. Workspace-relative paths, line suffixes, and unique filename fallbacks open the source file; directories reveal in Explorer.
 - **End-of-turn edited-files summary.** Completed, cancelled, and failed turns now show a deduplicated **Edited N files** card. Each file opens directly in VS Code; existing per-file Diff and Restore controls remain available.
+
+## 1.0.173
+
+- **Skill workshop keeps a permanent reject log.** Apply / reject / quarantine / rollback append to `.clawagents/skill-workshop/skill-impact.md` (reason + `SKILL.md` diff). Undo does not erase that file. Requires **clawagents 6.20.68** — **Install/Upgrade Python Dependencies** or **Restart Sidecar**.
 
 ## 1.0.172
 
