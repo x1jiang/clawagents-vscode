@@ -75,7 +75,10 @@ test("stale interactive prompts badge the owner instead of disappearing", () => 
   assert.match(app, /next\.set\(id, reason\)/);
   const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
   assert.match(runTask, /this\.pendingInteractions\.set\(runChatId, buf\)/);
-  assert.match(runTask, /if \(runChatId !== this\.chatId\)/);
+  assert.match(
+    runTask,
+    /if \(runChatId !== this\.chatId && runChatId !== this\.sideChatId\)/,
+  );
   assert.doesNotMatch(
     runTask,
     /isInteractive && runChatId && runChatId !== this\.chatId/,

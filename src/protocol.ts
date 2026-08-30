@@ -180,6 +180,14 @@ export type HostToWebview =
       eventsHasMore: boolean;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
+  /** A temporary fork rendered in the webview's side-chat overlay. */
+  | {
+      type: "side_chat_open";
+      chatId: string;
+      title?: string;
+      items: unknown[];
+      mode: AgentMode;
+    }
   | {
       type: "settings";
       settings: Record<string, unknown>;
@@ -351,6 +359,8 @@ export type WebviewToHost =
   | { type: "new_chat" }
   | { type: "deselect_chat" }
   | { type: "fork_chat"; chatId?: string }
+  | { type: "open_side_chat"; chatId?: string }
+  | { type: "close_side_chat"; chatId: string }
   | { type: "select_chat"; chatId: string }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
@@ -604,8 +614,11 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost
         : undefined;
     case "fork_chat":
+    case "open_side_chat":
       return (value.chatId === undefined || opaqueId(value.chatId))
         ? value as WebviewToHost : undefined;
+    case "close_side_chat":
+      return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
     case "search_chats":
       return text(value.query, 10_000) ? value as WebviewToHost : undefined;
     case "set_mode":

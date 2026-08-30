@@ -710,6 +710,74 @@ summary {
   background: color-mix(in srgb, var(--input-bg) 28%, var(--bg));
 }
 
+/* A transient fork lives beside the main transcript, never in the history list. */
+.side-chat {
+  position: fixed;
+  z-index: 30;
+  right: 12px;
+  bottom: 12px;
+  width: min(420px, calc(100vw - 24px));
+  height: min(560px, calc(100vh - 90px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 35%, transparent);
+}
+
+.side-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent, #0d9488) 12%, var(--bg));
+}
+
+.side-chat-head > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
+.side-chat-head > div { display: flex; gap: 3px; }
+.side-chat-messages { flex: 1; overflow: auto; padding: 10px; }
+.side-chat-item { margin-bottom: 10px; font-size: 12px; overflow-wrap: anywhere; }
+.side-chat-item pre { margin: 3px 0 0; white-space: pre-wrap; font: inherit; }
+.side-chat-item p:first-child { margin-top: 0; }
+.side-chat-item p:last-child { margin-bottom: 0; }
+.side-chat-compose { display: flex; gap: 6px; align-items: flex-end; padding: 8px; border-top: 1px solid var(--border); }
+.side-chat-compose textarea { min-height: 44px; max-height: 120px; resize: vertical; }
+button.side-chat-peek {
+  position: fixed;
+  z-index: 30;
+  right: 0;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  background: var(--input-bg);
+  color: var(--accent);
+  cursor: grab;
+  box-shadow: -5px 5px 16px color-mix(in srgb, #000 28%, transparent);
+  transition: background-color 150ms ease, color 150ms ease;
+  touch-action: none;
+}
+
+button.side-chat-peek:hover,
+button.side-chat-peek:focus-visible {
+  background: color-mix(in srgb, var(--accent) 13%, var(--input-bg));
+  color: var(--fg);
+}
+
+button.side-chat-peek:active {
+  cursor: grabbing;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1176,66 +1244,150 @@ button.send:not(.icon-btn) {
   user-select: none;
 }
 
-.conversation-tabs {
+.threads-popover-root {
+  position: relative;
   display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  gap: 3px;
-  overflow-x: hidden;
-  overflow-y: hidden;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
-.conversation-tab {
+button.threads-trigger {
   display: flex;
-  flex: 1 1 140px;
   align-items: center;
-  width: auto;
-  min-width: 28px;
-  max-width: 150px;
+  gap: 5px;
   height: 26px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: color-mix(in srgb, var(--input-bg) 68%, transparent);
-  overflow: hidden;
-  container-type: inline-size;
+  color: var(--fg);
+  font-size: 11px;
 }
 
-.conversation-tab:hover {
-  background: var(--input-bg);
-}
-
-.conversation-tab.active {
+button.threads-trigger:hover,
+button.threads-trigger.active {
   border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
   background: color-mix(in srgb, var(--accent) 13%, var(--input-bg));
 }
 
-button.conversation-tab-main,
-button.conversation-tab-close {
-  height: 100%;
-  min-width: 0;
-  padding: 0;
+.threads-trigger-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--muted);
+  text-align: center;
+  line-height: 16px;
+}
+
+.threads-attention-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.threads-popover {
+  position: absolute;
+  z-index: 1000;
+  top: calc(100% + 5px);
+  right: 0;
+  width: min(320px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - 120px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--vscode-menu-background, var(--input-bg));
+  color: var(--vscode-menu-foreground, var(--fg));
+  box-shadow: 0 10px 30px rgb(0 0 0 / 42%);
+}
+
+.threads-popover::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  width: 100%;
+  height: 6px;
+}
+
+.threads-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 5px 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+button.threads-close-all {
   border: 0;
-  border-radius: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px 5px;
+  font-size: 11px;
+}
+
+.threads-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.threads-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 34px;
+  border-radius: 5px;
+  color: inherit;
+}
+
+.threads-row:hover,
+.threads-row.active {
+  background: var(--vscode-menu-selectionBackground, color-mix(in srgb, var(--accent) 16%, transparent));
+}
+
+button.threads-row-main,
+button.threads-row-action {
+  height: 100%;
+  border: 0;
   background: transparent;
   color: inherit;
 }
 
-button.conversation-tab-main {
+button.threads-row-main {
   display: flex;
-  flex: 1 1 auto;
   align-items: center;
-  gap: 5px;
-  padding-left: 8px;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 7px;
   text-align: left;
 }
 
-.conversation-tab-pin {
+.threads-row-status {
   flex: 0 0 auto;
-  color: var(--accent);
-  font-size: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
 }
 
-.conversation-tab-title {
+.threads-row.active .threads-row-status {
+  background: var(--accent);
+}
+
+.threads-row-status.attention {
+  background: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+}
+
+.threads-row-title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1243,65 +1395,35 @@ button.conversation-tab-main {
   font-size: 11px;
 }
 
-@container (max-width: 54px) {
-  button.conversation-tab-main {
-    padding-left: 4px;
-  }
-
-  .conversation-tab-title {
-    display: none;
-  }
-
-  .conversation-tab-pin {
-    margin: 0 auto;
-  }
-}
-
-button.conversation-tab-close {
-  flex: 0 0 24px;
-  font-size: 16px;
+button.threads-row-action {
+  flex: 0 0 27px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   color: var(--muted);
-  opacity: 0.55;
+  opacity: 0.3;
 }
 
-.conversation-tab:hover button.conversation-tab-close,
-button.conversation-tab-close:focus-visible {
+.threads-row:hover button.threads-row-action,
+button.threads-row-action:focus-visible,
+button.threads-row-action.pinned {
   opacity: 1;
 }
 
-button.conversation-tab-close:hover {
-  color: var(--fg);
+button.threads-row-action.pinned {
+  color: var(--accent);
+}
+
+button.threads-row-close {
+  font-size: 17px;
+}
+
+button.threads-close-all:hover,
+button.threads-close-all:focus-visible,
+button.threads-row-action:hover,
+button.threads-row-action:focus-visible {
   background: color-mix(in srgb, var(--fg) 10%, transparent);
-}
-
-.conversation-tab-menu {
-  position: fixed;
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  width: 164px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--vscode-menu-background, var(--input-bg));
-  color: var(--vscode-menu-foreground, var(--fg));
-  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
-}
-
-.conversation-tab-menu button {
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  padding: 6px 8px;
-  text-align: left;
-  font: inherit;
-}
-
-.conversation-tab-menu button:hover,
-.conversation-tab-menu button:focus-visible {
-  background: var(--vscode-menu-selectionBackground, color-mix(in srgb, var(--accent) 20%, transparent));
-  color: var(--vscode-menu-selectionForeground, var(--fg));
+  color: var(--fg);
 }
 
 .panel {

@@ -7,6 +7,7 @@ import {
   useState,
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
 import ReactMarkdown from "react-markdown";
@@ -177,10 +178,15 @@ type ConversationTab = {
   pinned: boolean;
 };
 
-type ConversationTabMenu = {
+type SideChat = {
   chatId: string;
-  x: number;
-  y: number;
+  title: string;
+  mode: AgentMode;
+  items: ChatItem[];
+  busy: boolean;
+  minimized: boolean;
+  /** Vertical position of the minimized side-chat launcher, in viewport pixels. */
+  peekY?: number;
 };
 
 function persistedConversationTabs(): ConversationTab[] {
@@ -904,6 +910,155 @@ const TranscriptItem = memo(function TranscriptItem({
 /** Cap DOM nodes for long transcripts; "Show more" expands the window. */
 const TRANSCRIPT_RENDER_CHUNK = 120;
 
+function SideChatOverlay({
+  sideChat,
+  hasApiKey,
+  setItems,
+  onSend,
+  onClose,
+  onMinimize,
+  onPeekYChange,
+}: {
+  sideChat: SideChat;
+  hasApiKey: boolean;
+  setItems: Dispatch<SetStateAction<ChatItem[]>>;
+  onSend: (text: string) => void;
+  onClose: () => void;
+  onMinimize: () => void;
+  onPeekYChange: (y: number) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const sideChatBottomRef = useRef<HTMLDivElement>(null);
+  const peekDragRef = useRef<{
+    pointerId: number;
+    startPointerY: number;
+    startTop: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressPeekClickRef = useRef(false);
+
+  const beginPeekDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    peekDragRef.current = {
+      pointerId: event.pointerId,
+      startPointerY: event.clientY,
+      startTop: event.currentTarget.getBoundingClientRect().top,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const movePeekDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = peekDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientY - drag.startPointerY;
+    if (Math.abs(delta) > 3) drag.moved = true;
+    const maxTop = Math.max(8, window.innerHeight - 44);
+    onPeekYChange(Math.max(8, Math.min(maxTop, drag.startTop + delta)));
+  };
+
+  const endPeekDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = peekDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    suppressPeekClickRef.current = drag.moved;
+    peekDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  useEffect(() => {
+    if (sideChat.minimized) return;
+    const frame = window.requestAnimationFrame(() => {
+      sideChatBottomRef.current?.scrollIntoView({ block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [sideChat.chatId, sideChat.items.length, sideChat.minimized]);
+
+  if (sideChat.minimized) {
+    return (
+      <button
+        type="button"
+        className="side-chat-peek"
+        style={sideChat.peekY == null ? undefined : { top: sideChat.peekY, bottom: "auto" }}
+        onPointerDown={beginPeekDrag}
+        onPointerMove={movePeekDrag}
+        onPointerUp={endPeekDrag}
+        onPointerCancel={endPeekDrag}
+        onClick={() => {
+          if (suppressPeekClickRef.current) {
+            suppressPeekClickRef.current = false;
+            return;
+          }
+          onMinimize();
+        }}
+        title="Drag vertically · click to expand side chat"
+        aria-label="Expand side chat"
+      >
+        <IconFork size={15} />
+      </button>
+    );
+  }
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || sideChat.busy || !hasApiKey) return;
+    setDraft("");
+    onSend(text);
+  };
+  return (
+    <aside className="side-chat" aria-label="Temporary side chat">
+      <header className="side-chat-head">
+        <span title={sideChat.title}><IconFork size={14} /> Side chat</span>
+        <div>
+          <button type="button" className="ghost tiny" onClick={onMinimize} title="Minimize side chat">—</button>
+          <button type="button" className="ghost tiny" onClick={onClose} title="Close and delete side chat">✕</button>
+        </div>
+      </header>
+      <div className="side-chat-messages">
+        {sideChat.items.map((item, index) => (
+          <TranscriptItem
+            key={index}
+            item={item}
+            setItems={setItems}
+            onAskDraftChange={(requestId, value) => setItems((current) =>
+              current.map((candidate) => candidate.kind === "ask" && candidate.requestId === requestId
+                ? { ...candidate, draft: value }
+                : candidate))}
+            onPlanFeedbackChange={(requestId, value) => setItems((current) =>
+              current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
+                ? { ...candidate, feedbackDraft: value }
+                : candidate))}
+            onPlanFeedbackToggle={(requestId, open) => setItems((current) =>
+              current.map((candidate) => candidate.kind === "plan_approval" && candidate.requestId === requestId
+                ? { ...candidate, feedbackOpen: open }
+                : candidate))}
+            showStreamingCursor={sideChat.busy && index === sideChat.items.length - 1 && item.kind === "assistant"}
+          />
+        ))}
+        <div ref={sideChatBottomRef} />
+      </div>
+      <div className="side-chat-compose">
+        <textarea
+          rows={2}
+          value={draft}
+          disabled={sideChat.busy || !hasApiKey}
+          placeholder={hasApiKey ? "Ask the fork…" : "Add a provider API key first"}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              submit();
+            }
+          }}
+        />
+        <button type="button" className="primary tiny" disabled={!draft.trim() || sideChat.busy || !hasApiKey} onClick={submit}>
+          {sideChat.busy ? "Working…" : "Send"}
+        </button>
+      </div>
+    </aside>
+  );
+}
+
 export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
   /** How many trailing items to mount (virtualization window). */
@@ -956,6 +1111,8 @@ export function App() {
   /** Owner stashed by beginDraftHandoff so a failed fork/new/select can resume persist. */
   const draftOwnerBeforeNavRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [sideChat, setSideChat] = useState<SideChat | null>(null);
+  const sideChatRef = useRef<SideChat | null>(null);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
   const [openChatMenuId, setOpenChatMenuId] = useState<string | undefined>();
@@ -970,8 +1127,8 @@ export function App() {
   const [openConversationTabs, setOpenConversationTabs] = useState<ConversationTab[]>(
     persistedConversationTabs,
   );
-  const [conversationTabMenu, setConversationTabMenu] =
-    useState<ConversationTabMenu | null>(null);
+  const [threadsPopoverOpen, setThreadsPopoverOpen] = useState(false);
+  const [threadsPopoverPinned, setThreadsPopoverPinned] = useState(false);
   const [panel, setPanel] = useState<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
   const pendingForkRef = useRef(false);
@@ -1275,6 +1432,10 @@ export function App() {
   }, [chatId]);
 
   useEffect(() => {
+    sideChatRef.current = sideChat;
+  }, [sideChat]);
+
+  useEffect(() => {
     const api = getVsCodeApi();
     const previous = api.getState();
     api.setState({
@@ -1284,15 +1445,25 @@ export function App() {
   }, [openConversationTabs]);
 
   useEffect(() => {
-    if (!conversationTabMenu) return;
+    if (!forkNotice) return;
+    const timer = window.setTimeout(() => setForkNotice(null), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [forkNotice]);
+
+  useEffect(() => {
+    if (!threadsPopoverOpen) return;
     const dismiss = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (!target?.closest(".conversation-tab-menu")) {
-        setConversationTabMenu(null);
+      if (!target?.closest(".threads-popover-root")) {
+        setThreadsPopoverOpen(false);
+        setThreadsPopoverPinned(false);
       }
     };
     const dismissWithEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setConversationTabMenu(null);
+      if (event.key === "Escape") {
+        setThreadsPopoverOpen(false);
+        setThreadsPopoverPinned(false);
+      }
     };
     window.addEventListener("pointerdown", dismiss);
     window.addEventListener("keydown", dismissWithEscape);
@@ -1300,7 +1471,7 @@ export function App() {
       window.removeEventListener("pointerdown", dismiss);
       window.removeEventListener("keydown", dismissWithEscape);
     };
-  }, [conversationTabMenu]);
+  }, [threadsPopoverOpen]);
 
   useEffect(() => {
     // Returns true when an incoming streaming event belongs to a different
@@ -1312,11 +1483,69 @@ export function App() {
       return Boolean(id && chatIdRef.current && id !== chatIdRef.current);
     };
 
+    const applySideChatEvent = (msg: HostToWebview): boolean => {
+      const owner = (msg as { chatId?: string }).chatId;
+      if (!owner || sideChatRef.current?.chatId !== owner) return false;
+      setSideChat((current) => {
+        if (!current || current.chatId !== owner) return current;
+        const append = (item: ChatItem) => ({ ...current, items: [...current.items, item] });
+        switch (msg.type) {
+          case "user_echo": return { ...append({ kind: "user", text: msg.text }), busy: true };
+          case "status": {
+            const items = [...current.items];
+            const last = items[items.length - 1];
+            if (last?.kind === "status") items[items.length - 1] = { kind: "status", text: msg.message };
+            else items.push({ kind: "status", text: msg.message });
+            return { ...current, items };
+          }
+          case "assistant_delta": {
+            const items = [...current.items];
+            const last = items[items.length - 1];
+            if (last?.kind === "assistant") items[items.length - 1] = { kind: "assistant", text: last.text + msg.delta };
+            else items.push({ kind: "assistant", text: msg.delta });
+            return { ...current, items };
+          }
+          case "assistant_message": {
+            if (!msg.text.trim()) return current;
+            const items = [...current.items];
+            const last = items[items.length - 1];
+            if (last?.kind === "assistant") items[items.length - 1] = { kind: "assistant", text: msg.text };
+            else items.push({ kind: "assistant", text: msg.text });
+            return { ...current, items };
+          }
+          case "tool_started": return append({ kind: "tool", id: msg.id, name: msg.name, status: "running" });
+          case "tool_completed": {
+            let matched = false;
+            const items = current.items.map((item) => {
+              if (item.kind === "tool" && item.id === msg.id) {
+                matched = true;
+                return { ...item, status: "done" as const, success: msg.success, output: msg.output };
+              }
+              return item;
+            });
+            if (!matched) items.push({ kind: "tool", id: msg.id || msg.name, name: msg.name, status: "done", success: msg.success, output: msg.output });
+            return { ...current, items };
+          }
+          case "permission_required": return append({ kind: "permission", requestId: msg.requestId, tool: msg.tool, filePath: msg.filePath, command: msg.command, reason: msg.reason });
+          case "ask_user_required": return append({ kind: "ask", requestId: msg.requestId, question: msg.question });
+          case "plan_approval_required": return append({ kind: "plan_approval", requestId: msg.requestId, planText: msg.planText });
+          case "plan_approved": return { ...current, items: current.items.map((item) => item.kind === "plan_approval" && !item.resolved ? { ...item, resolved: "approve" as const } : item) };
+          case "file_changed": return append({ kind: "file", path: msg.path });
+          case "done": return { ...append({ kind: "status", text: `Done · ${msg.status}` }), busy: false };
+          case "error": return { ...append({ kind: "error", text: msg.message }), busy: false };
+          case "cancelled": return { ...append({ kind: "status", text: "Cancelled" }), busy: false };
+          default: return current;
+        }
+      });
+      return true;
+    };
+
     const onMessage = (event: MessageEvent<HostToWebview>) => {
       const msg = event.data;
       if (!msg || typeof msg !== "object" || !("type" in msg)) {
         return;
       }
+      if (applySideChatEvent(msg)) return;
       if (runScopedEventTypes.has(msg.type) && isStaleEvent(msg)) {
         if (INTERACTIVE_EVENT_TYPES.has(msg.type)) {
           const id = (msg as { chatId?: string }).chatId;
@@ -1335,6 +1564,22 @@ export function App() {
         return;
       }
       switch (msg.type) {
+        case "side_chat_open":
+          {
+            const nextSideChat: SideChat = {
+            chatId: msg.chatId,
+            title: msg.title || "Forked conversation",
+            mode: msg.mode,
+            items: (msg.items as ChatItem[]) || [],
+            busy: false,
+            minimized: false,
+            };
+            // A user can submit immediately after the overlay is painted;
+            // make the event owner visible before the state effect runs.
+            sideChatRef.current = nextSideChat;
+            setSideChat(nextSideChat);
+          }
+          break;
         case "ready":
           setWorkspace(msg.workspace);
           setModel(msg.model || "default");
@@ -1676,6 +1921,10 @@ export function App() {
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
           setItems((msg.items as ChatItem[]) || []);
+          // Selecting or forking into a conversation should reveal its newest
+          // turn immediately, even when the previously viewed chat was scrolled up.
+          stickToBottomRef.current = true;
+          window.requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: "end" }));
           setRenderWindow(TRANSCRIPT_RENDER_CHUNK);
           setEventsHasMore(Boolean(msg.eventsHasMore));
           setDraft(msg.draft || "");
@@ -2340,8 +2589,8 @@ export function App() {
   }, [historyQuery, panel]);
 
   const visibleChats = useMemo(
-    () => chats.filter((c) => !c.archived),
-    [chats],
+    () => chats.filter((c) => !c.archived && c.id !== sideChat?.chatId),
+    [chats, sideChat?.chatId],
   );
   const pinnedChats = useMemo(
     () => visibleChats.filter((c) => c.pinned),
@@ -2470,7 +2719,8 @@ export function App() {
   };
 
   const selectConversationTab = (tab: ConversationTab) => {
-    setConversationTabMenu(null);
+    setThreadsPopoverOpen(false);
+    setThreadsPopoverPinned(false);
     pendingNewChatRef.current = false;
     setPanel("chat");
     setOpenConversationTabs((previous) =>
@@ -2488,7 +2738,10 @@ export function App() {
     if (closingIndex < 0) return;
     const remaining = openConversationTabs.filter((tab) => tab.id !== closingId);
     setOpenConversationTabs(remaining);
-    setConversationTabMenu(null);
+    if (remaining.length === 0) {
+      setThreadsPopoverOpen(false);
+      setThreadsPopoverPinned(false);
+    }
     if (chatIdRef.current !== closingId) return;
     const replacement = remaining[Math.min(closingIndex, remaining.length - 1)];
     if (replacement) {
@@ -2514,7 +2767,8 @@ export function App() {
     draftOwnerRef.current = undefined;
     draftOwnerBeforeNavRef.current = undefined;
     setOpenConversationTabs([]);
-    setConversationTabMenu(null);
+    setThreadsPopoverOpen(false);
+    setThreadsPopoverPinned(false);
     chatIdRef.current = undefined;
     setChatId(undefined);
     setPanel("history");
@@ -2528,7 +2782,6 @@ export function App() {
         candidate.id === tab.id ? { ...candidate, pinned } : candidate,
       ),
     );
-    setConversationTabMenu(null);
     post({ type: "pin_chat", chatId: tab.id, pinned });
   };
 
@@ -3588,71 +3841,106 @@ export function App() {
             ))}
           </div>
           {openConversationTabs.length ? (
-            <>
+            <div
+              className="threads-popover-root"
+              onMouseEnter={() => setThreadsPopoverOpen(true)}
+              onMouseLeave={() => {
+                if (!threadsPopoverPinned) setThreadsPopoverOpen(false);
+              }}
+              onFocus={() => setThreadsPopoverOpen(true)}
+              onBlur={(event) => {
+                if (
+                  !threadsPopoverPinned &&
+                  !event.currentTarget.contains(event.relatedTarget as Node | null)
+                ) {
+                  setThreadsPopoverOpen(false);
+                }
+              }}
+            >
               <span className="tabs-divider" aria-hidden="true">|</span>
-              <div className="conversation-tabs" role="tablist" aria-label="Open conversations">
-                {openConversationTabs.map((tab) => (
-                  <div
-                    className={`conversation-tab${tab.id === chatId && panel === "chat" ? " active" : ""}`}
-                    key={tab.id}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setConversationTabMenu({
-                        chatId: tab.id,
-                        x: Math.max(8, Math.min(event.clientX, window.innerWidth - 172)),
-                        y: Math.max(8, Math.min(event.clientY, window.innerHeight - 118)),
-                      });
-                    }}
-                  >
+              <button
+                type="button"
+                className={`threads-trigger${threadsPopoverPinned ? " active" : ""}`}
+                aria-haspopup="dialog"
+                aria-expanded={threadsPopoverOpen}
+                title="Open threads"
+                onClick={() => {
+                  if (threadsPopoverPinned) {
+                    setThreadsPopoverOpen(false);
+                    setThreadsPopoverPinned(false);
+                  } else {
+                    setThreadsPopoverOpen(true);
+                    setThreadsPopoverPinned(true);
+                  }
+                }}
+              >
+                Threads
+                <span className="threads-trigger-count">{openConversationTabs.length}</span>
+                {openConversationTabs.some((tab) => chatAttention.has(tab.id))
+                  ? <span className="threads-attention-dot" aria-label="Thread needs attention" />
+                  : null}
+              </button>
+              {threadsPopoverOpen ? (
+                <div className="threads-popover" role="dialog" aria-label="Open threads">
+                  <div className="threads-popover-header">
+                    <strong>Open threads</strong>
                     <button
                       type="button"
-                      role="tab"
-                      aria-selected={tab.id === chatId && panel === "chat"}
-                      aria-label={tab.title}
-                      className="conversation-tab-main"
-                      title={tab.title}
-                      onClick={() => selectConversationTab(tab)}
+                      className="threads-close-all"
+                      onClick={closeAllConversationTabs}
                     >
-                      {tab.pinned ? <span className="conversation-tab-pin" aria-label="Pinned">●</span> : null}
-                      <span className="conversation-tab-title">{tab.title}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="conversation-tab-close"
-                      title={`Close ${tab.title}`}
-                      aria-label={`Close ${tab.title}`}
-                      onClick={() => closeConversationTab(tab.id)}
-                    >
-                      ×
+                      Close all
                     </button>
                   </div>
-                ))}
-              </div>
-            </>
+                  <div className="threads-list" role="list">
+                    {openConversationTabs.map((tab) => {
+                      const needsAttention = chatAttention.has(tab.id);
+                      const active = tab.id === chatId && panel === "chat";
+                      return (
+                        <div
+                          className={`threads-row${active ? " active" : ""}`}
+                          key={tab.id}
+                          role="listitem"
+                        >
+                          <button
+                            type="button"
+                            className="threads-row-main"
+                            title={tab.title}
+                            onClick={() => selectConversationTab(tab)}
+                          >
+                            <span
+                              className={`threads-row-status${needsAttention ? " attention" : ""}`}
+                              aria-label={needsAttention ? "Needs attention" : active ? "Current thread" : undefined}
+                            />
+                            <span className="threads-row-title">{tab.title}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={`threads-row-action${tab.pinned ? " pinned" : ""}`}
+                            title={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
+                            aria-label={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
+                            onClick={() => toggleConversationTabPin(tab)}
+                          >
+                            <IconPin size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="threads-row-action threads-row-close"
+                            title={`Close ${tab.title}`}
+                            aria-label={`Close ${tab.title}`}
+                            onClick={() => closeConversationTab(tab.id)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </nav>
-        {conversationTabMenu ? (() => {
-          const tab = openConversationTabs.find((candidate) => candidate.id === conversationTabMenu.chatId);
-          if (!tab) return null;
-          return (
-            <div
-              className="conversation-tab-menu"
-              role="menu"
-              aria-label={`${tab.title} tab options`}
-              style={{ left: conversationTabMenu.x, top: conversationTabMenu.y }}
-            >
-              <button type="button" role="menuitem" onClick={() => toggleConversationTabPin(tab)}>
-                {tab.pinned ? "Unpin thread" : "Pin thread"}
-              </button>
-              <button type="button" role="menuitem" onClick={() => closeConversationTab(tab.id)}>
-                Close
-              </button>
-              <button type="button" role="menuitem" onClick={closeAllConversationTabs}>
-                Close all
-              </button>
-            </div>
-          );
-        })() : null}
         {panel === "chat" && (
           <PinnedContext
             text={pinnedText}
@@ -6034,6 +6322,15 @@ export function App() {
               <button
                 type="button"
                 className="ghost tiny"
+                disabled={busy || !chatId || Boolean(sideChat)}
+                title="Fork this conversation into a temporary side chat"
+                onClick={() => post({ type: "open_side_chat", chatId })}
+              >
+                <IconFork size={12} /> Side chat
+              </button>
+              <button
+                type="button"
+                className="ghost tiny"
                 disabled={busy}
                 title="Start a new chat"
                 onClick={() => {
@@ -6420,6 +6717,38 @@ export function App() {
           ) : null}
         </>
       )}
+      {sideChat ? (
+        <SideChatOverlay
+          sideChat={sideChat}
+          hasApiKey={hasApiKey}
+          setItems={(update) => setSideChat((current) => {
+            if (!current) return current;
+            const items = typeof update === "function" ? update(current.items) : update;
+            return { ...current, items };
+          })}
+          onSend={(text) => {
+            post({
+              type: "send",
+              text,
+              mode: sideChat.mode,
+              includeContext: false,
+              chatId: sideChat.chatId,
+              autoApprove,
+              model: activeModelId || undefined,
+              interaction: effectiveInteraction,
+              caveman,
+              goal: goalMode,
+            });
+          }}
+          onMinimize={() => setSideChat((current) => current ? { ...current, minimized: !current.minimized } : null)}
+          onPeekYChange={(peekY) => setSideChat((current) => current ? { ...current, peekY } : null)}
+          onClose={() => {
+            post({ type: "close_side_chat", chatId: sideChat.chatId });
+            sideChatRef.current = null;
+            setSideChat(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

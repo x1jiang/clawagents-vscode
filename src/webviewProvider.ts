@@ -153,6 +153,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private abort?: AbortController;
   private chatId: string | undefined;
+  /** Temporary fork currently owned by the side-chat overlay. */
+  private sideChatId: string | undefined;
+  private sideChatOpening = false;
   /** Composer drafts are workspace-local because chat IDs are workspace-local. */
   private readonly drafts: Record<string, string> = Object.create(null) as Record<
     string,
@@ -1083,6 +1086,59 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "open_side_chat": {
+        const targetId = msg.chatId || this.chatId;
+        if (!targetId) {
+          this.post({ type: "error", message: "Start a conversation before opening a side chat." });
+          break;
+        }
+        if (this.abort) {
+          this.post({ type: "error", message: "Stop the current run before opening a side chat." });
+          break;
+        }
+        if (this.sideChatOpening || this.sideChatId) {
+          this.post({ type: "error", message: "A side chat is already open." });
+          break;
+        }
+        this.sideChatOpening = true;
+        try {
+          const res = await this.gateway.forkChat(targetId);
+          const chat = await this.gateway.getChat(res.chat_id, { tail: 400 });
+          const title =
+            (typeof res.chat?.title === "string" && res.chat.title) ||
+            (typeof chat.title === "string" ? chat.title : undefined);
+          this.post({
+            type: "side_chat_open",
+            chatId: res.chat_id,
+            title,
+            items: eventsToItems((chat.events as Array<Record<string, unknown>>) || []),
+            mode: (chat.mode as AgentMode) || this.mode,
+          });
+          this.sideChatId = res.chat_id;
+          await this.refreshChats();
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        } finally {
+          this.sideChatOpening = false;
+        }
+        break;
+      }
+      case "close_side_chat":
+        try {
+          if (this.activeRunChatId === msg.chatId) {
+            await this.cancelTask();
+          }
+          await this.gateway.deleteChat(msg.chatId);
+          this.pendingInteractions.delete(msg.chatId);
+          await this.refreshChats();
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        } finally {
+          if (this.sideChatId === msg.chatId) {
+            this.sideChatId = undefined;
+          }
+        }
+        break;
       case "select_chat":
         this.chatId = msg.chatId;
         await this.persistLocal(this.persistState());
@@ -2923,7 +2979,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 ev.type === "permission_required" ? "permission" as const
                 : ev.type === "ask_user_required" ? "ask" as const
                 : "plan_approval" as const;
-              if (runChatId !== this.chatId) {
+              if (runChatId !== this.chatId && runChatId !== this.sideChatId) {
                 this.post({ type: "chat_attention", chatId: runChatId, reason });
                 return;
               }
