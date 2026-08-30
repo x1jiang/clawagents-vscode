@@ -150,7 +150,7 @@ test("every run-scoped event, including the canonical final response, is stale-g
 test("stale interactive prompts badge the owner instead of disappearing", () => {
   assert.match(app, /const INTERACTIVE_EVENT_TYPES = new Set<HostToWebview\["type"\]>/);
   assert.match(app, /INTERACTIVE_EVENT_TYPES\.has\(msg\.type\)/);
-  assert.match(app, /next\.set\(id, reason\)/);
+  assert.match(app, /next\.set\(ownerChatId, reason\)/);
   const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
   assert.match(runTask, /this\.pendingInteractions\.set\(runChatId, buf\)/);
   assert.match(

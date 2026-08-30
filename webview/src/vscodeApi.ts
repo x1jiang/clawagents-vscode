@@ -65,18 +65,29 @@ function previewApi(): VsCodeApi {
             { kind: "assistant", text: "Yes — this fork stays in a temporary side panel." },
           ],
         });
-      } else if (message.type === "send" && message.chatId === "preview-side") {
-        emit({ type: "user_echo", text: message.text, chatId: "preview-side" });
+      } else if (message.type === "send") {
+        const chatId = message.chatId || "preview-main";
+        const isSideChat = chatId === "preview-side";
+        emit({ type: "thread_run_state", chatId, running: true });
+        emit({ type: "user_echo", text: message.text, chatId });
+        const delay = isSideChat ? 200 : 900;
         window.setTimeout(() => emit({
           type: "assistant_message",
-          text: "This is a browser-preview response from the forked thread.",
-          chatId: "preview-side",
-        }), 200);
+          text: isSideChat
+            ? "This is a browser-preview response from the forked thread."
+            : "This is a browser-preview response from the main conversation.",
+          chatId,
+        }), delay);
         window.setTimeout(() => emit({
           type: "done",
           status: "completed",
-          chatId: "preview-side",
-        }), 220);
+          chatId,
+        }), delay + 20);
+        window.setTimeout(() => emit({
+          type: "thread_run_state",
+          chatId,
+          running: false,
+        }), delay + 25);
       }
     },
     getState: () => state,

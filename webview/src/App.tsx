@@ -6531,8 +6531,10 @@ export function App() {
               <button
                 type="button"
                 className="ghost tiny"
-                disabled={busy || !chatId || Boolean(sideChat)}
-                title="Fork this conversation into a temporary side chat"
+                disabled={!chatId || Boolean(sideChat)}
+                title={busy
+                  ? "Fork the running conversation at its current saved point"
+                  : "Fork this conversation into a temporary side chat"}
                 onClick={() => post({ type: "open_side_chat", chatId })}
               >
                 <IconFork size={12} /> Side chat

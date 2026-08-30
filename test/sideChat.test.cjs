@@ -16,7 +16,9 @@ test("side chat forks without replacing the selected conversation", () => {
   assert.match(provider, /this\.gateway\.forkChat\(targetId\)/);
   const sideChatCase = provider.slice(provider.indexOf('case "open_side_chat":'), provider.indexOf('case "close_side_chat":'));
   assert.doesNotMatch(sideChatCase, /this\.chatId = res\.chat_id/);
+  assert.doesNotMatch(sideChatCase, /runs\.isActive\(targetId\)/);
   assert.match(app, /post\(\{ type: "open_side_chat", chatId \}\)/);
+  assert.match(app, /disabled=\{!chatId \|\| Boolean\(sideChat\)\}/);
 });
 
 test("side chat routes its events locally and deletes its fork when closed", () => {
@@ -39,7 +41,6 @@ test("host coalesces repeated side-chat opens", () => {
   assert.match(provider, /if \(this\.sideChatOpening \|\| this\.sideChatId\)/);
   assert.match(provider, /this\.sideChatOpening = true/);
   assert.match(provider, /finally \{\s*this\.sideChatOpening = false;/);
-  assert.match(provider, /this\.runs\.isActive\(targetId\)/);
   assert.doesNotMatch(provider, /this\.abort|activeRunChatId/);
 });
 

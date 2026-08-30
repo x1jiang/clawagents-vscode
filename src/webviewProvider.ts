@@ -1213,14 +1213,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           this.post({ type: "error", message: "Start a conversation before opening a side chat." });
           break;
         }
-        if (this.runs.isActive(targetId)) {
-          this.post({
-            type: "error",
-            message: "Stop the source conversation before forking it into a side chat.",
-            chatId: targetId,
-          });
-          break;
-        }
         if (this.sideChatOpening || this.sideChatId) {
           this.post({ type: "error", message: "A side chat is already open." });
           break;
