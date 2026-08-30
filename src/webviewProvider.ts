@@ -187,6 +187,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
    *  conversations that are not currently displayed. Keyed by chatId.
    *  Flushed to the webview when the user switches back to that chat. */
   private pendingInteractions: Map<string, HostToWebview[]> = new Map();
+  /** Ephemeral events for each active turn. Assistant deltas are coalesced so
+   *  switching away and back can reconstruct the unfinished response without
+   *  retaining one object per streamed token. */
+  private liveRunEvents: Map<string, HostToWebview[]> = new Map();
   /** Image attachments staged for the next send (base64 stays host-side). */
   private pendingImages: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   /** File attachments (PDF/DOCX) staged for the next send — same contract. */
@@ -481,6 +485,61 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       eventsTotal: Number(chat.events_total ?? events.length) || events.length,
       eventsHasMore: this.eventsHasMore,
     });
+  }
+
+  private rememberLiveRunEvent(chatId: string, event: HostToWebview): void {
+    const events = this.liveRunEvents.get(chatId);
+    if (!events) return;
+    // Blocking prompts have their own durable buffer and attention badge.
+    if (
+      event.type === "permission_required" ||
+      event.type === "ask_user_required" ||
+      event.type === "plan_approval_required"
+    ) {
+      return;
+    }
+    const last = events[events.length - 1];
+    if (last?.type === "assistant_delta" && event.type === "assistant_delta") {
+      events[events.length - 1] = { ...last, delta: last.delta + event.delta };
+      return;
+    }
+    events.push(event);
+  }
+
+  /** Replay the active turn after persisted history has replaced the webview.
+   *  User/final messages already present on disk are not emitted twice. */
+  private replayLiveRun(chatId: string, chat: Record<string, unknown>): void {
+    const buffered = this.liveRunEvents.get(chatId);
+    if (!buffered?.length) return;
+    const persisted = (chat.events as Array<Record<string, unknown>>) || [];
+
+    let lastPersistedUser: string | undefined;
+    let lastPersistedAssistant: string | undefined;
+    for (let index = persisted.length - 1; index >= 0; index -= 1) {
+      const event = persisted[index];
+      if (lastPersistedAssistant === undefined && event.kind === "assistant") {
+        lastPersistedAssistant = String(event.text || "");
+      }
+      if (lastPersistedUser === undefined && event.kind === "user") {
+        lastPersistedUser = String(event.text || "");
+      }
+      if (lastPersistedUser !== undefined && lastPersistedAssistant !== undefined) break;
+    }
+
+    // The canonical assistant message is appended to disk before it is emitted.
+    // If it is already present, the persisted restore is the complete answer.
+    for (let index = buffered.length - 1; index >= 0; index -= 1) {
+      const event = buffered[index];
+      if (event.type === "assistant_message") {
+        if (event.text === lastPersistedAssistant) return;
+        break;
+      }
+    }
+
+    for (const event of buffered) {
+      if (event.type === "user_echo" && event.text === lastPersistedUser) continue;
+      this.post(event);
+    }
   }
 
   private async loadOlderChatEvents(): Promise<void> {
@@ -1208,13 +1267,22 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.chatId = msg.chatId;
         await this.persistLocal(this.persistState());
         try {
-          const chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          const wasRunning = this.runs.isActive(msg.chatId);
+          let chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          // If the run completed while history was loading, fetch once more so
+          // the final assistant message wins over a now-expired live snapshot.
+          if (wasRunning && !this.runs.isActive(msg.chatId)) {
+            chat = await this.gateway.getChat(msg.chatId, { tail: 400 });
+          }
           // Selection requests can overlap. A slow response for an older click
           // must not replace the transcript chosen more recently.
           if (this.chatId !== msg.chatId) {
             break;
           }
           await this.postChatRestore(msg.chatId, chat);
+          if (this.runs.isActive(msg.chatId)) {
+            this.replayLiveRun(msg.chatId, chat);
+          }
           // Flush any buffered interactive events (permission / ask / plan
           // approval) that arrived while this chat was in the background.
           const pending = this.pendingInteractions.get(msg.chatId);
@@ -2963,8 +3031,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const signal = run.controller.signal;
+    const userEcho = {
+      type: "user_echo",
+      text: trimmed,
+      chatId: runChatId,
+    } as HostToWebview;
+    this.liveRunEvents.set(runChatId, [userEcho]);
     this.post({ type: "thread_run_state", chatId: runChatId, running: true });
-    this.post({ type: "user_echo", text: trimmed, chatId: runChatId });
+    this.post(userEcho);
 
     // Claim attachments synchronously with the run slot. Without this, two
     // conversations racing through getSettings() could attach the visible
@@ -3031,6 +3105,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             // Tag every event with the originating chatId so the webview
             // can route it to the correct conversation thread.
             const tagged = { ...ev, chatId: runChatId } as HostToWebview;
+            this.rememberLiveRunEvent(runChatId, tagged);
 
             // Interactive events that block the agent must not be silently
             // dropped when the user is viewing a different conversation.
@@ -3089,14 +3164,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       if (!signal.aborted) {
-        this.post({
+        const errorEvent = {
           type: "error",
           message: err instanceof Error ? err.message : String(err),
           chatId: runChatId,
-        });
+        } as HostToWebview;
+        this.rememberLiveRunEvent(runChatId, errorEvent);
+        this.post(errorEvent);
       }
     } finally {
       this.runs.finish(run);
+      this.liveRunEvents.delete(runChatId);
       this.post({ type: "thread_run_state", chatId: runChatId, running: false });
       // A job the turn detached is now unattended: the run's event stream is
       // closed, so polling is the only thing that will notice it finishing.

@@ -80,6 +80,23 @@ test("run state follows its conversation through navigation", () => {
   assert.match(app, /type: "cancel", chatId: chatIdRef\.current/);
 });
 
+test("switching back replays the complete unfinished turn over persisted history", () => {
+  assert.match(provider, /private liveRunEvents: Map<string, HostToWebview\[]>/);
+  const remember = section(provider, "private rememberLiveRunEvent", "/** Replay the active turn");
+  assert.match(remember, /last\.delta \+ event\.delta/);
+  const replay = section(provider, "private replayLiveRun", "async openChat");
+  assert.match(replay, /event\.type === "user_echo" && event\.text === lastPersistedUser/);
+  assert.match(replay, /event\.text === lastPersistedAssistant/);
+  assert.match(replay, /this\.post\(event\)/);
+  const selectChat = section(provider, 'case "select_chat":', 'case "load_older_chat":');
+  assert.match(selectChat, /if \(wasRunning && !this\.runs\.isActive\(msg\.chatId\)\)/);
+  assert.match(selectChat, /this\.replayLiveRun\(msg\.chatId, chat\)/);
+  const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
+  assert.match(runTask, /this\.liveRunEvents\.set\(runChatId, \[userEcho\]\)/);
+  assert.match(runTask, /this\.rememberLiveRunEvent\(runChatId, tagged\)/);
+  assert.match(runTask, /this\.liveRunEvents\.delete\(runChatId\)/);
+});
+
 test("an active stream uses its stable chat owner", () => {
   const runTask = section(provider, "private async runTask", "private drainQueueIfIdle");
   assert.match(runTask, /streamChat\(\s*task,\s*runChatId,/);
