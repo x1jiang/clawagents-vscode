@@ -1494,6 +1494,7 @@ export function App() {
         if (!current || current.chatId !== owner) return current;
         const append = (item: ChatItem) => ({ ...current, items: [...current.items, item] });
         switch (msg.type) {
+          case "thread_run_state": return { ...current, busy: msg.running };
           case "user_echo": return { ...append({ kind: "user", text: msg.text }), busy: true };
           case "status": {
             const items = [...current.items];

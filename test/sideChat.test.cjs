@@ -28,8 +28,10 @@ test("side chat routes its events locally and deletes its fork when closed", () 
   assert.match(provider, /runChatId !== this\.chatId && runChatId !== this\.sideChatId/);
   assert.match(app, /type: "close_side_chat", chatId: sideChat\.chatId/);
   assert.match(provider, /case "close_side_chat":/);
+  assert.match(provider, /this\.cancelTask\(msg\.chatId\)/);
   assert.match(provider, /await this\.gateway\.deleteChat\(msg\.chatId\)/);
   assert.match(app, /c\.id !== sideChat\?\.chatId/);
+  assert.match(app, /case "thread_run_state": return \{ \.\.\.current, busy: msg\.running \}/);
 });
 
 test("host coalesces repeated side-chat opens", () => {
@@ -37,6 +39,8 @@ test("host coalesces repeated side-chat opens", () => {
   assert.match(provider, /if \(this\.sideChatOpening \|\| this\.sideChatId\)/);
   assert.match(provider, /this\.sideChatOpening = true/);
   assert.match(provider, /finally \{\s*this\.sideChatOpening = false;/);
+  assert.match(provider, /this\.runs\.isActive\(targetId\)/);
+  assert.doesNotMatch(provider, /this\.abort|activeRunChatId/);
 });
 
 test("minimized side chat is a draggable compact launcher that expands on demand", () => {

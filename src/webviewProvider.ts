@@ -1153,8 +1153,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           this.post({ type: "error", message: "Start a conversation before opening a side chat." });
           break;
         }
-        if (this.abort) {
-          this.post({ type: "error", message: "Stop the current run before opening a side chat." });
+        if (this.runs.isActive(targetId)) {
+          this.post({
+            type: "error",
+            message: "Stop the source conversation before forking it into a side chat.",
+            chatId: targetId,
+          });
           break;
         }
         if (this.sideChatOpening || this.sideChatId) {
@@ -1186,8 +1190,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
       case "close_side_chat":
         try {
-          if (this.activeRunChatId === msg.chatId) {
-            await this.cancelTask();
+          if (this.runs.isActive(msg.chatId) || this.runs.isCancelling(msg.chatId)) {
+            await this.cancelTask(msg.chatId);
           }
           await this.gateway.deleteChat(msg.chatId);
           this.pendingInteractions.delete(msg.chatId);
