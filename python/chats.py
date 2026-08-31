@@ -35,6 +35,19 @@ OnEvent = Callable[[str, dict[str, Any]], None]
 # settings (without an explicit model) routes model+key resolution through
 # that profile instead of the ambient PROVIDER/env defaults.
 _PROFILE_PROVIDERS = frozenset({"openai", "gemini", "anthropic", "ollama", "bedrock"})
+_MODEL_ROUTE_KEYS = (
+    "provider",
+    "model",
+    "reasoning_effort",
+    "bedrock_mode",
+    "aws_region",
+    "aws_profile",
+    "wire_api",
+)
+_MODEL_ROUTE_PROVIDERS = frozenset(
+    {"auto", "openai", "anthropic", "gemini", "bedrock", "ollama", "xai"}
+)
+_REASONING_EFFORTS = frozenset({"", "none", "low", "medium", "high", "xhigh", "max"})
 
 
 class MantleKeyMissingError(RuntimeError):
@@ -122,12 +135,130 @@ def _title_from_text(text: str) -> str:
     return line or "New chat"
 
 
+def normalize_model_route(value: Any) -> dict[str, Any] | None:
+    """Validate a non-secret per-chat model route."""
+    if not isinstance(value, dict):
+        return None
+    provider = str(value.get("provider") or "auto").strip().lower()
+    if provider not in _MODEL_ROUTE_PROVIDERS and not re.fullmatch(
+        r"profile:[A-Za-z0-9._-]+", provider
+    ):
+        return None
+    model = str(value.get("model") or "").strip()[:256]
+    effort = str(value.get("reasoning_effort") or "").strip().lower()
+    if effort not in _REASONING_EFFORTS:
+        effort = ""
+    mode = str(value.get("bedrock_mode") or "").strip().lower()
+    if mode not in {"", "iam", "mantle", "bag"}:
+        mode = ""
+    route: dict[str, Any] = {
+        "provider": provider,
+        "model": model,
+        # Keep the empty value: it intentionally clears an OpenAI default
+        # effort when a thread switches to a provider that has no effort knob.
+        "reasoning_effort": effort,
+    }
+    if mode:
+        route["bedrock_mode"] = mode
+    for key, limit in (("aws_region", 128), ("aws_profile", 256), ("wire_api", 64)):
+        text = str(value.get(key) or "").strip()[:limit]
+        if text:
+            route[key] = text
+    return route
+
+
+def model_route_from_settings(
+    settings: dict[str, Any], *, model: str | None = None
+) -> dict[str, Any]:
+    source = {key: settings.get(key) for key in _MODEL_ROUTE_KEYS}
+    if model and model != "default":
+        source["model"] = model
+    return normalize_model_route(source) or {"provider": "auto", "model": ""}
+
+
+def _model_route_notice_label(route: dict[str, Any] | None) -> str:
+    """Human-readable model route for a durable transcript notice."""
+    clean = normalize_model_route(route) or {"provider": "auto", "model": ""}
+    provider = str(clean.get("provider") or "auto")
+    labels = {
+        "auto": "Auto",
+        "openai": "OpenAI",
+        "anthropic": "Anthropic",
+        "gemini": "Google Gemini",
+        "bedrock": "AWS Bedrock",
+        "ollama": "Ollama",
+        "xai": "xAI",
+    }
+    if provider == "bedrock":
+        mode = str(clean.get("bedrock_mode") or "").lower()
+        provider = {
+            "iam": "AWS Bedrock (IAM)",
+            "mantle": "AWS Bedrock Mantle",
+            "bag": "AWS Bedrock Gateway",
+        }.get(mode, "AWS Bedrock")
+    else:
+        provider = labels.get(provider, provider)
+    model = str(clean.get("model") or "default")
+    effort = str(clean.get("reasoning_effort") or "").lower()
+    effort_label = {
+        "low": "Light",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra High",
+        "none": "None",
+    }.get(effort, "")
+    return " · ".join(part for part in (provider, model, effort_label) if part)
+
+
+def _model_route_notice_changed(
+    previous: dict[str, Any] | None, current: dict[str, Any] | None
+) -> bool:
+    """Only announce choices users can see in the model capsule."""
+    before = normalize_model_route(previous) or {"provider": "auto", "model": ""}
+    after = normalize_model_route(current) or {"provider": "auto", "model": ""}
+    return any(
+        before.get(key, "") != after.get(key, "")
+        for key in ("provider", "model", "reasoning_effort", "bedrock_mode")
+    )
+
+
+def settings_with_model_route(
+    settings: dict[str, Any], route: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Overlay a chat route while preserving global endpoint and credentials."""
+    clean = normalize_model_route(route)
+    if not clean:
+        return dict(settings)
+    merged = dict(settings)
+    for key in _MODEL_ROUTE_KEYS:
+        if key in clean:
+            merged[key] = clean[key]
+    return merged
+
+
+def _migrate_model_route(meta: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Drop legacy per-chat transport fields without changing chat recency."""
+    route = normalize_model_route(meta.get("model_route"))
+    if not route:
+        route = model_route_from_settings(load_settings())
+    if meta.get("model_route") == route:
+        return meta
+    migrated = dict(meta)
+    migrated["model_route"] = route
+    try:
+        atomic_write_json(path, migrated)
+    except OSError:
+        pass
+    return migrated
+
+
 def list_chats() -> list[dict[str, Any]]:
     ensure_dirs()
     chats: list[dict[str, Any]] = []
     for path in CHATS_DIR.glob("*.json"):
         meta = read_json(path, None)
         if isinstance(meta, dict) and meta.get("id"):
+            meta = _migrate_model_route(meta, path)
             meta.setdefault("pinned", False)
             meta.setdefault("archived", False)
             chats.append(meta)
@@ -150,7 +281,8 @@ def get_chat(chat_id: str) -> dict[str, Any] | None:
     meta = read_json(path, None)
     if not isinstance(meta, dict):
         return None
-    return _ensure_session_cost(meta)
+    meta = _ensure_session_cost(meta)
+    return _migrate_model_route(meta, path)
 
 
 def _ensure_session_cost(meta: dict[str, Any]) -> dict[str, Any]:
@@ -161,7 +293,10 @@ def _ensure_session_cost(meta: dict[str, Any]) -> dict[str, Any]:
     if not chat_id:
         return meta
     settings = load_settings()
-    model_id = str(settings.get("model") or MODEL or "")
+    route = normalize_model_route(meta.get("model_route"))
+    effective_settings = settings_with_model_route(settings, route)
+    model_id = str(effective_settings.get("model") or MODEL or "")
+    provider_id = str(effective_settings.get("provider") or "")
     cost = 0.0
     prompt_n = 0
     completion_n = 0
@@ -180,11 +315,12 @@ def _ensure_session_cost(meta: dict[str, Any]) -> dict[str, Any]:
         prompt_n += p
         completion_n += c
         run = estimate_usd(
-            model_id,
+            str(usage.get("model") or model_id),
             prompt_tokens=p,
             completion_tokens=c,
             cached_input_tokens=cached,
             cache_creation_tokens=created,
+            provider=str(usage.get("provider") or provider_id),
         )
         if run:
             cost += float(run)
@@ -205,6 +341,7 @@ def create_chat(
     chat_id: str | None = None,
     title: str | None = None,
     mode: str = "auto",
+    model_route: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ensure_dirs()
     chat_id = chat_id or f"chat_{uuid.uuid4().hex[:12]}"
@@ -226,6 +363,8 @@ def create_chat(
         "session_prompt_tokens": 0,
         "session_completion_tokens": 0,
         "session_total_tokens": 0,
+        "model_route": normalize_model_route(model_route)
+        or model_route_from_settings(load_settings()),
     }
     atomic_write_json(chat_meta_path(chat_id), meta)
     return meta
@@ -236,6 +375,7 @@ def patch_chat(chat_id: str, **fields: Any) -> dict[str, Any]:
     if not meta:
         raise KeyError(chat_id)
     clean: dict[str, Any] = {}
+    prior_route = normalize_model_route(meta.get("model_route"))
     for k, v in fields.items():
         if v is None:
             continue
@@ -243,11 +383,29 @@ def patch_chat(chat_id: str, **fields: Any) -> dict[str, Any]:
             clean[k] = re.sub(r"\s+", " ", v).strip()[:120] or "New chat"
         elif k in {"pinned", "archived"}:
             clean[k] = bool(v)
+        elif k == "model_route":
+            route = normalize_model_route(v)
+            if route:
+                clean[k] = route
         else:
             clean[k] = v
     meta.update(clean)
     meta["updated_at"] = now_ts()
     atomic_write_json(chat_meta_path(chat_id), meta)
+    if (
+        "model_route" in clean
+        and _model_route_notice_changed(prior_route, clean["model_route"])
+    ):
+        append_ui_event(
+            chat_id,
+            {
+                "kind": "model_change",
+                "text": (
+                    f"Model changed from {_model_route_notice_label(prior_route)} "
+                    f"to {_model_route_notice_label(clean['model_route'])}."
+                ),
+            },
+        )
     return meta
 
 
@@ -1054,6 +1212,20 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
             base_url = None
         elif provider in {"anthropic", "gemini"} and bag_like:
             base_url = None
+    # A workspace OpenAI-compatible proxy is for the OpenAI/Ollama route. Do
+    # not leak it into native provider clients after a thread-only switch.
+    if base_url and provider in {"anthropic", "gemini", "xai"}:
+        base_url = None
+    if base_url and provider == "bedrock":
+        mantle_host = "bedrock-mantle." in base_url
+        bag_host = base_url.rstrip("/").endswith("/api/v1")
+        # Keep recognized gateway URLs for legacy settings that predate the
+        # explicit bedrock_mode field. A normal OpenAI proxy (/v1) is still not
+        # a valid native Bedrock endpoint.
+        if (mode == "mantle" and not mantle_host) or (mode == "bag" and not bag_host) or (
+            mode == "iam" and not (mantle_host or bag_host)
+        ):
+            base_url = None
     if base_url:
         from url_trust import is_trusted_base_url
 
@@ -1243,6 +1415,7 @@ async def run_chat_turn(
     on_event: OnEvent,
     before_tool_factory: Callable[..., Any],
     cancel_check: Callable[[], bool],
+    model_route: dict[str, Any] | None = None,
     ask_user_factory: Callable[[], Any] | None = None,
     on_exit_plan_mode: Callable[..., Any] | None = None,
     caveman: bool = True,
@@ -1261,7 +1434,23 @@ async def run_chat_turn(
     # Keys come from spawn_secrets via _resolve_model_kwargs(api_key=…);
     # sidecar also sets CLAWAGENTS_SKIP_DOTENV so clawagents won't reload .env.
     ensure_dirs()
-    settings = load_settings()
+    default_settings = load_settings()
+    requested_route = normalize_model_route(model_route)
+    meta = get_chat(chat_id) or create_chat(
+        chat_id=chat_id,
+        title=_title_from_text(content),
+        mode=mode,
+        model_route=requested_route
+        or model_route_from_settings(default_settings, model=model),
+    )
+    route = (
+        requested_route
+        or normalize_model_route(meta.get("model_route"))
+        or model_route_from_settings(default_settings, model=model)
+    )
+    if requested_route and requested_route != normalize_model_route(meta.get("model_route")):
+        meta = patch_chat(chat_id, model_route=requested_route)
+    settings = settings_with_model_route(default_settings, route)
 
     run_context = RunContext()
     run_context._metadata["workspace"] = str(WORKSPACE)
@@ -1281,6 +1470,14 @@ async def run_chat_turn(
         and not is_trusted_base_url(base_url)
         and settings.get("trust_custom_base_url")
     )
+    if base_url and not is_trusted_base_url(base_url) and not trusted_custom:
+        msg = (
+            f'This thread uses custom model endpoint "{base_url}", but that exact URL '
+            "is not currently trusted. Open Settings, select the endpoint, and approve it again."
+        )
+        on_event("error", {"text": msg})
+        append_ui_event(chat_id, {"kind": "error", "text": msg})
+        return {"ok": False, "error": msg}
     effective_model = (model or settings.get("model") or "").strip()
     if effective_model.lower() in ("default",):
         effective_model = ""
@@ -1293,7 +1490,7 @@ async def run_chat_turn(
             "Pick a model from the gateway list (header or Settings → Model). "
             f"Custom base URL is set ({base_url}) but model is empty/default."
         )
-        on_event({"kind": "error", "text": msg})
+        on_event("error", {"text": msg})
         append_ui_event(chat_id, {"kind": "error", "text": msg})
         return {"ok": False, "error": msg}
 
@@ -1317,13 +1514,10 @@ async def run_chat_turn(
             "is OpenAI (api.openai.com). Pick an OpenAI model in Settings "
             "(e.g. gpt-5.6-terra), or switch Provider to Ollama."
         )
-        on_event({"kind": "error", "text": msg})
+        on_event("error", {"text": msg})
         append_ui_event(chat_id, {"kind": "error", "text": msg})
         return {"ok": False, "error": msg}
 
-    meta = get_chat(chat_id) or create_chat(
-        chat_id=chat_id, title=_title_from_text(content), mode=mode
-    )
     if meta.get("title") in (None, "", "New chat"):
         patch_chat(chat_id, title=_title_from_text(content), mode=mode)
     else:
@@ -1337,7 +1531,7 @@ async def run_chat_turn(
     session = JsonlFileSession(chat_id, dir_path=SESSIONS_MEMORY_DIR)
 
     kwargs: dict[str, Any] = {"streaming": True}
-    kwargs.update(_resolve_model_kwargs(model, settings))
+    kwargs.update(_resolve_model_kwargs(None, settings))
     instructions: list[str] = []
     if mode == "ask":
         instructions.append(
@@ -1961,6 +2155,9 @@ async def run_chat_turn(
         "max_input_tokens": max_input_n,
         "long_context_request_count": long_ctx_n,
         "next_prompt_est_tokens": next_prompt_est,
+        "model": model_id_for_cost,
+        "provider": provider_for_cost,
+        "reasoning_effort": str(settings.get("reasoning_effort") or ""),
     }
 
     latest = get_chat(chat_id) or meta

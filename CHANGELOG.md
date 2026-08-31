@@ -1,5 +1,6 @@
 ## 1.0.174
 
+- **Conversation controls and model routing are easier to understand.** Each conversation can now keep its own provider, model, reasoning effort, and Bedrock route, with a compact model-route capsule for quick inspection and switching. Message timestamps and copy actions improve chat history scanning, while composer and conversation menus, always-on instructions, and side-chat input receive clearer interaction states and more consistent spacing.
 - **Independent concurrent conversations.** Each chat now owns its own run slot and queue, so work can continue in multiple threads at once. Cancellation applies only to the selected conversation, while workspace-mutating turns remain serialised to prevent concurrent edits from colliding.
 - **Thread switching preserves live work.** A running thread retains its busy state while you navigate away; returning replays its complete unfinished turn over the persisted transcript. Sends, late events, and final responses remain bound to the conversation that started them.
 - **Forked side chat.** Open a temporary side-chat overlay without replacing the main conversation. Its events stay isolated, and closing it removes only the forked conversation.

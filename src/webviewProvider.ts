@@ -36,7 +36,7 @@ import {
   type GraphifyStatus,
   runGraphifyMode,
 } from "./graphifyOps";
-import { parseWebviewToHost } from "./protocol";
+import { ADVANCED_RESTORE_FEATURES_AVAILABLE, parseWebviewToHost } from "./protocol";
 import type {
   AgentMode,
   AutoApprove,
@@ -44,6 +44,7 @@ import type {
   HostToWebview,
   InteractionStyle,
   JobSummary,
+  ModelRoute,
   WebviewToHost,
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
@@ -71,6 +72,16 @@ function graphTargetExists(graphPath: unknown): boolean {
 }
 
 const STATE_KEY = "clawagents.chatState.v2";
+
+const ADVANCED_RESTORE_MESSAGE_TYPES = new Set<WebviewToHost["type"]>([
+  "restore_checkpoint",
+  "list_checkpoints",
+  "list_hunks",
+  "accept_hunk",
+  "reject_hunk",
+  "list_rewind",
+  "rewind_to",
+]);
 
 const DEFAULT_AUTO_APPROVE: AutoApprove = {
   edit: true,
@@ -140,8 +151,62 @@ type QueuedTurn = {
   chatId: string;
   includeContext: boolean;
   modelOverride?: string;
+  modelRoute?: ModelRoute;
   settings?: TurnSettings;
 };
+
+function modelRouteFromChat(chat: Record<string, unknown> | undefined): ModelRoute | undefined {
+  const value = chat?.model_route;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const route = value as Record<string, unknown>;
+  if (typeof route.provider !== "string" || typeof route.model !== "string") return undefined;
+  const clean: ModelRoute = {
+    provider: route.provider,
+    model: route.model,
+    reasoning_effort: typeof route.reasoning_effort === "string" ? route.reasoning_effort : "",
+  };
+  for (const key of ["reasoning_effort", "bedrock_mode", "aws_region", "aws_profile", "wire_api"] as const) {
+    if (key === "reasoning_effort") continue;
+    if (typeof route[key] === "string") clean[key] = route[key] as never;
+  }
+  return clean;
+}
+
+function modelRouteNoticeLabel(route: ModelRoute): string {
+  const provider = (() => {
+    if (route.provider === "bedrock") {
+      const labels: Record<NonNullable<ModelRoute["bedrock_mode"]>, string> = {
+        iam: "AWS Bedrock (IAM)",
+        mantle: "AWS Bedrock Mantle",
+        bag: "AWS Bedrock Gateway",
+      };
+      return route.bedrock_mode ? labels[route.bedrock_mode] : "AWS Bedrock";
+    }
+    return {
+      auto: "Auto",
+      openai: "OpenAI",
+      anthropic: "Anthropic",
+      gemini: "Google Gemini",
+      ollama: "Ollama",
+      xai: "xAI",
+    }[route.provider] || route.provider;
+  })();
+  const effort = {
+    low: "Light",
+    medium: "Medium",
+    high: "High",
+    xhigh: "Extra High",
+    none: "None",
+  }[route.reasoning_effort || ""];
+  return [provider, route.model || "default", effort].filter(Boolean).join(" · ");
+}
+
+function isVisibleModelRouteChange(previous: ModelRoute | undefined, next: ModelRoute): boolean {
+  if (!previous) return false;
+  return ["provider", "model", "reasoning_effort", "bedrock_mode"].some(
+    (key) => previous[key as keyof ModelRoute] !== next[key as keyof ModelRoute],
+  );
+}
 
 type TurnSettings = Readonly<{
   mode: AgentMode;
@@ -182,6 +247,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private autoApprove: AutoApprove = DEFAULT_AUTO_APPROVE;
   /** Run ownership and follow-up queues are isolated by conversation. */
   private readonly runs = new ThreadRunCoordinator<QueuedTurn>();
+  /** Last authoritative non-secret model route for each conversation. */
+  private readonly modelRoutes = new Map<string, ModelRoute>();
   /** Coalesce concurrent first sends before a brand-new chat has an id. */
   private pendingRunChatPromise?: Promise<string>;
   /** Buffered interactive events (permission / ask / plan approval) for
@@ -207,6 +274,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   /** Serialize settings saves — concurrent autosaves + live /providers probes
    *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
   private saveSettingsChain: Promise<void> = Promise.resolve();
+  /** Preserve UI order when provider/model/effort changes arrive in a burst. */
+  private chatRouteSaveChain: Promise<void> = Promise.resolve();
   /** Webview persistence messages can overlap with thread selection. Keep
    *  workspace-state writes ordered so an older draft cannot land last. */
   private persistStateChain: Promise<void> = Promise.resolve();
@@ -462,6 +531,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     chatTitle?: string,
     restoreReason?: "fork",
   ): Promise<void> {
+    const modelRoute = modelRouteFromChat(chat);
+    if (modelRoute) this.modelRoutes.set(chatId, modelRoute);
     const events = (chat.events as Array<Record<string, unknown>>) || [];
     this.eventsOffset = Number(chat.events_offset ?? 0) || 0;
     this.eventsHasMore = Boolean(chat.events_has_more);
@@ -485,6 +556,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       eventsOffset: this.eventsOffset,
       eventsTotal: Number(chat.events_total ?? events.length) || events.length,
       eventsHasMore: this.eventsHasMore,
+      modelRoute,
     });
   }
 
@@ -591,6 +663,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     const pending = (async () => {
       const chat = await this.gateway.createChat(mode);
       const chatId = String(chat.id);
+      const modelRoute = modelRouteFromChat(chat);
+      if (modelRoute) this.modelRoutes.set(chatId, modelRoute);
       if (!this.chatId) {
         this.chatId = chatId;
         await this.persistLocal(this.persistState());
@@ -662,10 +736,63 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "prepend", text });
   }
 
-  private async createNewChat(): Promise<void> {
+  private async createOrReuseEmptyChat(): Promise<void> {
     try {
       await this.sidecar.ensureStarted();
       const startedOn = this.chatId;
+
+      // Once New has selected a genuinely blank conversation, keep using it
+      // instead of leaving another empty "New chat" row behind on every click.
+      // Preserve its composer draft: drafts are conversation-owned and a New
+      // click must not silently discard text typed into the blank conversation.
+      if (startedOn) {
+        try {
+          const current = await this.gateway.getChat(startedOn, { tail: 1 });
+          if (this.chatId !== startedOn) {
+            // User selected another conversation while getChat was in flight.
+            await this.refreshChats();
+            return;
+          }
+          if (
+            Number(current.message_count) === 0 &&
+            Number(current.events_total) === 0
+          ) {
+            const modelRoute =
+              modelRouteFromChat(current) || this.modelRoutes.get(startedOn);
+            if (modelRoute) this.modelRoutes.set(startedOn, modelRoute);
+            this.eventsOffset = 0;
+            this.eventsHasMore = false;
+            await this.refreshChats();
+            if (this.chatId !== startedOn) {
+              return;
+            }
+            this.post({
+              type: "restore",
+              items: [],
+              draft: this.draftForChat(startedOn),
+              mode: this.mode,
+              chatId: startedOn,
+              autoApprove: this.autoApprove,
+              interaction: this.interaction,
+              caveman: this.caveman,
+              goal: this.goalMode,
+              busy: false,
+              sessionCostUsd: 0,
+              modelRoute,
+            });
+            await this.persistLocal(this.persistState());
+            return;
+          }
+        } catch {
+          // A stale workspace pointer should fall through and create a chat,
+          // unless the user navigated elsewhere while lookup was in flight.
+          if (this.chatId !== startedOn) {
+            await this.refreshChats();
+            return;
+          }
+        }
+      }
+
       const chat = await this.gateway.createChat(this.mode);
       if (this.chatId !== startedOn) {
         // User selected another conversation while createChat was in flight.
@@ -673,6 +800,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         return;
       }
       this.chatId = String(chat.id);
+      const modelRoute = modelRouteFromChat(chat);
+      if (modelRoute) this.modelRoutes.set(this.chatId, modelRoute);
       this.eventsOffset = 0;
       this.eventsHasMore = false;
       await this.refreshChats();
@@ -691,6 +820,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         goal: this.goalMode,
         busy: false,
         sessionCostUsd: 0,
+        modelRoute,
       });
       await this.persistLocal(this.persistState());
     } catch (err) {
@@ -708,7 +838,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       await this.newChatPromise;
       return;
     }
-    const pending = this.createNewChat();
+    const pending = this.createOrReuseEmptyChat();
     this.newChatPromise = pending;
     try {
       await pending;
@@ -749,6 +879,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             text,
             chatId: targetChatId,
             includeContext: this.config.includeContextByDefault,
+            modelRoute: this.modelRoutes.get(targetChatId),
           }, true);
         }
         const queueLength = this.runs.queued(targetChatId).length;
@@ -800,6 +931,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         ...chat,
         running: this.runs.isActive(chat.id),
       }));
+      for (const chat of chats) {
+        const route = modelRouteFromChat(chat);
+        if (route) this.modelRoutes.set(chat.id, route);
+      }
       this.post({ type: "chats", chats, chatId: this.chatId });
     } catch {
       /* ignore until sidecar up */
@@ -922,6 +1057,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     let mcp: unknown[] = [];
     try {
       chats = (await this.gateway.listChats()) as ChatSummary[];
+      for (const chat of chats) {
+        const route = modelRouteFromChat(chat);
+        if (route) this.modelRoutes.set(chat.id, route);
+      }
       settings = await this.gateway.getSettings();
       // Fast start: fetch without live network probes.
       providers = await this.gateway.getProviders({ probe: false });
@@ -984,6 +1123,16 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleMessage(msg: WebviewToHost): Promise<void> {
+    if (
+      !ADVANCED_RESTORE_FEATURES_AVAILABLE &&
+      ADVANCED_RESTORE_MESSAGE_TYPES.has(msg.type)
+    ) {
+      this.post({
+        type: "status",
+        message: "Checkpoints, Review, and Rewind are temporarily unavailable.",
+      });
+      return;
+    }
     switch (msg.type) {
       case "ready":
         // Show the webview immediately; never block the first paint on a
@@ -1011,7 +1160,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         const turnSettings = this.currentTurnSettings();
         // Drain in-flight settings saves first — sidecar reads disk per turn.
         await this.saveSettingsChain.catch(() => undefined);
-        await this.runTask(msg.text, msg.includeContext, msg.chatId, msg.model, turnSettings);
+        await this.runTask(
+          msg.text,
+          msg.includeContext,
+          msg.chatId,
+          msg.model,
+          turnSettings,
+          msg.modelRoute,
+        );
         break;
       case "queue_send": {
         // Prefer mid-turn redirect when a run is active; else queue for next turn.
@@ -1037,6 +1193,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           text: msg.text,
           chatId: targetChatId,
           includeContext: this.config.includeContextByDefault,
+          modelRoute: msg.modelRoute ?? this.modelRoutes.get(targetChatId),
           settings: this.currentTurnSettings(),
         });
         this.post({
@@ -1069,6 +1226,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             text: msg.text,
             chatId: targetChatId,
             includeContext: this.config.includeContextByDefault,
+            modelRoute: this.modelRoutes.get(targetChatId),
             settings: this.currentTurnSettings(),
           });
           this.post({
@@ -1213,14 +1371,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           this.post({ type: "error", message: "Start a conversation before opening a side chat." });
           break;
         }
-        if (this.runs.isActive(targetId)) {
-          this.post({
-            type: "error",
-            message: "Stop the source conversation before forking it into a side chat.",
-            chatId: targetId,
-          });
-          break;
-        }
         if (this.sideChatOpening || this.sideChatId) {
           this.post({ type: "error", message: "A side chat is already open." });
           break;
@@ -1229,6 +1379,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         try {
           const res = await this.gateway.forkChat(targetId);
           const chat = await this.gateway.getChat(res.chat_id, { tail: 400 });
+          const sideModelRoute = modelRouteFromChat(chat);
+          if (sideModelRoute) this.modelRoutes.set(res.chat_id, sideModelRoute);
           const title =
             (typeof res.chat?.title === "string" && res.chat.title) ||
             (typeof chat.title === "string" ? chat.title : undefined);
@@ -1238,6 +1390,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             title,
             items: eventsToItems((chat.events as Array<Record<string, unknown>>) || []),
             mode: (chat.mode as AgentMode) || this.mode,
+            modelRoute: sideModelRoute,
           });
           this.sideChatId = res.chat_id;
           await this.refreshChats();
@@ -1301,6 +1454,36 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             message: err instanceof Error ? err.message : String(err),
           });
         }
+        break;
+      case "set_chat_model_route":
+        this.chatRouteSaveChain = this.chatRouteSaveChain
+          .catch(() => undefined)
+          .then(async () => {
+            try {
+              const previous = this.modelRoutes.get(msg.chatId);
+              const chat = await this.gateway.patchChat(msg.chatId, {
+                model_route: msg.modelRoute,
+              });
+              const modelRoute = modelRouteFromChat(chat) ?? msg.modelRoute;
+              this.modelRoutes.set(msg.chatId, modelRoute);
+              this.post({ type: "chat_model_route", chatId: msg.chatId, modelRoute });
+              if (isVisibleModelRouteChange(previous, modelRoute)) {
+                this.post({
+                  type: "model_changed",
+                  chatId: msg.chatId,
+                  text: `Model changed from ${modelRouteNoticeLabel(previous!)} to ${modelRouteNoticeLabel(modelRoute)}.`,
+                });
+              }
+              await this.refreshChats();
+            } catch (err) {
+              this.post({
+                type: "error",
+                message: err instanceof Error ? err.message : String(err),
+                chatId: msg.chatId,
+              });
+            }
+          });
+        await this.chatRouteSaveChain;
         break;
       case "load_older_chat":
         try {
@@ -2934,6 +3117,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       text: prompt,
       chatId: this.chatId,
       includeContext: false,
+      modelRoute: this.modelRoutes.get(this.chatId),
       settings: this.currentTurnSettings(),
     });
     this.post({
@@ -3003,6 +3187,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     chatId?: string,
     modelOverride?: string,
     settingsOverride?: TurnSettings,
+    modelRouteOverride?: ModelRoute,
   ): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -3018,6 +3203,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         chatId: requestedChatId,
         includeContext,
         modelOverride,
+        modelRoute: modelRouteOverride ?? this.modelRoutes.get(requestedChatId),
         settings: turnSettings,
       });
       this.post({
@@ -3074,6 +3260,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         chatId: runChatId,
         includeContext,
         modelOverride,
+        modelRoute: modelRouteOverride ?? this.modelRoutes.get(runChatId),
         settings: turnSettings,
       });
       this.post({
@@ -3118,7 +3305,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       const settings = await this.gateway
         .getSettings()
         .catch(() => ({}) as Record<string, unknown>);
+      const modelRoute = modelRouteOverride ?? this.modelRoutes.get(runChatId);
+      if (modelRoute) this.modelRoutes.set(runChatId, modelRoute);
       const model =
+        modelRoute?.model ||
         (modelOverride && modelOverride !== "default" ? modelOverride : undefined) ||
         (typeof settings.model === "string" && settings.model
           ? settings.model
@@ -3140,6 +3330,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                     chatId: runChatId,
                     includeContext,
                     modelOverride,
+                    modelRoute,
                     settings: turnSettings,
                   }, true);
                 }
@@ -3205,6 +3396,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         turnSettings.goal,
         images,
         files,
+        modelRoute,
       );
       if (newId) {
         // Completing a background run must never pull the UI away from the
@@ -3253,6 +3445,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         next.chatId,
         next.modelOverride,
         next.settings,
+        next.modelRoute,
       );
     }
   }
@@ -3318,6 +3511,14 @@ function stripEditorContextForDisplay(text: string): string {
   return idx >= 0 ? text.slice(0, idx).replace(/\s+$/, "") : text;
 }
 
+function eventTimestamp(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value * 1000).toISOString();
+  }
+  return undefined;
+}
+
 function eventsToItems(events: Array<Record<string, unknown>>): unknown[] {
   const items: unknown[] = [];
   for (const ev of events) {
@@ -3326,9 +3527,16 @@ function eventsToItems(events: Array<Record<string, unknown>>): unknown[] {
       items.push({
         kind: "user",
         text: stripEditorContextForDisplay(String(ev.text || "")),
+        timestamp: eventTimestamp(ev.ts),
       });
     } else if (kind === "assistant") {
-      items.push({ kind: "assistant", text: String(ev.text || "") });
+      items.push({
+        kind: "assistant",
+        text: String(ev.text || ""),
+        timestamp: eventTimestamp(ev.ts),
+      });
+    } else if (kind === "model_change") {
+      items.push({ kind: "model_change", text: String(ev.text || "") });
     } else if (kind === "done") {
       items.push({
         kind: "status",

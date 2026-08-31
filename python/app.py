@@ -565,6 +565,7 @@ class ChatBody(BaseModel):
     lane: str = "main"
     mode: Mode = "auto"
     model: str | None = None
+    model_route: dict[str, Any] | None = None
     auto_approve: AutoApprove | None = None
     # interactive = ask_user hits the webview; auto = agent decides without waiting.
     # Plan (read_only) always forces interactive on the server.
@@ -706,6 +707,7 @@ class PlanApprovalBody(BaseModel):
 class CreateChatBody(BaseModel):
     title: str | None = None
     mode: Mode = "auto"
+    model_route: dict[str, Any] | None = None
 
 
 class PatchChatBody(BaseModel):
@@ -713,6 +715,7 @@ class PatchChatBody(BaseModel):
     mode: Mode | None = None
     pinned: bool | None = None
     archived: bool | None = None
+    model_route: dict[str, Any] | None = None
 
 
 class RestoreBody(BaseModel):
@@ -1244,7 +1247,9 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return create_chat(title=body.title, mode=body.mode)
+        return create_chat(
+            title=body.title, mode=body.mode, model_route=body.model_route
+        )
 
     @app.get("/chats/{chat_id}")
     async def chats_get(chat_id: str, request: Request):
@@ -1297,6 +1302,7 @@ def create_app() -> FastAPI:
                 mode=body.mode,
                 pinned=body.pinned,
                 archived=body.archived,
+                model_route=body.model_route,
             )
         except KeyError:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
@@ -1797,6 +1803,7 @@ def create_app() -> FastAPI:
                         content=body.task,
                         mode=effective_mode,
                         model=body.model,
+                        model_route=body.model_route,
                         on_event=on_event,
                         before_tool_factory=before_tool_factory,
                         cancel_check=cancel_ev.is_set,

@@ -23,8 +23,10 @@ import {
   type HostToWebview,
   type InteractionStyle,
   type JobSummary,
+  type ModelRoute,
 } from "./vscodeApi";
 import { parseInlinePathReference } from "../../src/pathReferences";
+import { ADVANCED_RESTORE_FEATURES_AVAILABLE } from "../../src/protocol";
 import {
   collectTurnChangedFiles,
   isTurnTerminal,
@@ -50,6 +52,7 @@ import {
   threadActivity,
   threadActivityLabel,
 } from "./threadUnread";
+import { ModelRouteCapsule } from "./ModelRouteCapsule";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -87,8 +90,9 @@ function modelSupportsEffort(model: string): boolean {
 }
 
 type ChatItem =
-  | { kind: "user"; text: string }
-  | { kind: "assistant"; text: string }
+  | { kind: "user"; text: string; timestamp?: string }
+  | { kind: "assistant"; text: string; timestamp?: string }
+  | { kind: "model_change"; text: string }
   | {
       kind: "tool";
       id: string;
@@ -199,12 +203,37 @@ type SideChat = {
   chatId: string;
   title: string;
   mode: AgentMode;
+  modelRoute?: ModelRoute;
   items: ChatItem[];
   busy: boolean;
   minimized: boolean;
   /** Vertical position of the minimized side-chat launcher, in viewport pixels. */
   peekY?: number;
 };
+
+const MODEL_ROUTE_FIELDS = [
+  "reasoning_effort",
+  "bedrock_mode",
+  "aws_region",
+  "aws_profile",
+  "wire_api",
+] as const;
+
+function modelRouteForSettings(value: Record<string, unknown>): ModelRoute {
+  const route: ModelRoute = {
+    provider: String(value.provider || "auto").trim().toLowerCase(),
+    model: String(value.model || "").trim(),
+    reasoning_effort: String(value.reasoning_effort || "").trim().toLowerCase(),
+  };
+  for (const key of MODEL_ROUTE_FIELDS) {
+    if (key === "reasoning_effort") continue;
+    const item = value[key];
+    if (typeof item === "string" && item.trim()) {
+      (route as unknown as Record<string, unknown>)[key] = item.trim();
+    }
+  }
+  return route;
+}
 
 function persistedConversationTabs(): ConversationTab[] {
   try {
@@ -367,6 +396,20 @@ function copyText(text: string) {
   void navigator.clipboard?.writeText(text);
 }
 
+function messageTimestamp(): string {
+  return new Date().toISOString();
+}
+
+function formatMessageTime(value?: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function looksLikeDiff(text: string): boolean {
   return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
 }
@@ -375,113 +418,65 @@ type PinnedContextProps = {
   text: string;
   draft: string;
   editing: boolean;
-  collapsed: boolean;
   onDraft: (value: string) => void;
   onEdit: () => void;
   onCancel: () => void;
   onSave: () => void;
-  onToggleCollapse: () => void;
 };
 
-/**
- * Always-on notes shown above the transcript.
- *
- * Anything written here is injected into every LLM round by the rules
- * pipeline, which is the point: standing facts (which virtualenv, which uv
- * environment, which skill to remember) stop being things you re-type each
- * chat and stop being lost to compaction. It is deliberately small and
- * collapsible, since it costs tokens on every request.
- */
+/** Small composer affordance for instructions injected into every LLM round. */
 const PinnedContext = memo(function PinnedContext({
   text,
   draft,
   editing,
-  collapsed,
   onDraft,
   onEdit,
   onCancel,
   onSave,
-  onToggleCollapse,
 }: PinnedContextProps) {
   const remaining = PINNED_CONTEXT_MAX_CHARS - draft.length;
-
-  if (editing) {
-    return (
-      <div className="banner pinned-banner pinned-editing">
-        <div className="pinned-head">
-          <IconPin size={13} className="pinned-icon" />
-          <strong className="pinned-title">Always applies</strong>
-          <span className={remaining < 0 ? "pinned-count over" : "pinned-count"}>
-            {remaining} left
-          </span>
-        </div>
-        <textarea
-          className="pinned-input"
-          value={draft}
-          autoFocus
-          rows={4}
-          maxLength={PINNED_CONTEXT_MAX_CHARS}
-          placeholder={
-            "Sent with every message. For example:\n"
-            + "• Use the .venv at repo root (uv sync, never pip)\n"
-            + "• Always follow the keep-track skill for long runs"
-          }
-          onChange={(e) => onDraft(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter inserts a newline: this is a list, not a chat composer.
-            if (e.key === "Escape") {
-              e.preventDefault();
-              onCancel();
-            } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              onSave();
-            }
-          }}
-        />
-        <div className="pinned-actions">
-          <button type="button" className="primary tiny" onClick={onSave}>
-            Save
-          </button>
-          <button type="button" className="ghost tiny" onClick={onCancel}>
-            Cancel
-          </button>
-          <span className="pinned-hint">⌘/Ctrl+Enter saves · Esc cancels</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!text.trim()) {
-    return (
-      <div className="banner pinned-banner pinned-empty">
-        <IconPin size={13} className="pinned-icon" />
-        <button type="button" className="linkish" onClick={onEdit}>
-          Pin always-on context
-        </button>
-        <span className="pinned-hint">venv, uv env, skills to always remember…</span>
-      </div>
-    );
-  }
-
   return (
-    <div className="banner pinned-banner">
-      <div className="pinned-head">
-        <IconPin size={13} className="pinned-icon" />
-        <strong className="pinned-title">Always applies</strong>
-        <button
-          type="button"
-          className="ghost tiny"
-          onClick={onToggleCollapse}
-          aria-expanded={!collapsed}
-          title={collapsed ? "Show pinned context" : "Hide pinned context"}
-        >
-          {collapsed ? "Show" : "Hide"}
-        </button>
-        <button type="button" className="ghost tiny" onClick={onEdit} title="Edit pinned context">
-          Edit
-        </button>
-      </div>
-      {!collapsed && <pre className="pinned-body">{text.trim()}</pre>}
+    <div
+      className={`always-on${text.trim() ? " has-rules" : ""}${editing ? " open" : ""}`}
+      onBlur={(event) => {
+        if (editing && !event.currentTarget.contains(event.relatedTarget as Node | null)) onCancel();
+      }}
+    >
+      <button
+        type="button"
+        className="always-on-trigger"
+        onClick={onEdit}
+        aria-expanded={editing}
+        title={text.trim() ? "Edit always-on context" : "Add always-on context"}
+      >
+        <IconPin size={13} />
+        <span>Always-on context</span>
+      </button>
+      {editing && (
+        <div className="always-on-popover">
+          <div className="always-on-head">
+            <strong>Always-on context</strong>
+            <span className={remaining < 0 ? "pinned-count over" : "pinned-count"}>{remaining} left</span>
+          </div>
+          <textarea
+            className="pinned-input"
+            value={draft}
+            autoFocus
+            rows={4}
+            maxLength={PINNED_CONTEXT_MAX_CHARS}
+            placeholder={"Sent with every message. For example:\n• Use the .venv at repo root\n• Follow the project instructions"}
+            onChange={(e) => onDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+              else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onSave(); }
+            }}
+          />
+          <div className="pinned-actions">
+            <button type="button" className="primary tiny" onClick={onSave}>Save</button>
+            <button type="button" className="ghost tiny" onClick={onCancel}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -619,6 +614,7 @@ type TranscriptItemProps = {
   onAskDraftChange: (requestId: string, draft: string) => void;
   onPlanFeedbackChange: (requestId: string, draft: string) => void;
   onPlanFeedbackToggle: (requestId: string, open: boolean) => void;
+  onRegenerate?: () => void;
 };
 
 function ChangedFilesSummary({ files }: { files: ChangedFile[] }) {
@@ -675,33 +671,58 @@ const TranscriptItem = memo(function TranscriptItem({
   onAskDraftChange,
   onPlanFeedbackChange,
   onPlanFeedbackToggle,
+  onRegenerate,
 }: TranscriptItemProps) {
+  const time = (item.kind === "user" || item.kind === "assistant")
+    ? formatMessageTime(item.timestamp)
+    : undefined;
   return (
     <div className={`item item-${item.kind}`}>
       {item.kind === "user" && (
         <>
           <div className="label-row">
             <div className="label">You</div>
-            <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
-              Copy
+            {time && <time className="message-time" dateTime={item.timestamp}>{time}</time>}
+          </div>
+          <div className="user-message">
+            <pre className="user-text">{item.text}</pre>
+            <button
+              type="button"
+              className="copy-message"
+              title="Copy message"
+              aria-label="Copy message"
+              onClick={() => copyText(item.text)}
+            >
+              <IconCopy />
             </button>
           </div>
-          <pre className="user-text">{item.text}</pre>
         </>
       )}
       {item.kind === "assistant" && (
         <>
           <div className="label-row">
             <div className="label">ClawAgents</div>
-            <button type="button" className="ghost tiny" onClick={() => copyText(item.text)}>
-              Copy
-            </button>
+            {time && <time className="message-time" dateTime={item.timestamp}>{time}</time>}
           </div>
-          <div className="md">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
-              {item.text}
-            </ReactMarkdown>
-            {showStreamingCursor && <span className="cursor" />}
+          <div className="assistant-message">
+            <div className="md">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+                {item.text}
+              </ReactMarkdown>
+              {showStreamingCursor && <span className="cursor" />}
+            </div>
+            <button
+              type="button"
+              className="copy-message"
+              title="Copy message"
+              aria-label="Copy message"
+              onClick={() => copyText(item.text)}
+            >
+              <IconCopy />
+            </button>
+            {onRegenerate && (
+              <button type="button" className="copy-message regenerate-message" title="Regenerate reply" aria-label="Regenerate reply" onClick={onRegenerate}>↻</button>
+            )}
           </div>
         </>
       )}
@@ -983,6 +1004,13 @@ const TranscriptItem = memo(function TranscriptItem({
           <div className="status">{item.text}</div>
         </>
       )}
+      {item.kind === "model_change" && (
+        <div className="model-change" role="status">
+          <span className="model-change-rule" aria-hidden="true" />
+          <span className="model-change-text"><span aria-hidden="true">◇</span> {item.text}</span>
+          <span className="model-change-rule" aria-hidden="true" />
+        </div>
+      )}
       {item.kind === "error" && (
         <>
           {changedFiles?.length ? <ChangedFilesSummary files={changedFiles} /> : null}
@@ -1142,22 +1170,33 @@ function SideChatOverlay({
         <div ref={sideChatBottomRef} />
       </div>
       <div className="side-chat-compose">
-        <textarea
-          rows={2}
-          value={draft}
-          disabled={sideChat.busy || !hasApiKey}
-          placeholder={hasApiKey ? "Ask the fork…" : "Add a provider API key first"}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <button type="button" className="primary tiny" disabled={!draft.trim() || sideChat.busy || !hasApiKey} onClick={submit}>
-          {sideChat.busy ? "Working…" : "Send"}
-        </button>
+        <div className="side-chat-compose-shell">
+          <textarea
+            rows={2}
+            value={draft}
+            disabled={sideChat.busy || !hasApiKey}
+            placeholder={hasApiKey ? "Ask the fork…" : "Add a provider API key first"}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <div className="side-chat-compose-actions">
+            <button
+              type="button"
+              className="icon-btn primary send"
+              title={sideChat.busy ? "Working…" : "Send (Enter)"}
+              aria-label={sideChat.busy ? "Working" : "Send"}
+              disabled={!draft.trim() || sideChat.busy || !hasApiKey}
+              onClick={submit}
+            >
+              {sideChat.busy ? <IconSpinner /> : <IconSend />}
+            </button>
+          </div>
+        </div>
       </div>
     </aside>
   );
@@ -1186,6 +1225,10 @@ export function App() {
   const [goalMode, setGoalMode] = useState(false);
   const [autoApproveOpen, setAutoApproveOpen] = useState(false);
   const [includeContext, setIncludeContext] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [contextMenuPinned, setContextMenuPinned] = useState(false);
+  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
+  const [conversationMenuPinned, setConversationMenuPinned] = useState(false);
   const [busy, setBusy] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [hasTavilyKey, setHasTavilyKey] = useState(false);
@@ -1244,6 +1287,8 @@ export function App() {
   /** New chat does not know the created id yet; restore may legally change chatId. */
   const pendingNewChatRef = useRef(false);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
+  const [threadModelRoute, setThreadModelRoute] = useState<ModelRoute | null>(null);
+  const threadModelRouteRef = useRef<ModelRoute | null>(null);
   const [skillsPreview, setSkillsPreview] = useState<SkillsPreview | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [diagnostics, setDiagnostics] = useState<unknown>();
@@ -1271,7 +1316,6 @@ export function App() {
   const [pinnedText, setPinnedText] = useState("");
   const [pinnedDraft, setPinnedDraft] = useState("");
   const [pinnedEditing, setPinnedEditing] = useState(false);
-  const [pinnedCollapsed, setPinnedCollapsed] = useState(false);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [jobDetail, setJobDetail] = useState<
@@ -1504,7 +1548,7 @@ export function App() {
   };
 
   const workspaceName = useMemo(
-    () => (workspace ? workspace.split(/[/\\]/).pop() : "No workspace"),
+    () => (workspace ? workspace.split(/[/\\]/).pop() : "ClawAgents"),
     [workspace],
   );
 
@@ -1622,7 +1666,8 @@ export function App() {
         const append = (item: ChatItem) => ({ ...current, items: [...current.items, item] });
         switch (msg.type) {
           case "thread_run_state": return { ...current, busy: msg.running };
-          case "user_echo": return { ...append({ kind: "user", text: msg.text }), busy: true };
+          case "model_changed": return append({ kind: "model_change", text: msg.text });
+          case "user_echo": return { ...append({ kind: "user", text: msg.text, timestamp: messageTimestamp() }), busy: true };
           case "status": {
             const items = [...current.items];
             const last = items[items.length - 1];
@@ -1633,16 +1678,16 @@ export function App() {
           case "assistant_delta": {
             const items = [...current.items];
             const last = items[items.length - 1];
-            if (last?.kind === "assistant") items[items.length - 1] = { kind: "assistant", text: last.text + msg.delta };
-            else items.push({ kind: "assistant", text: msg.delta });
+            if (last?.kind === "assistant") items[items.length - 1] = { ...last, text: last.text + msg.delta };
+            else items.push({ kind: "assistant", text: msg.delta, timestamp: messageTimestamp() });
             return { ...current, items };
           }
           case "assistant_message": {
             if (!msg.text.trim()) return current;
             const items = [...current.items];
             const last = items[items.length - 1];
-            if (last?.kind === "assistant") items[items.length - 1] = { kind: "assistant", text: msg.text };
-            else items.push({ kind: "assistant", text: msg.text });
+            if (last?.kind === "assistant") items[items.length - 1] = { ...last, text: msg.text };
+            else items.push({ kind: "assistant", text: msg.text, timestamp: messageTimestamp() });
             return { ...current, items };
           }
           case "tool_started": return append({ kind: "tool", id: msg.id, name: msg.name, status: "running" });
@@ -1713,6 +1758,7 @@ export function App() {
             chatId: msg.chatId,
             title: msg.title || "Forked conversation",
             mode: msg.mode,
+            modelRoute: msg.modelRoute,
             items: (msg.items as ChatItem[]) || [],
             busy: false,
             minimized: false,
@@ -1771,6 +1817,9 @@ export function App() {
           chatIdRef.current = msg.chatId;
           setChatId(msg.chatId);
           setChats(msg.chats || []);
+          const readyRoute = (msg.chats || []).find((chat) => chat.id === msg.chatId)?.model_route ?? null;
+          threadModelRouteRef.current = readyRoute;
+          setThreadModelRoute(readyRoute);
           setUnreadChatIds((previous) => {
             const retained = retainAvailableUnreadThreads(
               previous,
@@ -1812,8 +1861,10 @@ export function App() {
           if (msg.stats) {
             setStats(msg.stats);
           }
-          // Quiet refresh so the Checkpoints chip can show last time.
-          post({ type: "list_checkpoints", open: false });
+          // Quiet refresh only when the advanced restore UI is enabled.
+          if (ADVANCED_RESTORE_FEATURES_AVAILABLE) {
+            post({ type: "list_checkpoints", open: false });
+          }
           break;
         case "sidecar":
           setSidecar(msg.state);
@@ -1834,7 +1885,8 @@ export function App() {
               },
             ]);
             for (const text of prompts) {
-              post({ type: "queue_send", text, chatId: chatIdRef.current });
+              post({ type: "queue_send", text, chatId: chatIdRef.current,
+                modelRoute: threadModelRouteRef.current ?? undefined });
             }
           }
           break;
@@ -1849,6 +1901,10 @@ export function App() {
             const visible = (msg.chats || []).find((chat) => chat.id === chatIdRef.current);
             if (visible) {
               setBusy(Boolean(visible.running));
+              if (visible.model_route) {
+                threadModelRouteRef.current = visible.model_route;
+                setThreadModelRoute(visible.model_route);
+              }
               if (!visible.running) streamingRef.current = false;
             }
           }
@@ -1884,6 +1940,19 @@ export function App() {
             setBusy(msg.running);
             if (!msg.running) streamingRef.current = false;
           }
+          break;
+        case "chat_model_route":
+          setChats((previous) => previous.map((chat) =>
+            chat.id === msg.chatId ? { ...chat, model_route: msg.modelRoute } : chat));
+          if (chatIdRef.current === msg.chatId) {
+            threadModelRouteRef.current = msg.modelRoute;
+            setThreadModelRoute(msg.modelRoute);
+            setModel(msg.modelRoute.model || "default");
+          }
+          break;
+        case "model_changed":
+          if (isStaleEvent(msg)) break;
+          setItems((prev) => [...prev, { kind: "model_change", text: msg.text }]);
           break;
         case "settings": {
           const incoming = msg.settings || {};
@@ -2130,6 +2199,9 @@ export function App() {
               );
             }
           }
+          threadModelRouteRef.current = msg.modelRoute ?? null;
+          setThreadModelRoute(msg.modelRoute ?? null);
+          if (msg.modelRoute?.model) setModel(msg.modelRoute.model);
           // Prefer persisted session total from chat meta (survives reload).
           resetSessionCost(
             typeof msg.sessionCostUsd === "number" ? msg.sessionCostUsd : 0,
@@ -2179,7 +2251,7 @@ export function App() {
           break;
         case "user_echo":
           if (isStaleEvent(msg)) break;
-          setItems((prev) => [...prev, { kind: "user", text: msg.text }]);
+          setItems((prev) => [...prev, { kind: "user", text: msg.text, timestamp: messageTimestamp() }]);
           setBusy(true);
           streamingRef.current = false;
           setUsage({});
@@ -2204,11 +2276,11 @@ export function App() {
             const next = [...prev];
             const last = next[next.length - 1];
             if (last?.kind === "assistant" && streamingRef.current) {
-              next[next.length - 1] = { kind: "assistant", text: last.text + msg.delta };
+              next[next.length - 1] = { ...last, text: last.text + msg.delta };
               return next;
             }
             streamingRef.current = true;
-            return [...next, { kind: "assistant", text: msg.delta }];
+            return [...next, { kind: "assistant", text: msg.delta, timestamp: messageTimestamp() }];
           });
           break;
         case "assistant_message": {
@@ -2225,11 +2297,11 @@ export function App() {
               // duplicating it.
               if (wasStreaming || last.text === msg.text) {
                 const next = [...prev];
-                next[next.length - 1] = { kind: "assistant", text: msg.text };
+                next[next.length - 1] = { ...last, text: msg.text };
                 return next;
               }
             }
-            return [...prev, { kind: "assistant", text: msg.text }];
+            return [...prev, { kind: "assistant", text: msg.text, timestamp: messageTimestamp() }];
           });
           break;
         }
@@ -2626,6 +2698,10 @@ export function App() {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  useEffect(() => {
+    threadModelRouteRef.current = threadModelRoute;
+  }, [threadModelRoute]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -3142,7 +3218,17 @@ export function App() {
     );
   };
 
-  const selectedProvider = String(settings.provider || "auto");
+  const threadSettings: Record<string, unknown> = threadModelRoute
+    ? {
+        ...settings,
+        // Endpoint, TLS and credentials are workspace configuration. Strip
+        // legacy route fields here too, so an already-open old chat cannot
+        // temporarily override a configured proxy before sidecar migration.
+        ...modelRouteForSettings(threadModelRoute),
+      }
+    : settings;
+  const selectedProvider = String(threadSettings.provider || "auto");
+  const threadProviderMenuValue = providerSelectValue(threadSettings);
   const providerMenuValue = providerSelectValue(settings);
   const keyFlags = {
     openai: hasOpenAIKey,
@@ -3175,24 +3261,30 @@ export function App() {
     });
   })();
   const modelFilterId =
-    selectedProvider === "bedrock" ? providerMenuValue : selectedProvider;
+    selectedProvider === "bedrock" ? threadProviderMenuValue : selectedProvider;
   const allModels = modelsForKeys(
     providerCatalog,
     modelFilterId,
-    providerMenuValue.startsWith("bedrock-")
-      ? providerMenuValue
+    threadProviderMenuValue.startsWith("bedrock-")
+      ? threadProviderMenuValue
       : BEDROCK_SELECT_IAM,
   );
-  const providerModels = allModels;
+  const settingsProvider = String(settings.provider || "auto");
+  const settingsFilterId = settingsProvider === "bedrock" ? providerMenuValue : settingsProvider;
+  const providerModels = modelsForKeys(
+    providerCatalog,
+    settingsFilterId,
+    providerMenuValue.startsWith("bedrock-") ? providerMenuValue : BEDROCK_SELECT_IAM,
+  );
   const preferredPick = pickPreferredModel(providerCatalog);
 
   const rawModelId =
-    (typeof settings.model === "string" && settings.model) ||
+    (typeof threadSettings.model === "string" && threadSettings.model) ||
     (model !== "default" ? model : "") ||
     "";
   // Never render a vendor-mismatched leftover (llama3.1 under OpenAI) as the
   // selected option — even for one frame before the persist heal runs.
-  const headerProviderId = String(settings.provider || "auto").trim().toLowerCase();
+  const headerProviderId = String(threadSettings.provider || "auto").trim().toLowerCase();
   const activeModelId =
     rawModelId &&
     headerProviderId &&
@@ -3203,7 +3295,7 @@ export function App() {
       : rawModelId;
   const activeModelMeta = allModels.find((m) => m.id === activeModelId);
   const headerProviderLabel = effectiveProviderLabel(
-    settings,
+    threadSettings,
     activeModelId || model,
     providerCatalog,
   );
@@ -3331,7 +3423,73 @@ export function App() {
   const sessionCostShown =
     sessionCostUsd + (busy && runCost != null ? runCost : 0);
 
+  const persistThreadModelRoute = (route: ModelRoute) => {
+    const owner = chatIdRef.current;
+    if (!owner) return false;
+    threadModelRouteRef.current = route;
+    setThreadModelRoute(route);
+    setChats((previous) => previous.map((chat) =>
+      chat.id === owner ? { ...chat, model_route: route } : chat));
+    post({ type: "set_chat_model_route", chatId: owner, modelRoute: route });
+    return true;
+  };
+
+  const selectThreadProvider = (choice: string) => {
+    if (!chatIdRef.current) {
+      setProviderSetupMsg("Start a chat before choosing a thread-specific provider.");
+      return;
+    }
+    const region = String(threadSettings.aws_region || settings.aws_region || "").trim()
+      || "us-east-1";
+    let next: Record<string, unknown> = { ...threadSettings };
+    if (
+      choice === BEDROCK_SELECT_IAM ||
+      choice === BEDROCK_SELECT_MANTLE ||
+      choice === BEDROCK_SELECT_BAG
+    ) {
+      const mode = choice === BEDROCK_SELECT_MANTLE
+        ? "mantle"
+        : choice === BEDROCK_SELECT_BAG ? "bag" : "iam";
+      const nextModel = mode === "mantle"
+        ? MANTLE_DEFAULT_MODEL
+        : "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+      next = {
+        ...next,
+        provider: "bedrock",
+        bedrock_mode: mode,
+        aws_region: region,
+        wire_api: mode === "mantle" ? mantleWireApiForModel(nextModel) : "auto",
+        model: nextModel,
+      };
+    } else {
+      next.provider = choice;
+      next.model = defaultModelForProvider(choice);
+      next.bedrock_mode = "iam";
+      next.wire_api = "auto";
+    }
+    if (!modelSupportsEffort(String(next.model || ""))) {
+      next.reasoning_effort = "";
+    }
+    const route = modelRouteForSettings(next);
+    persistThreadModelRoute(route);
+    setModel(route.model || "default");
+    setUsage({});
+  };
+
   const selectModel = (next: string) => {
+    const nextThreadSettings: Record<string, unknown> = { ...threadSettings, model: next };
+    if (isMantleSettings(nextThreadSettings) && next) {
+      nextThreadSettings.wire_api = mantleWireApiForModel(next);
+    }
+    if (!modelSupportsEffort(next)) nextThreadSettings.reasoning_effort = "";
+    if (persistThreadModelRoute(modelRouteForSettings(nextThreadSettings))) {
+      setModel(next || "default");
+      return;
+    }
+    selectDefaultModel(next);
+  };
+
+  const selectDefaultModel = (next: string) => {
     setModel(next || "default");
     const nextSettings: Record<string, unknown> = { ...settings, model: next };
     if (isMantleSettings(nextSettings) && next) {
@@ -3417,6 +3575,19 @@ export function App() {
   };
 
   const selectEffort = (next: string) => {
+    const route = modelRouteForSettings({ ...threadSettings, reasoning_effort: next });
+    if (persistThreadModelRoute(route)) return;
+    selectDefaultEffort(next);
+  };
+
+  const resetThreadModelRoute = () => {
+    const route = modelRouteForSettings(settings);
+    if (!persistThreadModelRoute(route)) return;
+    setModel(route.model || "default");
+    setUsage({});
+  };
+
+  const selectDefaultEffort = (next: string) => {
     const nextSettings = { ...settings, reasoning_effort: next };
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
@@ -3523,6 +3694,17 @@ export function App() {
     if (!value) {
       return;
     }
+    if (
+      !ADVANCED_RESTORE_FEATURES_AVAILABLE &&
+      ["/checkpoints", "/hunks", "/review", "/rewind"].includes(value)
+    ) {
+      clearDraft();
+      setItems((previous) => [
+        ...previous,
+        { kind: "status", text: "Checkpoints, Review, and Rewind are temporarily unavailable." },
+      ]);
+      return;
+    }
     // Slash commands work without a provider key; chat turns do not.
     const isSlash =
       value === "/compact" ||
@@ -3583,7 +3765,7 @@ export function App() {
       post({ type: "set_mode", mode: sendMode });
     }
     // Never send a leftover Ollama/etc. id to OpenAI even if heal hasn't run yet.
-    const prov = String(settings.provider || "auto").trim().toLowerCase();
+    const prov = String(threadSettings.provider || "auto").trim().toLowerCase();
     let sendModel = activeModelId || undefined;
     if (
       sendModel &&
@@ -3608,6 +3790,7 @@ export function App() {
       chatId: chatIdRef.current,
       autoApprove,
       model: sendModel,
+      modelRoute: threadModelRouteRef.current ?? undefined,
       interaction: effectiveInteraction,
       caveman,
       goal: goalMode,
@@ -3636,7 +3819,8 @@ export function App() {
       unreadChatIds.has(c.id),
       Boolean(c.running),
     );
-    const meta = `${c.message_count || 0} msgs${
+    const routeModel = c.model_route?.model?.trim();
+    const meta = `${c.message_count || 0} msgs${routeModel ? ` · ${routeModel}` : ""}${
       c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""
     }`;
 
@@ -3805,7 +3989,7 @@ export function App() {
     <div className="app">
       <header className="header">
         <div className="header-top">
-          <div className="brand">ClawAgents</div>
+          <div className="brand" title={workspace || workspaceName}>{workspaceName}</div>
           <div className={`pill sidecar-${sidecar}`} title={sidecarDetail || sidecar}>
             <span className="pill-dot" />
             {sidecar === "running"
@@ -3818,48 +4002,22 @@ export function App() {
           </div>
         </div>
         <div className="meta">
-          <span className="meta-workspace" title={workspace}>
-            {workspaceName}
-          </span>
-          <span
-            className="meta-provider"
-            title="Provider (change in Settings)"
-            aria-label={`Provider ${headerProviderLabel}`}
-          >
-            {headerProviderLabel}
-          </span>
-          <select
-            className="model-select"
-            value={activeModelId}
-            title={`${headerProviderLabel} · only models for providers with a saved key`}
-            aria-label="Model"
-            onChange={(e) => selectModel(e.target.value)}
-          >
-            <option value="">{allModels.length ? "default" : "no key — Settings"}</option>
-            {activeModelId && !allModels.some((m) => m.id === activeModelId) && (
-              <option value={activeModelId}>{activeModelId} (unavailable)</option>
-            )}
-            {allModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label || m.id}
-              </option>
-            ))}
-          </select>
-          {modelSupportsEffort(activeModelId || model) && (
-            <select
-              className="model-select effort-select"
-              value={String(settings.reasoning_effort || "medium")}
-              title="Thinking effort (OpenAI reasoning models)"
-              aria-label="Effort"
-              onChange={(e) => selectEffort(e.target.value)}
-            >
-              {EFFORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          )}
+          <ModelRouteCapsule
+            disabled={!chatId}
+            busy={busy}
+            providerValue={threadProviderMenuValue}
+            providerLabel={headerProviderLabel}
+            providers={providerCatalog}
+            models={allModels}
+            activeModelId={activeModelId}
+            effort={String(threadSettings.reasoning_effort || "medium")}
+            showEffort={modelSupportsEffort(activeModelId || model)}
+            efforts={EFFORT_OPTIONS}
+            onProviderChange={selectThreadProvider}
+            onModelChange={selectModel}
+            onEffortChange={selectEffort}
+            onReset={resetThreadModelRoute}
+          />
           {compactPhase && (
             <span className="compact-chip" title="Compaction in progress">
               compact · {compactPhase}
@@ -3934,7 +4092,8 @@ export function App() {
             </span>
           )}
           <div className="meta-actions">
-            <button
+            {ADVANCED_RESTORE_FEATURES_AVAILABLE && <>
+              <button
               type="button"
               className={`tool-chip${checkpointsOpen ? " active" : ""}`}
               title={
@@ -3948,8 +4107,8 @@ export function App() {
               {lastCheckpointLabel ? (
                 <span className="tool-chip-meta">{lastCheckpointLabel}</span>
               ) : null}
-            </button>
-            <button
+              </button>
+              <button
               type="button"
               className={`tool-chip${hunksOpen ? " active" : ""}`}
               title="Attributed hunk accept/reject (/hunks)"
@@ -3959,8 +4118,8 @@ export function App() {
               {hunks.length ? (
                 <span className="tool-chip-meta">{hunks.length}</span>
               ) : null}
-            </button>
-            <button
+              </button>
+              <button
               type="button"
               className={`tool-chip${rewindOpen ? " active" : ""}`}
               title="Rewind workspace files to a prior prompt (/rewind)"
@@ -3970,7 +4129,8 @@ export function App() {
               {rewindSnaps.length ? (
                 <span className="tool-chip-meta">{rewindSnaps.length}</span>
               ) : null}
-            </button>
+              </button>
+            </>}
             <button
               type="button"
               className="tool-chip compact-action"
@@ -4145,29 +4305,6 @@ export function App() {
             </div>
           ) : null}
         </nav>
-        {panel === "chat" && (
-          <PinnedContext
-            text={pinnedText}
-            draft={pinnedDraft}
-            editing={pinnedEditing}
-            collapsed={pinnedCollapsed}
-            onDraft={setPinnedDraft}
-            onEdit={() => {
-              setPinnedDraft(pinnedText);
-              setPinnedEditing(true);
-              setPinnedCollapsed(false);
-            }}
-            onCancel={() => {
-              setPinnedDraft(pinnedText);
-              setPinnedEditing(false);
-            }}
-            onSave={() => {
-              post({ type: "save_pinned", text: pinnedDraft.slice(0, PINNED_CONTEXT_MAX_CHARS) });
-              setPinnedEditing(false);
-            }}
-            onToggleCollapse={() => setPinnedCollapsed((v) => !v)}
-          />
-        )}
         {panel === "chat" && jobs.length > 0 && (
           <BackgroundJobs
             jobs={jobs}
@@ -4247,7 +4384,7 @@ export function App() {
         )}
       </header>
 
-      {checkpointsOpen && (
+      {ADVANCED_RESTORE_FEATURES_AVAILABLE && checkpointsOpen && (
         <div className="checkpoint-panel" role="region" aria-label="Checkpoints">
           <div className="checkpoint-panel-head">
             <div>
@@ -4336,7 +4473,7 @@ export function App() {
         </div>
       )}
 
-      {hunksOpen && (
+      {ADVANCED_RESTORE_FEATURES_AVAILABLE && hunksOpen && (
         <div className="checkpoint-panel" role="region" aria-label="Hunk review">
           <div className="checkpoint-panel-head">
             <div>
@@ -4406,7 +4543,7 @@ export function App() {
         </div>
       )}
 
-      {rewindOpen && (
+      {ADVANCED_RESTORE_FEATURES_AVAILABLE && rewindOpen && (
         <div className="checkpoint-panel" role="region" aria-label="Session rewind">
           <div className="checkpoint-panel-head">
             <div>
@@ -4584,7 +4721,7 @@ export function App() {
       {panel === "settings" && (
         <div className="panel settings">
           <section className="settings-section">
-            <h3 className="settings-heading">Model</h3>
+            <h3 className="settings-heading">Default model for new chats</h3>
             <label>
               Provider
               <select
@@ -4672,9 +4809,9 @@ export function App() {
                 ))}
               </select>
             </label>
-            {(selectedProvider === "auto" || selectedProvider === "ollama") && (
+            {(settingsProvider === "auto" || settingsProvider === "ollama") && (
               <p className="settings-hint">
-                {selectedProvider === "ollama"
+                {settingsProvider === "ollama"
                   ? "Ollama usually needs no key. For a remote OpenAI-compatible host, switch Provider to OpenAI and set Base URL + key there."
                   : "Pick OpenAI, Anthropic, Gemini, or Bedrock above to save/verify that provider’s API key in one place."}
               </p>
@@ -4684,7 +4821,7 @@ export function App() {
               <select
                 value={String(settings.model || "")}
                 title="Only models for providers with a saved key"
-                onChange={(e) => selectModel(e.target.value)}
+                onChange={(e) => selectDefaultModel(e.target.value)}
               >
                 <option value="">{providerModels.length ? "default" : "no key — Settings"}</option>
                 {Boolean(String(settings.model || "").trim()) &&
@@ -4708,7 +4845,7 @@ export function App() {
                 Effort
                 <select
                   value={String(settings.reasoning_effort || "medium")}
-                  onChange={(e) => selectEffort(e.target.value)}
+                  onChange={(e) => selectDefaultEffort(e.target.value)}
                 >
                   {EFFORT_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -6201,6 +6338,11 @@ export function App() {
                   onAskDraftChange={handleAskDraftChange}
                   onPlanFeedbackChange={handlePlanFeedbackChange}
                   onPlanFeedbackToggle={handlePlanFeedbackToggle}
+                  onRegenerate={
+                    !busy && item.kind === "assistant" && !items.slice(absoluteIndex + 1).some((next) => next.kind === "assistant")
+                      ? () => post({ type: "regenerate" })
+                      : undefined
+                  }
                   showStreamingCursor={
                     busy && streamingRef.current && absoluteIndex === items.length - 1
                   }
@@ -6356,73 +6498,29 @@ export function App() {
             <div className="toolbar">
               <div className="toolbar-modes">
                 <div className="planact" role="tablist" aria-label="Goal, Plan, or Act">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={workMode === "goal"}
-                    aria-label={`Goal. ${MODE_HELP.goal}`}
-                    className={
-                      workMode === "goal"
-                        ? "seg active has-tooltip tooltip-left"
-                        : "seg has-tooltip tooltip-left"
-                    }
-                    onClick={() => setWorkMode("goal")}
-                    disabled={busy}
-                    data-tooltip={MODE_HELP.goal}
-                  >
-                    Goal
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={workMode === "plan"}
-                    aria-label={`Plan. ${MODE_HELP.plan}`}
-                    className={
-                      workMode === "plan"
-                        ? "seg active has-tooltip tooltip-center"
-                        : "seg has-tooltip tooltip-center"
-                    }
-                    onClick={() => setWorkMode("plan")}
-                    disabled={busy}
-                    data-tooltip={MODE_HELP.plan}
-                  >
-                    Plan
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={workMode === "act"}
-                    aria-label={`Act. ${MODE_HELP.act}`}
-                    className={
-                      workMode === "act"
-                        ? "seg active has-tooltip tooltip-right"
-                        : "seg has-tooltip tooltip-right"
-                    }
-                    onClick={() => setWorkMode("act")}
-                    disabled={busy}
-                    data-tooltip={MODE_HELP.act}
-                  >
-                    Act
-                  </button>
+                  {(["goal", "plan", "act"] as const).map((next) => (
+                    <button
+                      key={next}
+                      type="button"
+                      role="tab"
+                      aria-selected={workMode === next}
+                      aria-label={`${next[0].toUpperCase() + next.slice(1)}. ${MODE_HELP[next]}`}
+                      className={workMode === next ? "seg active" : "seg"}
+                      onClick={() => setWorkMode(next)}
+                      disabled={busy}
+                    >
+                      {next[0].toUpperCase() + next.slice(1)}
+                    </button>
+                  ))}
                 </div>
-                <div
-                  className="planact interaction"
-                  role="tablist"
-                  aria-label="Ask or Auto"
-                >
+                <div className="planact interaction" role="tablist" aria-label="Ask or Auto">
                   <button
                     type="button"
                     role="tab"
                     aria-selected={effectiveInteraction === "interactive"}
-                    aria-label={`Ask. ${MODE_HELP.ask}`}
-                    className={
-                      effectiveInteraction === "interactive"
-                        ? "seg active has-tooltip tooltip-left"
-                        : "seg has-tooltip tooltip-left"
-                    }
+                    className={effectiveInteraction === "interactive" ? "seg active" : "seg"}
                     onClick={() => setInteractionStyle("interactive")}
-                    disabled={busy || planAct === "plan"}
-                    data-tooltip={MODE_HELP.ask}
+                    disabled={busy || workMode === "plan"}
                   >
                     Ask
                   </button>
@@ -6430,56 +6528,47 @@ export function App() {
                     type="button"
                     role="tab"
                     aria-selected={effectiveInteraction === "auto"}
-                    aria-label={`Auto. ${MODE_HELP.auto}`}
-                    className={
-                      effectiveInteraction === "auto"
-                        ? "seg active has-tooltip tooltip-right"
-                        : "seg has-tooltip tooltip-right"
-                    }
+                    className={effectiveInteraction === "auto" ? "seg active" : "seg"}
                     onClick={() => setInteractionStyle("auto")}
-                    disabled={busy || planAct === "plan"}
-                    data-tooltip={MODE_HELP.auto}
+                    disabled={busy || workMode === "plan"}
                   >
                     Auto
                   </button>
                 </div>
               </div>
-              <label
-                className="check"
-                title="Attach active editor snippet to the model (not shown in chat history; .env and other secret files are omitted)"
+              <div
+                className="composer-menu-wrap"
+                onMouseEnter={() => setContextMenuOpen(true)}
+                onMouseLeave={() => { if (!contextMenuPinned) setContextMenuOpen(false); }}
               >
-                <input
-                  type="checkbox"
-                  checked={includeContext}
-                  onChange={(e) => setIncludeContext(e.target.checked)}
-                />
-                Context
-              </label>
-              {(
-                [
-                  ["file", "+File", "Insert active file path (@path) — agent reads it"],
-                  ["selection", "+Sel", "Insert the current selection into the draft"],
-                ] as const
-              ).map(([kind, label, title]) => (
                 <button
-                  key={kind}
                   type="button"
                   className="ghost tiny"
-                  title={title}
-                  onClick={() => post({ type: "insert_context", kind })}
+                  onClick={() => {
+                    if (contextMenuPinned) {
+                      setContextMenuPinned(false);
+                      setContextMenuOpen(false);
+                    } else {
+                      setContextMenuPinned(true);
+                      setContextMenuOpen(true);
+                    }
+                  }}
+                  aria-expanded={contextMenuOpen}
+                  aria-pressed={contextMenuPinned}
                 >
-                  {label}
+                  + Add context ▾
                 </button>
-              ))}
-              <button
-                type="button"
-                className="ghost tiny"
-                disabled={busy || attachmentUploads > 0}
-                title="Attach images, PDF, or DOCX from this device"
-                onClick={() => localAttachInputRef.current?.click()}
-              >
-                +Attach
-              </button>
+                {contextMenuOpen && <div className="composer-menu">
+                  <button type="button" onClick={() => { post({ type: "insert_context", kind: "file" }); setContextMenuPinned(false); setContextMenuOpen(false); }}>Active file</button>
+                  <button type="button" onClick={() => { post({ type: "insert_context", kind: "selection" }); setContextMenuPinned(false); setContextMenuOpen(false); }}>Selection</button>
+                  <button type="button" disabled={busy || attachmentUploads > 0} onClick={() => { localAttachInputRef.current?.click(); setContextMenuPinned(false); setContextMenuOpen(false); }}>Upload</button>
+                  <button type="button" disabled={busy || attachmentUploads > 0} onClick={() => { post({ type: "pick_attach_files" }); setContextMenuPinned(false); setContextMenuOpen(false); }}>Workspace file</button>
+                  <label className="composer-menu-check" title="Attach the active editor snippet to this request">
+                    <span>Include active editor</span>
+                    <input type="checkbox" checked={includeContext} onChange={(e) => setIncludeContext(e.target.checked)} />
+                  </label>
+                </div>}
+              </div>
               <input
                 ref={localAttachInputRef}
                 type="file"
@@ -6497,59 +6586,40 @@ export function App() {
                   );
                 }}
               />
-              <button
-                type="button"
-                className="ghost tiny"
-                disabled={busy || attachmentUploads > 0}
-                title="Attach files from the remote workspace"
-                onClick={() => post({ type: "pick_attach_files" })}
+              <div
+                className="composer-menu-wrap conversation-menu-wrap"
+                onMouseEnter={() => setConversationMenuOpen(true)}
+                onMouseLeave={() => { if (!conversationMenuPinned) setConversationMenuOpen(false); }}
               >
-                +Remote
-              </button>
-              <button
-                type="button"
-                className="ghost tiny"
-                disabled={busy || !items.length}
-                title="Regenerate the last reply"
-                onClick={() => post({ type: "regenerate" })}
-              >
-                Regen
-              </button>
-              <button
-                type="button"
-                className="ghost tiny"
-                disabled={busy || !items.length}
-                title="Fork current conversation into a new chat"
-                onClick={() => {
-                  pendingForkRef.current = true;
-                  beginDraftHandoff();
-                  post({ type: "fork_chat" });
-                }}
-              >
-                <IconFork size={12} /> Fork
-              </button>
-              <button
-                type="button"
-                className="ghost tiny"
-                disabled={busy || !chatId || Boolean(sideChat)}
-                title="Fork this conversation into a temporary side chat"
-                onClick={() => post({ type: "open_side_chat", chatId })}
-              >
-                <IconFork size={12} /> Side chat
-              </button>
-              <button
-                type="button"
-                className="ghost tiny"
-                disabled={busy}
-                title="Start a new chat"
-                onClick={() => {
-                  beginDraftHandoff();
-                  pendingNewChatRef.current = true;
-                  post({ type: "new_chat" });
-                }}
-              >
-                New
-              </button>
+                <button
+                  type="button"
+                  className="ghost tiny"
+                  onClick={() => {
+                    if (conversationMenuPinned) {
+                      setConversationMenuPinned(false);
+                      setConversationMenuOpen(false);
+                    } else {
+                      setConversationMenuPinned(true);
+                      setConversationMenuOpen(true);
+                    }
+                  }}
+                  aria-expanded={conversationMenuOpen}
+                  aria-pressed={conversationMenuPinned}
+                >
+                  Conversation ▾
+                </button>
+                {conversationMenuOpen && <div className="composer-menu conversation-menu">
+                  <button type="button" disabled={busy} onClick={() => { beginDraftHandoff(); pendingNewChatRef.current = true; post({ type: "new_chat" }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
+                    <IconMessageCirclePlus size={14} /><span>New chat</span>
+                  </button>
+                  <button type="button" disabled={busy || !items.length} onClick={() => { pendingForkRef.current = true; beginDraftHandoff(); post({ type: "fork_chat" }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
+                    <IconFork size={14} /><span>Fork to new chat</span>
+                  </button>
+                  <button type="button" disabled={!chatId || Boolean(sideChat)} onClick={() => { post({ type: "open_side_chat", chatId }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
+                    <IconComment /><span>Side Chat</span>
+                  </button>
+                </div>}
+              </div>
             </div>
             {(pendingImages.length > 0 || pendingFiles.length > 0) && (
               <div className="image-attachments">
@@ -6665,6 +6735,24 @@ export function App() {
                     };
                     document.addEventListener("pointermove", onMove);
                     document.addEventListener("pointerup", onUp);
+                  }}
+                />
+                <PinnedContext
+                  text={pinnedText}
+                  draft={pinnedDraft}
+                  editing={pinnedEditing}
+                  onDraft={setPinnedDraft}
+                  onEdit={() => {
+                    setPinnedDraft(pinnedText);
+                    setPinnedEditing(true);
+                  }}
+                  onCancel={() => {
+                    setPinnedDraft(pinnedText);
+                    setPinnedEditing(false);
+                  }}
+                  onSave={() => {
+                    post({ type: "save_pinned", text: pinnedDraft.slice(0, PINNED_CONTEXT_MAX_CHARS) });
+                    setPinnedEditing(false);
                   }}
                 />
                 <textarea
@@ -6943,7 +7031,8 @@ export function App() {
               includeContext: false,
               chatId: sideChat.chatId,
               autoApprove,
-              model: activeModelId || undefined,
+              model: sideChat.modelRoute?.model || undefined,
+              modelRoute: sideChat.modelRoute,
               interaction: effectiveInteraction,
               caveman,
               goal: goalMode,
@@ -6971,6 +7060,15 @@ function IconComment() {
         strokeWidth="2"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function IconCopy() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="9" y="3" width="12" height="14" rx="3" stroke="currentColor" strokeWidth="2" />
+      <rect x="3" y="8" width="13" height="13" rx="3" fill="var(--input-bg)" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
 }
