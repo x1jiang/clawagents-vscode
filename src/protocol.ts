@@ -1,5 +1,12 @@
 /** Typed messages between the extension host and the webview. */
 
+/**
+ * Checkpoint restore, attributed-hunk review, and prompt rewind are retained
+ * for future work but are intentionally unavailable in the product for now.
+ * Keep this shared gate false until their UX and restore semantics are ready.
+ */
+export const ADVANCED_RESTORE_FEATURES_AVAILABLE = false;
+
 export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
 
 /** How the agent talks to you during a turn. */
@@ -20,6 +27,22 @@ export type AutoApprove = {
   browser: boolean;
 };
 
+/** Non-secret model routing pinned to one conversation.
+ *
+ * Endpoint, TLS and credentials deliberately remain workspace settings. A
+ * conversation may select a model provider, but must not silently replace the
+ * user's configured OpenAI-compatible gateway.
+ */
+export type ModelRoute = {
+  provider: string;
+  model: string;
+  reasoning_effort?: string;
+  bedrock_mode?: "iam" | "mantle" | "bag";
+  aws_region?: string;
+  aws_profile?: string;
+  wire_api?: string;
+};
+
 export type ChatSummary = {
   id: string;
   title: string;
@@ -32,6 +55,7 @@ export type ChatSummary = {
   session_prompt_tokens?: number;
   session_completion_tokens?: number;
   session_total_tokens?: number;
+  model_route?: ModelRoute;
   /** Ephemeral extension-host state; never persisted by the sidecar. */
   running?: boolean;
 };
@@ -175,6 +199,7 @@ export type HostToWebview =
       eventsOffset?: number;
       eventsTotal?: number;
       eventsHasMore?: boolean;
+      modelRoute?: ModelRoute;
     }
   | {
       type: "prepend_items";
@@ -184,6 +209,8 @@ export type HostToWebview =
       eventsHasMore: boolean;
     }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
+  | { type: "chat_model_route"; chatId: string; modelRoute: ModelRoute }
+  | { type: "model_changed"; chatId: string; text: string }
   /** A temporary fork rendered in the webview's side-chat overlay. */
   | {
       type: "side_chat_open";
@@ -191,6 +218,7 @@ export type HostToWebview =
       title?: string;
       items: unknown[];
       mode: AgentMode;
+      modelRoute?: ModelRoute;
     }
   | { type: "thread_run_state"; chatId: string; running: boolean }
   | {
@@ -343,6 +371,7 @@ export type WebviewToHost =
       chatId?: string;
       autoApprove?: AutoApprove;
       model?: string;
+      modelRoute?: ModelRoute;
       interaction?: InteractionStyle;
       caveman?: boolean;
       goal?: boolean;
@@ -367,6 +396,7 @@ export type WebviewToHost =
   | { type: "open_side_chat"; chatId?: string }
   | { type: "close_side_chat"; chatId: string }
   | { type: "select_chat"; chatId: string }
+  | { type: "set_chat_model_route"; chatId: string; modelRoute: ModelRoute }
   | { type: "load_older_chat" }
   | { type: "delete_chat"; chatId: string }
   | { type: "delete_chats"; chatIds: string[] }
@@ -457,7 +487,7 @@ export type WebviewToHost =
       /** @deprecated host ignores transcript items */
       items?: unknown[];
     }
-  | { type: "queue_send"; text: string; chatId?: string }
+  | { type: "queue_send"; text: string; chatId?: string; modelRoute?: ModelRoute }
   | { type: "bug_report_capture_screenshot" }
   | {
       type: "bug_report_submit";
@@ -507,7 +537,7 @@ const GRAPHIFY_ACTIONS = new Set([
   "open_folder",
 ]);
 const AGENT_MODES = new Set(["ask", "read_only", "auto", "full_access"]);
-const PROVIDERS = new Set(["openai", "anthropic", "gemini", "bedrock", "tavily"]);
+const PROVIDERS = new Set(["openai", "anthropic", "gemini", "bedrock", "xai", "tavily"]);
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -546,6 +576,19 @@ function autoApprove(value: unknown): boolean {
   );
 }
 
+function modelRoute(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!record(value) || !text(value.provider, 64) || !text(value.model, 256)) return false;
+  if (!/^(auto|openai|anthropic|gemini|bedrock|ollama|xai|profile:[A-Za-z0-9._-]+)$/.test(value.provider)) {
+    return false;
+  }
+  return optionalText(value.reasoning_effort, 32)
+    && optionalText(value.bedrock_mode, 16)
+    && optionalText(value.aws_region, 128)
+    && optionalText(value.aws_profile, 256)
+    && optionalText(value.wire_api, 64);
+}
+
 /** Decode the untrusted webview message before it reaches extension authority. */
 export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
   if (!record(value) || typeof value.type !== "string") return undefined;
@@ -556,12 +599,13 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return text(value.text) && AGENT_MODES.has(String(value.mode))
         && typeof value.includeContext === "boolean" && optionalOpaqueId(value.chatId)
         && autoApprove(value.autoApprove) && optionalText(value.model, 256)
+        && modelRoute(value.modelRoute)
         && (value.interaction === undefined || value.interaction === "interactive" || value.interaction === "auto")
         && (value.caveman === undefined || typeof value.caveman === "boolean")
         && (value.goal === undefined || typeof value.goal === "boolean")
         ? value as WebviewToHost : undefined;
     case "queue_send":
-      return text(value.text) && optionalOpaqueId(value.chatId)
+      return text(value.text) && optionalOpaqueId(value.chatId) && modelRoute(value.modelRoute)
         ? value as WebviewToHost : undefined;
     case "cancel":
       return optionalOpaqueId(value.chatId)
@@ -605,6 +649,9 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
+    case "set_chat_model_route":
+      return opaqueId(value.chatId) && modelRoute(value.modelRoute)
+        ? value as WebviewToHost : undefined;
     case "delete_chats":
       return opaqueIds(value.chatIds) ? value as WebviewToHost : undefined;
     case "rename_chat":

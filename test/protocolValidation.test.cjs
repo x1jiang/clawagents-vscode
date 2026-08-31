@@ -24,6 +24,33 @@ test("accepts a legitimate send request", () => {
   assert.deepEqual(parseWebviewToHost(message), message);
 });
 
+test("accepts bounded thread model routes and rejects malformed providers", () => {
+  const modelRoute = {
+    provider: "anthropic",
+    model: "claude-sonnet-4-5",
+    reasoning_effort: "high",
+  };
+  const patch = {
+    type: "set_chat_model_route",
+    chatId: "chat-123",
+    modelRoute,
+  };
+  assert.deepEqual(parseWebviewToHost(patch), patch);
+  assert.equal(
+    parseWebviewToHost({ ...patch, modelRoute: { provider: "../../evil", model: "x" } }),
+    undefined,
+  );
+  const send = {
+    type: "send",
+    text: "hello",
+    mode: "auto",
+    includeContext: false,
+    chatId: "chat-123",
+    modelRoute,
+  };
+  assert.deepEqual(parseWebviewToHost(send), send);
+});
+
 test("accepts deselect_chat with no payload", () => {
   assert.deepEqual(parseWebviewToHost({ type: "deselect_chat" }), { type: "deselect_chat" });
 });

@@ -8,6 +8,7 @@ import type {
   HostToWebview,
   InteractionStyle,
   JobSummary,
+  ModelRoute,
 } from "./protocol";
 
 export type StreamHandlers = {
@@ -288,9 +289,10 @@ export class GatewayClient {
     return requestJson<Array<Record<string, unknown>>>(this.requireHandle(), "GET", path);
   }
 
-  createChat(mode: AgentMode = "auto") {
+  createChat(mode: AgentMode = "auto", modelRoute?: ModelRoute) {
     return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/chats", {
       mode,
+      model_route: modelRoute,
     });
   }
 
@@ -315,7 +317,7 @@ export class GatewayClient {
 
   patchChat(
     chatId: string,
-    patch: { title?: string; pinned?: boolean; archived?: boolean },
+    patch: { title?: string; pinned?: boolean; archived?: boolean; model_route?: ModelRoute },
   ) {
     return requestJson<Record<string, unknown>>(
       this.requireHandle(),
@@ -503,6 +505,7 @@ export class GatewayClient {
     goal?: boolean,
     images?: Array<{ data: string; media_type: string }>,
     files?: Array<{ data: string; media_type: string; name: string }>,
+    modelRoute?: ModelRoute,
   ): Promise<string | undefined> {
     const handle = this.requireHandle();
     const enableContextObservatory =
@@ -514,6 +517,7 @@ export class GatewayClient {
       lane: "main",
       mode,
       model: model || undefined,
+      model_route: modelRoute,
       auto_approve: autoApprove,
       interaction: interaction || "interactive",
       caveman: Boolean(caveman),

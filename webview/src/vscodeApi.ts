@@ -7,6 +7,7 @@ export type {
   ChatSummary,
   HostToWebview,
   JobSummary,
+  ModelRoute,
   WebviewToHost,
 } from "../../src/protocol";
 export { PINNED_CONTEXT_MAX_CHARS, PLAN_FEEDBACK_MAX_CHARS } from "../../src/protocol";
