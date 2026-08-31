@@ -4010,7 +4010,7 @@ export function App() {
             providers={providerCatalog}
             models={allModels}
             activeModelId={activeModelId}
-            effort={String(threadSettings.reasoning_effort || "medium")}
+            effort={String(threadSettings.reasoning_effort || "")}
             showEffort={modelSupportsEffort(activeModelId || model)}
             efforts={EFFORT_OPTIONS}
             onProviderChange={selectThreadProvider}

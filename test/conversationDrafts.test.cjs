@@ -65,7 +65,7 @@ test("failed navigation restores draft ownership so the composer keeps persistin
 test("closing the last tab or all tabs flushes the composer before deselect", () => {
   assert.match(
     app,
-    /persistDraftNow\(\);\s*draftOwnerRef\.current = undefined;\s*draftOwnerBeforeNavRef\.current = undefined;\s*chatIdRef\.current = undefined;\s*setChatId\(undefined\);\s*setPanel\("history"\);\s*post\(\{ type: "deselect_chat" \}\)/,
+    /persistDraftNow\(\);\s*draftOwnerRef\.current = undefined;\s*draftOwnerBeforeNavRef\.current = undefined;\s*chatIdRef\.current = undefined;\s*setChatId\(undefined\);\s*showPanel\("history"\);\s*post\(\{ type: "deselect_chat" \}\)/,
   );
   assert.match(
     app,
