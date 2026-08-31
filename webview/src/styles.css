@@ -728,7 +728,7 @@ body,
   overflow-wrap: anywhere;
   font-family: inherit;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  padding: 8px 40px 8px 10px;
+  padding: 8px 10px;
   border-radius: 6px;
 }
 
@@ -744,7 +744,6 @@ body,
 
 .assistant-message {
   min-height: 24px;
-  padding-right: 36px;
 }
 
 .copy-message {
