@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.174**
+Publisher **`clawagents`** · version **1.0.175**
 
+- [x] GitHub release `v1.0.175` + VSIX (per-thread model routing, conversation-control polish)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] GitHub release `v1.0.174` + VSIX (concurrent threads, side chat, path lookup, edited-file summary; close-slot race)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] GitHub release `v1.0.173` + VSIX (skill-impact ledger; floor clawagents **6.20.68**)
