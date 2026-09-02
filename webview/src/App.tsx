@@ -2839,7 +2839,7 @@ export function App() {
     if (!pendingQueryJump) return;
     const target = queryNodesRef.current.get(pendingQueryJump.eventIndex);
     if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
     setActiveQueryEventIndex(pendingQueryJump.eventIndex);
     setPendingQueryJump(undefined);
   }, [items, pendingQueryJump, renderWindow]);
@@ -6486,7 +6486,6 @@ export function App() {
 
           {queryIndex.length > 0 && (
             <aside className="query-index" aria-label="Your messages">
-              <div className="query-index-rail" aria-hidden="true" />
               <div className="query-index-ticks" role="list">
                 {queryIndex.map((entry, position) => (
                   <button
