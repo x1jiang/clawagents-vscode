@@ -55,6 +55,18 @@ test("accepts deselect_chat with no payload", () => {
   assert.deepEqual(parseWebviewToHost({ type: "deselect_chat" }), { type: "deselect_chat" });
 });
 
+test("query navigation accepts only a non-negative event position", () => {
+  assert.deepEqual(parseWebviewToHost({ type: "load_query_index" }), {
+    type: "load_query_index",
+  });
+  assert.deepEqual(parseWebviewToHost({ type: "jump_to_query", eventIndex: 12 }), {
+    type: "jump_to_query",
+    eventIndex: 12,
+  });
+  assert.equal(parseWebviewToHost({ type: "jump_to_query", eventIndex: -1 }), undefined);
+  assert.equal(parseWebviewToHost({ type: "jump_to_query", eventIndex: 1.5 }), undefined);
+});
+
 test("accepts bounded side-chat fork and close requests", () => {
   for (const message of [
     { type: "open_side_chat", chatId: "chat-1" },

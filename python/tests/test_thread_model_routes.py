@@ -67,6 +67,36 @@ def test_old_chat_is_migrated_without_changing_timestamp(tmp_path: Path, monkeyp
     assert json.loads(path.read_text(encoding="utf-8"))["model_route"] == meta["model_route"]
 
 
+def test_query_index_uses_persisted_event_positions_and_compact_previews(
+    tmp_path: Path, monkeypatch
+):
+    _isolate_chat_files(tmp_path, monkeypatch)
+    chat_id = "chat_query_index"
+    log = tmp_path / f"{chat_id}.ui.jsonl"
+    log.write_text(
+        "\n".join(
+            [
+                json.dumps({"kind": "user", "text": "First question", "ts": 1}),
+                json.dumps({"kind": "assistant", "text": "Answer", "ts": 2}),
+                json.dumps({"kind": "user", "text": "Second\nquestion", "ts": 3}),
+                json.dumps({"kind": "done", "status": "completed", "ts": 4}),
+                json.dumps({"kind": "user", "text": "Third question", "ts": 5}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert chats.list_user_event_index(chat_id) == [
+        {"event_index": 0, "text": "First question", "ts": 1},
+        {"event_index": 2, "text": "Second question", "ts": 3},
+        {"event_index": 4, "text": "Third question", "ts": 5},
+    ]
+    page = chats.read_ui_events_page(chat_id, tail=3, around=2)
+    assert page["offset"] == 1
+    assert [event["kind"] for event in page["events"]] == ["assistant", "user", "done"]
+
+
 def test_route_overlay_isolated_between_threads():
     defaults = {
         "provider": "openai",

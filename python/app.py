@@ -20,6 +20,7 @@ from chats import (
     delete_chat,
     fork_chat,
     get_chat,
+    list_user_event_index,
     list_chats,
     patch_chat,
     read_ui_events,
@@ -1276,12 +1277,17 @@ def create_app() -> FastAPI:
         except ValueError:
             tail = 400
         before_raw = qs.get("before")
+        around_raw = qs.get("around")
         before: int | None
         try:
             before = int(before_raw) if before_raw is not None else None
         except ValueError:
             before = None
-        page = read_ui_events_page(chat_id, tail=tail, before=before)
+        try:
+            around = int(around_raw) if around_raw is not None else None
+        except ValueError:
+            around = None
+        page = read_ui_events_page(chat_id, tail=tail, before=before, around=around)
         return {
             **meta,
             "events": page["events"],
@@ -1289,6 +1295,15 @@ def create_app() -> FastAPI:
             "events_offset": page["offset"],
             "events_has_more": page["has_more"],
         }
+
+    @app.get("/chats/{chat_id}/query-index")
+    async def chats_query_index(chat_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        if not get_chat(chat_id):
+            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+        return {"entries": list_user_event_index(chat_id)}
 
     @app.patch("/chats/{chat_id}")
     async def chats_patch(chat_id: str, body: PatchChatBody, request: Request):

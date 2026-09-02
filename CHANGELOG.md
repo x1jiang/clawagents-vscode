@@ -1,3 +1,7 @@
+## Unreleased
+
+- **Jump between your messages without losing your place.** A discreet, edge-hover transcript map now previews every user query, highlights the query nearest the viewport, and provides previous/next controls. It remains an overlay rather than consuming chat width; selecting an older query loads its surrounding history and scrolls directly to it.
+
 ## 1.0.177
 
 - **Gemini 3.8 Flash** (`gemini-3.8-flash`) is in the Google Gemini model picker. Cost estimate uses the introductory rate ($0.75 / $3.75 per 1M input/output through 31 December 2026). Existing saved Gemini models are unchanged (default remains 3.7 Flash).

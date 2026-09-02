@@ -60,6 +60,15 @@ export type ChatSummary = {
   running?: boolean;
 };
 
+/** A compact, stable pointer to a user-authored message in the UI event log. */
+export type QueryIndexEntry = {
+  /** Zero-based event position in the persisted conversation log. */
+  eventIndex: number;
+  /** Plain-text preview, intentionally capped by the sidecar. */
+  text: string;
+  timestamp?: string;
+};
+
 export type HostToWebview =
   | {
       type: "ready";
@@ -208,6 +217,17 @@ export type HostToWebview =
       eventsTotal?: number;
       eventsHasMore: boolean;
     }
+  | {
+      /** Replaces the mounted transcript with the page surrounding a query. */
+      type: "jump_to_query";
+      chatId: string;
+      targetEventIndex: number;
+      items: unknown[];
+      eventsOffset: number;
+      eventsTotal?: number;
+      eventsHasMore: boolean;
+    }
+  | { type: "query_index"; chatId: string; entries: QueryIndexEntry[] }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
   | { type: "chat_model_route"; chatId: string; modelRoute: ModelRoute }
   | { type: "model_changed"; chatId: string; text: string }
@@ -398,6 +418,8 @@ export type WebviewToHost =
   | { type: "select_chat"; chatId: string }
   | { type: "set_chat_model_route"; chatId: string; modelRoute: ModelRoute }
   | { type: "load_older_chat" }
+  | { type: "load_query_index" }
+  | { type: "jump_to_query"; eventIndex: number }
   | { type: "delete_chat"; chatId: string }
   | { type: "delete_chats"; chatIds: string[] }
   | { type: "rename_chat"; chatId: string; title: string }
@@ -511,7 +533,7 @@ const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
-  "load_stats", "bug_report_capture_screenshot", "load_older_chat",
+  "load_stats", "bug_report_capture_screenshot", "load_older_chat", "load_query_index",
   "list_jobs", "load_pinned",
 ]);
 
@@ -649,6 +671,9 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         : undefined;
     case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
+    case "jump_to_query":
+      return Number.isInteger(value.eventIndex) && Number(value.eventIndex) >= 0
+        ? value as WebviewToHost : undefined;
     case "set_chat_model_route":
       return opaqueId(value.chatId) && modelRoute(value.modelRoute)
         ? value as WebviewToHost : undefined;

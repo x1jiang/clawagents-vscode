@@ -298,7 +298,7 @@ export class GatewayClient {
 
   getChat(
     chatId: string,
-    opts?: { tail?: number; before?: number; all?: boolean },
+    opts?: { tail?: number; before?: number; around?: number; all?: boolean },
   ) {
     const qs = new URLSearchParams();
     if (opts?.all) {
@@ -306,12 +306,23 @@ export class GatewayClient {
     } else {
       if (opts?.tail != null) qs.set("tail", String(opts.tail));
       if (opts?.before != null) qs.set("before", String(opts.before));
+      if (opts?.around != null) qs.set("around", String(opts.around));
     }
     const q = qs.toString();
     return requestJson<Record<string, unknown>>(
       this.requireHandle(),
       "GET",
       `/chats/${encodeURIComponent(chatId)}${q ? `?${q}` : ""}`,
+    );
+  }
+
+  getChatQueryIndex(chatId: string) {
+    return requestJson<{
+      entries: Array<{ event_index: number; text: string; ts?: string | number }>;
+    }>(
+      this.requireHandle(),
+      "GET",
+      `/chats/${encodeURIComponent(chatId)}/query-index`,
     );
   }
 

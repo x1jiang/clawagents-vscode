@@ -677,6 +677,124 @@ body,
   gap: 12px;
 }
 
+/* A transcript map that lives over the panel edge, never in the message flow.
+ * It stays deliberately quiet until the pointer reaches the edge. */
+.query-index {
+  position: absolute;
+  z-index: 8;
+  top: 132px;
+  right: 2px;
+  bottom: 108px;
+  width: 28px;
+  min-height: 96px;
+  opacity: 0.1;
+  transition: opacity 150ms ease;
+}
+
+.query-index:hover,
+.query-index:focus-within {
+  opacity: 0.72;
+}
+
+.query-index-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 13px;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 72%, transparent);
+}
+
+.query-index-ticks {
+  position: absolute;
+  inset: 0;
+}
+
+.query-index-tick {
+  position: absolute;
+  left: 6px;
+  width: 16px;
+  height: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.query-index-tick:hover,
+.query-index-tick:focus-visible,
+.query-index-tick.active {
+  width: 22px;
+  left: 3px;
+  height: 5px;
+  background: var(--accent);
+  outline: none;
+}
+
+.query-index-preview {
+  position: absolute;
+  right: 28px;
+  top: 50%;
+  display: block;
+  width: min(280px, 52vw);
+  max-height: 4.2em;
+  overflow: hidden;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  background: var(--input-bg);
+  box-shadow: 0 4px 16px color-mix(in srgb, #000 28%, transparent);
+  font: inherit;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translateY(-50%) translateX(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.query-index-tick:hover .query-index-preview,
+.query-index-tick:focus-visible .query-index-preview {
+  opacity: 1;
+  transform: translateY(-50%);
+}
+
+.query-index-actions {
+  position: absolute;
+  right: 1px;
+  bottom: -58px;
+  display: grid;
+  gap: 3px;
+}
+
+.query-index-arrow {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--fg);
+  background: var(--input-bg);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.query-index-arrow:hover:not(:disabled),
+.query-index-arrow:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.query-index-arrow:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
 .empty {
   color: var(--muted);
   line-height: 1.5;

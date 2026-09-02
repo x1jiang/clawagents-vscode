@@ -577,15 +577,29 @@ def read_ui_events_page(
     *,
     tail: int = DEFAULT_UI_EVENTS_TAIL,
     before: int | None = None,
+    around: int | None = None,
 ) -> dict[str, Any]:
     """Paginated UI log for chat restore / load-older.
 
     - Default: last ``tail`` events.
     - ``before``: exclusive end index into the full log (load older page ending
       just before that index).
+    - ``around``: event position to centre in a page (used by transcript jumps).
     """
     total = count_ui_events(chat_id)
     page_size = max(1, min(int(tail), 2000))
+    if around is not None:
+        center = max(0, min(int(around), max(0, total - 1)))
+        start = max(0, center - page_size // 2)
+        end = min(total, start + page_size)
+        start = max(0, end - page_size)
+        events = read_ui_events(chat_id, offset=start, limit=end - start)
+        return {
+            "events": events,
+            "total": total,
+            "offset": start,
+            "has_more": start > 0,
+        }
     if before is None:
         start = max(0, total - page_size)
         events = read_ui_events(chat_id, offset=start, limit=page_size)
@@ -604,6 +618,47 @@ def read_ui_events_page(
         "offset": start,
         "has_more": start > 0,
     }
+
+
+def list_user_event_index(chat_id: str, *, preview_chars: int = 180) -> list[dict[str, Any]]:
+    """Return small navigation entries without sending the whole transcript.
+
+    The event position is deliberately the raw JSONL index rather than a
+    user-turn ordinal: it remains valid when assistant/status events are added
+    between prompts and allows the client to request a page around one query.
+    """
+    try:
+        path = chat_ui_log_path(chat_id)
+    except ValueError:
+        return []
+    if not path.exists():
+        return []
+    entries: list[dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            event_index = -1
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                event_index += 1
+                if event.get("kind") != "user":
+                    continue
+                text = " ".join(display_user_text(str(event.get("text") or "")).split())
+                if len(text) > preview_chars:
+                    text = text[: preview_chars - 1].rstrip() + "…"
+                entries.append({
+                    "event_index": event_index,
+                    "text": text or "(empty message)",
+                    "ts": event.get("ts"),
+                })
+    except OSError:
+        return []
+    return entries
 
 
 def _ui_log_contains(chat_id: str, needle: str, *, max_bytes: int = 512_000) -> bool:
