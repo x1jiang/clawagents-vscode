@@ -1069,6 +1069,9 @@ const TranscriptItem = memo(function TranscriptItem({
 
 /** Cap DOM nodes for long transcripts; "Show more" expands the window. */
 const TRANSCRIPT_RENDER_CHUNK = 120;
+const QUERY_NAV_MAX_EXPANDED = 9;
+const QUERY_NAV_COMPACT_COUNT = 5;
+const QUERY_NAV_ROW_HEIGHT = 20;
 
 function SideChatOverlay({
   sideChat,
@@ -1409,6 +1412,7 @@ export function App() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
   const queryNodesRef = useRef(new Map<number, HTMLDivElement>());
+  const queryJumpAnimationTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoApproveRef = useRef<HTMLDivElement>(null);
   /** When false, streaming tokens must not yank scroll away from the user. */
   const stickToBottomRef = useRef(true);
@@ -2840,9 +2844,26 @@ export function App() {
     const target = queryNodesRef.current.get(pendingQueryJump.eventIndex);
     if (!target) return;
     target.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (queryJumpAnimationTimerRef.current) {
+      clearTimeout(queryJumpAnimationTimerRef.current);
+    }
+    target.classList.remove("query-jump-target");
+    // Restart the highlight when the user selects the same query twice.
+    void target.offsetWidth;
+    target.classList.add("query-jump-target");
+    queryJumpAnimationTimerRef.current = setTimeout(() => {
+      target.classList.remove("query-jump-target");
+      queryJumpAnimationTimerRef.current = undefined;
+    }, 900);
     setActiveQueryEventIndex(pendingQueryJump.eventIndex);
     setPendingQueryJump(undefined);
   }, [items, pendingQueryJump, renderWindow]);
+
+  useEffect(() => () => {
+    if (queryJumpAnimationTimerRef.current) {
+      clearTimeout(queryJumpAnimationTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (!stickToBottomRef.current) {
@@ -4116,8 +4137,15 @@ export function App() {
     (entry) => entry.eventIndex === activeQueryEventIndex,
   );
   const compactQueryEntries = useMemo(() => {
-    const visibleCount = 5;
     const center = activeQueryPosition >= 0 ? activeQueryPosition : queryIndex.length - 1;
+    if (queryIndex.length <= QUERY_NAV_MAX_EXPANDED) {
+      return queryIndex.map((entry, position) => ({
+        entry,
+        position,
+        distance: Math.abs(position - center),
+      }));
+    }
+    const visibleCount = QUERY_NAV_COMPACT_COUNT;
     const start = Math.max(
       0,
       Math.min(center - Math.floor(visibleCount / 2), Math.max(0, queryIndex.length - visibleCount)),
@@ -6498,7 +6526,13 @@ export function App() {
           </main>
 
           {compactQueryEntries.length > 0 && (
-            <aside className="query-index" aria-label="Your messages">
+            <aside
+              className="query-index"
+              aria-label="Your messages"
+              style={{
+                height: `${Math.max(56, compactQueryEntries.length * QUERY_NAV_ROW_HEIGHT)}px`,
+              }}
+            >
               <div
                 className="query-index-ticks"
                 role="list"
