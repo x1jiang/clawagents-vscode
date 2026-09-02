@@ -3518,6 +3518,12 @@ function eventTimestamp(value: unknown): string | undefined {
   return undefined;
 }
 
+function completionStatus(value: unknown): string {
+  const status = String(value || "").trim();
+  if (!status || /^(done|complete|completed)$/i.test(status)) return "Done";
+  return `Done · ${status}`;
+}
+
 function eventsToItems(events: Array<Record<string, unknown>>): unknown[] {
   const items: unknown[] = [];
   for (const ev of events) {
@@ -3539,7 +3545,7 @@ function eventsToItems(events: Array<Record<string, unknown>>): unknown[] {
     } else if (kind === "done") {
       items.push({
         kind: "status",
-        text: `Done · ${ev.status || "done"}${ev.iterations != null ? ` · ${ev.iterations} iters` : ""}`,
+        text: `${completionStatus(ev.status)}${ev.iterations != null ? ` · ${ev.iterations} iters` : ""}`,
       });
     }
   }

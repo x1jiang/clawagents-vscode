@@ -778,6 +778,13 @@ body,
   background: var(--input-bg);
 }
 
+.copy-message.copied {
+  opacity: 1;
+  color: var(--accent);
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
 .copy-message:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
@@ -1748,11 +1755,32 @@ button.send:not(.icon-btn) {
 }
 
 .changed-files-title {
+  width: 100%;
   display: flex;
   align-items: baseline;
   gap: 8px;
   padding: 8px 10px;
+  border: 0;
   border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.changed-files-title:hover,
+.changed-files-title:focus-visible {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.changed-files-title:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.changed-files-title[aria-expanded="false"] {
+  border-bottom: 0;
 }
 
 .changed-files-title strong {
@@ -1762,6 +1790,11 @@ button.send:not(.icon-btn) {
 .changed-files-title span {
   color: var(--muted);
   font-size: 11px;
+}
+
+.changed-files-caret {
+  margin-left: auto;
+  color: var(--muted);
 }
 
 .changed-files-list {
