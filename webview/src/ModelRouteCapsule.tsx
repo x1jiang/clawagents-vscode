@@ -12,6 +12,8 @@ type EffortOption = {
   label: string;
 };
 
+const COMMON_OPENAI_MODELS = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
+
 type Props = {
   disabled: boolean;
   busy: boolean;
@@ -50,6 +52,11 @@ export function ModelRouteCapsule({
   const root = useRef<HTMLDivElement>(null);
   const activeModel = models.find((item) => item.id === activeModelId);
   const effortLabel = efforts.find((item) => item.value === effort)?.label || "Default";
+  const commonModels = COMMON_OPENAI_MODELS.flatMap((id) => {
+    const model = models.find((item) => item.id === id);
+    return model ? [model] : [];
+  });
+  const otherModels = models.filter((item) => !COMMON_OPENAI_MODELS.includes(item.id));
 
   useEffect(() => {
     if (!open) return undefined;
@@ -95,8 +102,9 @@ export function ModelRouteCapsule({
                 type="button"
                 className={providerValue === "auto" ? "selected" : ""}
                 onClick={() => onProviderChange("auto")}
+                title="Use the saved default provider. It does not automatically choose the best model."
               >
-                <span>Auto</span>
+                <span>Auto (default)</span>
                 {providerValue === "auto" && <span aria-hidden="true">✓</span>}
               </button>
               {providers.map((provider) => (
@@ -129,7 +137,23 @@ export function ModelRouteCapsule({
                   <span>{activeModelId} (unavailable)</span><span aria-hidden="true">✓</span>
                 </button>
               )}
-              {models.map((item) => (
+              {commonModels.length > 0 && <div className="model-route-group-label">Common</div>}
+              {commonModels.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={item.available === false}
+                  className={activeModelId === item.id ? "selected" : ""}
+                  onClick={() => onModelChange(item.id)}
+                >
+                  <span>{item.label || item.id}</span>
+                  {activeModelId === item.id && <span aria-hidden="true">✓</span>}
+                </button>
+              ))}
+              {commonModels.length > 0 && otherModels.length > 0 && (
+                <div className="model-route-group-label model-route-group-divider">All models</div>
+              )}
+              {otherModels.map((item) => (
                 <button
                   key={item.id}
                   type="button"

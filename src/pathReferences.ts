@@ -14,7 +14,12 @@ const BARE_FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$
 const PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._ -]*$/;
 const SEARCH_ARTIFACT_DIRS = new Set([".clawagents", ".git", "node_modules"]);
 
-/** True only for a plain file name that is safe to use in a workspace glob. */
+/** True only for a plain file name that is safe to use in a workspace glob.
+ *
+ * This is used only after a host request already contains a file path.  It is
+ * deliberately not used to infer a path from an inline code span: dotted
+ * identifiers such as `PATIENT.BIRTH_DATE` are common in prose and queries.
+ */
 export function isBareFileName(value: string): boolean {
   return BARE_FILE_NAME.test(value);
 }
@@ -58,9 +63,6 @@ export function parseInlinePathReference(value: string): PathReference | undefin
   if (!normalized || normalized.includes("\\")) return undefined;
 
   const absolute = normalized.startsWith("/");
-  if (!absolute && isBareFileName(normalized)) {
-    return line ? { path: normalized, line } : { path: normalized };
-  }
   const segments = normalized.split("/").filter(Boolean);
   if (segments.length < (absolute ? 1 : 2) || segments.some((segment) => !PATH_SEGMENT.test(segment))) {
     return undefined;

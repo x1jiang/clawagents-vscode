@@ -251,6 +251,21 @@ body,
   opacity: 0.5;
 }
 
+.model-route-group-label {
+  padding: 6px 6px 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.model-route-group-divider {
+  margin-top: 5px;
+  border-top: 1px solid var(--border);
+  padding-top: 7px;
+}
+
 .model-route-unavailable {
   margin: 6px;
   color: var(--muted);

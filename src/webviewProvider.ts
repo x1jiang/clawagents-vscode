@@ -2941,13 +2941,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     line?: number,
     opts?: { quiet?: boolean },
   ): Promise<void> {
-    const quiet = Boolean(opts?.quiet);
     const fail = (message: string) => {
-      if (quiet) {
-        this.sidecar.output.appendLine(`autoOpen: ${message}`);
-        return;
-      }
-      this.post({ type: "error", message });
+      // Opening a stale path from chat is expected (for example when an
+      // inline code value looks file-like).  Keep diagnostics available to
+      // extension developers without adding noisy error cards to the chat.
+      this.sidecar.output.appendLine(`${opts?.quiet ? "autoOpen" : "openPath"}: ${message}`);
     };
     try {
       const folders = vscode.workspace.workspaceFolders ?? [];
@@ -2984,7 +2982,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         preview: true,
         // Preserve focus for auto-open convenience; user-initiated opens still
         // focus the editor (quiet=false).
-        preserveFocus: quiet,
+        preserveFocus: Boolean(opts?.quiet),
       });
       if (line && line > 0) {
         const pos = new vscode.Position(line - 1, 0);
