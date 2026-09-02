@@ -24,7 +24,6 @@ const {
 test.after(() => fs.rmSync(outputDir, { recursive: true, force: true }));
 
 test("parses inline file and directory references", () => {
-  assert.deepEqual(parseInlinePathReference("report.md"), { path: "report.md" });
   assert.deepEqual(parseInlinePathReference("src/report.ts:42"), { path: "src/report.ts", line: 42 });
   assert.deepEqual(parseInlinePathReference("src/report.ts#L17C3"), { path: "src/report.ts", line: 17 });
   assert.deepEqual(parseInlinePathReference("/workspace/src/report.ts:9"), {
@@ -40,7 +39,16 @@ test("parses inline file and directory references", () => {
 });
 
 test("does not turn prose, URLs, or unsafe values into path references", () => {
-  for (const value of ["diagnosis-validation scripts", "https://example.com/a.py", "#heading", "--flag", "../secret.txt"]) {
+  for (const value of [
+    "diagnosis-validation scripts",
+    "https://example.com/a.py",
+    "#heading",
+    "--flag",
+    "../secret.txt",
+    "report.md",
+    "ORDER_RESULTS.PAT_ENC_CSN_ID",
+    "PATIENT.BIRTH_DATE",
+  ]) {
     assert.equal(parseInlinePathReference(value), undefined);
   }
   assert.equal(isBareFileName("report.md"), true);

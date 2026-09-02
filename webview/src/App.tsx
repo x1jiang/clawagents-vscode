@@ -392,8 +392,14 @@ function safeJson(value: unknown): string {
   }
 }
 
-function copyText(text: string) {
-  void navigator.clipboard?.writeText(text);
+async function copyText(text: string): Promise<boolean> {
+  if (!navigator.clipboard?.writeText) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function messageTimestamp(): string {
@@ -408,6 +414,12 @@ function formatMessageTime(value?: string): string | undefined {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatCompletionStatus(status?: string): string {
+  const value = status?.trim();
+  if (!value || /^(done|complete|completed)$/i.test(value)) return "Done";
+  return `Done · ${value}`;
 }
 
 function looksLikeDiff(text: string): boolean {
@@ -618,25 +630,35 @@ type TranscriptItemProps = {
 };
 
 function ChangedFilesSummary({ files }: { files: ChangedFile[] }) {
+  const [expanded, setExpanded] = useState(true);
   return (
     <section className="changed-files-summary" aria-label={`Edited ${files.length} files`}>
-      <div className="changed-files-title">
+      <button
+        type="button"
+        className="changed-files-title"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+        title={expanded ? "Collapse edited files" : "Expand edited files"}
+      >
         <strong>Edited {files.length} file{files.length === 1 ? "" : "s"}</strong>
-        <span>Click a file to open it</span>
-      </div>
-      <div className="changed-files-list">
-        {files.map((file) => (
-          <button
-            key={file.path}
-            type="button"
-            className="changed-file-link"
-            title={`Open ${file.path}`}
-            onClick={() => post({ type: "open_file", path: file.path })}
-          >
-            {file.path}
-          </button>
-        ))}
-      </div>
+        <span>{expanded ? "Click a file to open it" : "Click to show files"}</span>
+        <span className="changed-files-caret" aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded && (
+        <div className="changed-files-list">
+          {files.map((file) => (
+            <button
+              key={file.path}
+              type="button"
+              className="changed-file-link"
+              title={`Open ${file.path}`}
+              onClick={() => post({ type: "open_file", path: file.path })}
+            >
+              {file.path}
+            </button>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -663,6 +685,37 @@ const assistantMarkdownComponents: Components = {
   },
 };
 
+function CopyMessageButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => () => {
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (!await copyText(text)) return;
+    setCopied(true);
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => {
+      setCopied(false);
+      resetTimer.current = undefined;
+    }, 2_500);
+  }, [text]);
+
+  return (
+    <button
+      type="button"
+      className={`copy-message${copied ? " copied" : ""}`}
+      title={copied ? "Copied" : "Copy message"}
+      aria-label={copied ? "Message copied" : "Copy message"}
+      onClick={() => void handleCopy()}
+    >
+      {copied ? <IconCheck /> : <IconCopy />}
+    </button>
+  );
+}
+
 const TranscriptItem = memo(function TranscriptItem({
   item,
   changedFiles,
@@ -686,15 +739,7 @@ const TranscriptItem = memo(function TranscriptItem({
           </div>
           <div className="user-message">
             <pre className="user-text">{item.text}</pre>
-            <button
-              type="button"
-              className="copy-message"
-              title="Copy message"
-              aria-label="Copy message"
-              onClick={() => copyText(item.text)}
-            >
-              <IconCopy />
-            </button>
+            <CopyMessageButton text={item.text} />
           </div>
         </>
       )}
@@ -711,15 +756,7 @@ const TranscriptItem = memo(function TranscriptItem({
               </ReactMarkdown>
               {showStreamingCursor && <span className="cursor" />}
             </div>
-            <button
-              type="button"
-              className="copy-message"
-              title="Copy message"
-              aria-label="Copy message"
-              onClick={() => copyText(item.text)}
-            >
-              <IconCopy />
-            </button>
+            <CopyMessageButton text={item.text} />
             {onRegenerate && (
               <button type="button" className="copy-message regenerate-message" title="Regenerate reply" aria-label="Regenerate reply" onClick={onRegenerate}>↻</button>
             )}
@@ -1708,7 +1745,7 @@ export function App() {
           case "plan_approval_required": return append({ kind: "plan_approval", requestId: msg.requestId, planText: msg.planText });
           case "plan_approved": return { ...current, items: current.items.map((item) => item.kind === "plan_approval" && !item.resolved ? { ...item, resolved: "approve" as const } : item) };
           case "file_changed": return append({ kind: "file", path: msg.path });
-          case "done": return { ...append({ kind: "status", text: `Done · ${msg.status}` }), busy: false };
+          case "done": return { ...append({ kind: "status", text: formatCompletionStatus(msg.status) }), busy: false };
           case "error": return { ...append({ kind: "error", text: msg.message }), busy: false };
           case "cancelled": return { ...append({ kind: "status", text: "Cancelled" }), busy: false };
           default: return current;
@@ -2569,7 +2606,7 @@ export function App() {
             ...prev.filter((it) => it.kind !== "status"),
             {
               kind: "status",
-              text: `Done · ${msg.status}${msg.iterations != null ? ` · ${msg.iterations} iters` : ""}${
+              text: `${formatCompletionStatus(msg.status)}${msg.iterations != null ? ` · ${msg.iterations} iters` : ""}${
                 runCost != null ? ` · run ~${formatUsd(runCost)}` : ""
               }`,
             },
@@ -7069,6 +7106,20 @@ function IconCopy() {
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <rect x="9" y="3" width="12" height="14" rx="3" stroke="currentColor" strokeWidth="2" />
       <rect x="3" y="8" width="13" height="13" rx="3" fill="var(--input-bg)" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="m5 12 4.5 4.5L19 7"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
