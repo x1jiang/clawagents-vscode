@@ -682,12 +682,14 @@ body,
 .query-index {
   position: absolute;
   z-index: 8;
-  top: 126px;
-  right: 1px;
-  bottom: 94px;
-  width: 14px;
-  min-height: 96px;
+  top: 50%;
+  right: 0;
+  bottom: auto;
+  width: 58px;
+  height: 100px;
+  min-height: 0;
   opacity: 0.035;
+  transform: translateY(-50%);
   transition: opacity 150ms ease;
 }
 
@@ -698,35 +700,56 @@ body,
 
 .query-index-ticks {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 34px;
+  display: grid;
 }
 
 .query-index-tick {
-  position: absolute;
-  left: 3px;
-  width: 8px;
-  height: 2px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 34px;
+  height: 100%;
   padding: 0;
   border: 0;
-  border-radius: 999px;
-  background: var(--muted);
+  background: transparent;
   cursor: pointer;
-  transform: translateY(-50%);
 }
 
-.query-index-tick:hover,
-.query-index-tick:focus-visible,
-.query-index-tick.active {
-  width: 10px;
-  left: 2px;
+.query-index-mark {
+  width: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: width 120ms ease, height 120ms ease, background 120ms ease;
+}
+
+.query-index-tick.distance-1 .query-index-mark {
+  width: 14px;
+}
+
+.query-index-tick.active .query-index-mark {
+  width: 24px;
   height: 3px;
   background: var(--accent);
+}
+
+.query-index-tick:hover .query-index-mark,
+.query-index-tick:focus-visible .query-index-mark {
+  background: var(--accent);
+}
+
+.query-index-tick:focus-visible {
   outline: none;
 }
 
 .query-index-preview {
   position: absolute;
-  right: 18px;
+  right: 42px;
   top: 50%;
   display: block;
   width: min(280px, 52vw);
@@ -755,10 +778,13 @@ body,
 
 .query-index-actions {
   position: absolute;
-  right: -1px;
-  bottom: -36px;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 22px;
   display: grid;
-  gap: 2px;
+  grid-template-rows: repeat(2, 1fr);
+  gap: 0;
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
@@ -771,16 +797,25 @@ body,
 }
 
 .query-index-arrow {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: auto;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 0;
   color: var(--fg);
   background: var(--input-bg);
   cursor: pointer;
   font: inherit;
   line-height: 1;
+}
+
+.query-index-arrow:first-child {
+  border-radius: 5px 5px 0 0;
+}
+
+.query-index-arrow:last-child {
+  border-top: 0;
+  border-radius: 0 0 5px 5px;
 }
 
 .query-index-arrow:hover:not(:disabled),

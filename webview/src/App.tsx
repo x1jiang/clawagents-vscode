@@ -4115,6 +4115,19 @@ export function App() {
   const activeQueryPosition = queryIndex.findIndex(
     (entry) => entry.eventIndex === activeQueryEventIndex,
   );
+  const compactQueryEntries = useMemo(() => {
+    const visibleCount = 5;
+    const center = activeQueryPosition >= 0 ? activeQueryPosition : queryIndex.length - 1;
+    const start = Math.max(
+      0,
+      Math.min(center - Math.floor(visibleCount / 2), Math.max(0, queryIndex.length - visibleCount)),
+    );
+    return queryIndex.slice(start, start + visibleCount).map((entry, offset) => ({
+      entry,
+      position: start + offset,
+      distance: Math.abs(start + offset - center),
+    }));
+  }, [activeQueryPosition, queryIndex]);
 
   return (
     <div className="app">
@@ -6484,23 +6497,25 @@ export function App() {
             <div ref={bottomRef} />
           </main>
 
-          {queryIndex.length > 0 && (
+          {compactQueryEntries.length > 0 && (
             <aside className="query-index" aria-label="Your messages">
-              <div className="query-index-ticks" role="list">
-                {queryIndex.map((entry, position) => (
+              <div
+                className="query-index-ticks"
+                role="list"
+                style={{ gridTemplateRows: `repeat(${compactQueryEntries.length}, 1fr)` }}
+              >
+                {compactQueryEntries.map(({ entry, position, distance }) => (
                   <button
                     key={entry.eventIndex}
                     type="button"
                     role="listitem"
-                    className={`query-index-tick${entry.eventIndex === activeQueryEventIndex ? " active" : ""}`}
-                    style={{
-                      top: `${queryIndex.length === 1 ? 50 : (position / (queryIndex.length - 1)) * 100}%`,
-                    }}
+                    className={`query-index-tick distance-${Math.min(distance, 2)}${entry.eventIndex === activeQueryEventIndex ? " active" : ""}`}
                     title={entry.text}
                     aria-label={`Message ${position + 1} of ${queryIndex.length}: ${entry.text}`}
                     aria-current={entry.eventIndex === activeQueryEventIndex ? "true" : undefined}
                     onClick={() => navigateToQuery(entry)}
                   >
+                    <span className="query-index-mark" aria-hidden="true" />
                     <span className="query-index-preview">{entry.text}</span>
                   </button>
                 ))}
