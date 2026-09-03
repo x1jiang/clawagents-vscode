@@ -1069,9 +1069,6 @@ const TranscriptItem = memo(function TranscriptItem({
 
 /** Cap DOM nodes for long transcripts; "Show more" expands the window. */
 const TRANSCRIPT_RENDER_CHUNK = 120;
-const QUERY_NAV_MAX_EXPANDED = 9;
-const QUERY_NAV_COMPACT_COUNT = 5;
-const QUERY_NAV_ROW_HEIGHT = 20;
 
 function SideChatOverlay({
   sideChat,
@@ -1255,6 +1252,7 @@ export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [queryIndex, setQueryIndex] = useState<QueryIndexEntry[]>([]);
   const [activeQueryEventIndex, setActiveQueryEventIndex] = useState<number>();
+  const [hoveredQueryPosition, setHoveredQueryPosition] = useState<number>();
   const [pendingQueryJump, setPendingQueryJump] = useState<QueryIndexEntry>();
   /** How many trailing items to mount (virtualization window). */
   const [renderWindow, setRenderWindow] = useState(TRANSCRIPT_RENDER_CHUNK);
@@ -4136,26 +4134,6 @@ export function App() {
   const activeQueryPosition = queryIndex.findIndex(
     (entry) => entry.eventIndex === activeQueryEventIndex,
   );
-  const compactQueryEntries = useMemo(() => {
-    const center = activeQueryPosition >= 0 ? activeQueryPosition : queryIndex.length - 1;
-    if (queryIndex.length <= QUERY_NAV_MAX_EXPANDED) {
-      return queryIndex.map((entry, position) => ({
-        entry,
-        position,
-        distance: Math.abs(position - center),
-      }));
-    }
-    const visibleCount = QUERY_NAV_COMPACT_COUNT;
-    const start = Math.max(
-      0,
-      Math.min(center - Math.floor(visibleCount / 2), Math.max(0, queryIndex.length - visibleCount)),
-    );
-    return queryIndex.slice(start, start + visibleCount).map((entry, offset) => ({
-      entry,
-      position: start + offset,
-      distance: Math.abs(start + offset - center),
-    }));
-  }, [activeQueryPosition, queryIndex]);
 
   return (
     <div className="app">
@@ -6525,34 +6503,39 @@ export function App() {
             <div ref={bottomRef} />
           </main>
 
-          {compactQueryEntries.length > 0 && (
+          {queryIndex.length > 0 && (
             <aside
               className="query-index"
               aria-label="Your messages"
-              style={{
-                height: `${Math.max(56, compactQueryEntries.length * QUERY_NAV_ROW_HEIGHT)}px`,
-              }}
+              onMouseLeave={() => setHoveredQueryPosition(undefined)}
             >
-              <div
-                className="query-index-ticks"
-                role="list"
-                style={{ gridTemplateRows: `repeat(${compactQueryEntries.length}, 1fr)` }}
-              >
-                {compactQueryEntries.map(({ entry, position, distance }) => (
-                  <button
-                    key={entry.eventIndex}
-                    type="button"
-                    role="listitem"
-                    className={`query-index-tick distance-${Math.min(distance, 2)}${entry.eventIndex === activeQueryEventIndex ? " active" : ""}`}
-                    title={entry.text}
-                    aria-label={`Message ${position + 1} of ${queryIndex.length}: ${entry.text}`}
-                    aria-current={entry.eventIndex === activeQueryEventIndex ? "true" : undefined}
-                    onClick={() => navigateToQuery(entry)}
-                  >
-                    <span className="query-index-mark" aria-hidden="true" />
-                    <span className="query-index-preview">{entry.text}</span>
-                  </button>
-                ))}
+              <div className="query-index-ticks" role="list">
+                {queryIndex.map((entry, position) => {
+                  const hoverDistance = hoveredQueryPosition === undefined
+                    ? undefined
+                    : Math.abs(position - hoveredQueryPosition);
+                  const hoverDistanceClass = hoverDistance !== undefined && hoverDistance <= 2
+                    ? ` hover-distance-${hoverDistance}`
+                    : "";
+                  return (
+                    <button
+                      key={entry.eventIndex}
+                      type="button"
+                      role="listitem"
+                      className={`query-index-tick${hoverDistanceClass}${entry.eventIndex === activeQueryEventIndex ? " active" : ""}`}
+                      title={entry.text}
+                      aria-label={`Message ${position + 1} of ${queryIndex.length}: ${entry.text}`}
+                      aria-current={entry.eventIndex === activeQueryEventIndex ? "true" : undefined}
+                      onMouseEnter={() => setHoveredQueryPosition(position)}
+                      onFocus={() => setHoveredQueryPosition(position)}
+                      onBlur={() => setHoveredQueryPosition(undefined)}
+                      onClick={() => navigateToQuery(entry)}
+                    >
+                      <span className="query-index-mark" aria-hidden="true" />
+                      <span className="query-index-preview">{entry.text}</span>
+                    </button>
+                  );
+                })}
               </div>
               <div className="query-index-actions" role="group" aria-label="Message navigation">
                 <button

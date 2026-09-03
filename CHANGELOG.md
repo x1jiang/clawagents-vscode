@@ -1,6 +1,6 @@
 ## Unreleased
 
-- **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator shows every query for conversations with up to nine user messages, then folds to five marks around the current message when history grows longer. The active query is longest, nearby queries taper shorter, hit areas remain seamless, and a brief landing animation makes smooth jumps easy to follow.
+- **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator stacks one evenly spaced mark for every user query and grows naturally with the conversation. At rest all marks are equal length and only the current query is highlighted; hovering makes the pointed mark longest and tapers its neighbours, while seamless hit areas and a brief landing animation keep navigation easy to follow.
 
 ## 1.0.177
 
