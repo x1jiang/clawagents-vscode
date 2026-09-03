@@ -37,8 +37,22 @@ test("summarizes one turn, de-duplicates paths, and keeps the newest snapshot", 
   ]);
 });
 
+test("summarizes a side-chat turn that ends with plain Done", () => {
+  const items = [
+    { kind: "user", text: "side" },
+    { kind: "file", path: "src/app.ts", snapshotId: "one" },
+    { kind: "status", text: "Done" },
+  ];
+  assert.equal(isTurnTerminal(items[2].kind, items[2].text), true);
+  assert.deepEqual(collectTurnChangedFiles(items, 2), [
+    { path: "src/app.ts", snapshotId: "one", snapshotRel: undefined },
+  ]);
+});
+
 test("recognizes final status and error transcript entries", () => {
+  assert.equal(isTurnTerminal("status", "Done"), true);
   assert.equal(isTurnTerminal("status", "Done · done"), true);
+  assert.equal(isTurnTerminal("status", "Done · 3 iters"), true);
   assert.equal(isTurnTerminal("status", "Cancelled"), true);
   assert.equal(isTurnTerminal("error"), true);
   assert.equal(isTurnTerminal("status", "Running tool"), false);

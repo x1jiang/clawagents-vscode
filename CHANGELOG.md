@@ -1,3 +1,8 @@
+## 1.0.176
+
+- **Chat transcript and model-route polish.** Path links and the model-route menu are easier to scan, and completion status/controls in the transcript are tighter.
+- **Edited-files summary after a plain Done.** A normal completion now shows as `Done` (no extra suffix). The end-of-turn **Edited N files** card still appears, including in side chat.
+
 ## 1.0.175
 
 - **Conversation controls and model routing are easier to understand.** Each conversation can now keep its own provider, model, reasoning effort, and Bedrock route, with a compact model-route capsule for quick inspection and switching. Message timestamps and copy actions improve chat history scanning, while composer and conversation menus, always-on instructions, and side-chat input receive clearer interaction states and more consistent spacing. An unset reasoning effort now shows as Default instead of Medium.
