@@ -1,6 +1,6 @@
 ## Unreleased
 
-- **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator stacks one evenly spaced mark for every user query and grows naturally with the conversation. At rest all marks are equal length and only the current query is highlighted; hovering makes the pointed mark longest and tapers its neighbours, while seamless hit areas and a brief landing animation keep navigation easy to follow.
+- **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator stacks one evenly spaced mark for every user query and grows naturally with the conversation. At rest all marks are equal length and only the current query is highlighted; hovering makes the pointed mark longest and tapers its neighbours, while seamless hit areas, a subdued readable preview, and a brief landing animation keep navigation easy to follow.
 
 ## 1.0.177
 

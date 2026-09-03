@@ -791,7 +791,7 @@ body,
 
 .query-index-tick:hover .query-index-preview,
 .query-index-tick:focus-visible .query-index-preview {
-  opacity: 1;
+  opacity: 0.68;
   transform: translateY(-50%);
 }
 
