@@ -169,6 +169,15 @@ test("isWeakAutoDefaultModel flags race-time Grok/Ollama picks", () => {
   assert.equal(mod.isWeakAutoDefaultModel("claude-sonnet-4-5"), false);
 });
 
+test("Gemini 3.8 Flash is first in the Google model picker", () => {
+  const gemini = mod.FALLBACK_PROVIDERS.find((p) => p.id === "gemini");
+  assert.ok(gemini, "gemini catalog row missing");
+  assert.equal(gemini.models[0].id, "gemini-3.8-flash");
+  assert.equal(gemini.models[0].label, "Gemini 3.8 Flash");
+  assert.ok(gemini.models.some((m) => m.id === "gemini-3.7-flash"));
+  assert.equal(mod.modelFitsProvider("gemini-3.8-flash", "gemini"), true);
+});
+
 test("the default OpenAI model is offered and correctly labelled", () => {
   // The fallback list is what renders before the sidecar catalog arrives, so a
   // stale label here mislabels the default model in the picker.

@@ -57,7 +57,8 @@ PRICES: dict[str, PriceTuple] = {
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
     "claude-haiku-4-5-20251001": (1.0, 5.0, 0.1, 1.25),
     # Gemini (approx; standard paid tier — cache rates when reported)
-    # 3.7 Flash intro $0.75/$3.75 through 2026-12-31, then $1.50/$7.50.
+    # 3.8 / 3.7 Flash intro $0.75/$3.75 through 2026-12-31, then $1.50/$7.50.
+    "gemini-3.8-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.7-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.6-flash": (1.5, 7.5, 0.15, 1.875),
     "gemini-3.5-flash": (1.5, 9.0, 0.15, 1.875),
