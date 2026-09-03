@@ -1,3 +1,7 @@
+## 1.0.177
+
+- **Gemini 3.8 Flash** (`gemini-3.8-flash`) is in the Google Gemini model picker. Cost estimate uses the introductory rate ($0.75 / $3.75 per 1M input/output through 31 December 2026). Existing saved Gemini models are unchanged (default remains 3.7 Flash).
+
 ## 1.0.176
 
 - **Chat transcript and model-route polish.** Path links and the model-route menu are easier to scan, and completion status/controls in the transcript are tighter.

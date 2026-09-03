@@ -1,5 +1,7 @@
-Publisher **`clawagents`** · version **1.0.176**
+Publisher **`clawagents`** · version **1.0.177**
 
+- [ ] GitHub release `v1.0.177` + VSIX (Gemini 3.8 Flash in the Google model picker)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] GitHub release `v1.0.176` + VSIX (UI polish + edited-files summary after plain Done)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] GitHub release `v1.0.175` + VSIX (per-thread model routing, conversation-control polish)
