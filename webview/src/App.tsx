@@ -24,6 +24,7 @@ import {
   type InteractionStyle,
   type JobSummary,
   type ModelRoute,
+  type QueryIndexEntry,
 } from "./vscodeApi";
 import { parseInlinePathReference } from "../../src/pathReferences";
 import { ADVANCED_RESTORE_FEATURES_AVAILABLE } from "../../src/protocol";
@@ -90,7 +91,7 @@ function modelSupportsEffort(model: string): boolean {
 }
 
 type ChatItem =
-  | { kind: "user"; text: string; timestamp?: string }
+  | { kind: "user"; text: string; timestamp?: string; eventIndex?: number }
   | { kind: "assistant"; text: string; timestamp?: string }
   | { kind: "model_change"; text: string }
   | {
@@ -627,6 +628,7 @@ type TranscriptItemProps = {
   onPlanFeedbackChange: (requestId: string, draft: string) => void;
   onPlanFeedbackToggle: (requestId: string, open: boolean) => void;
   onRegenerate?: () => void;
+  onUserMessageMount?: (eventIndex: number, element: HTMLDivElement | null) => void;
 };
 
 function ChangedFilesSummary({ files }: { files: ChangedFile[] }) {
@@ -725,12 +727,19 @@ const TranscriptItem = memo(function TranscriptItem({
   onPlanFeedbackChange,
   onPlanFeedbackToggle,
   onRegenerate,
+  onUserMessageMount,
 }: TranscriptItemProps) {
   const time = (item.kind === "user" || item.kind === "assistant")
     ? formatMessageTime(item.timestamp)
     : undefined;
   return (
-    <div className={`item item-${item.kind}`}>
+    <div
+      className={`item item-${item.kind}`}
+      ref={item.kind === "user" && item.eventIndex !== undefined
+        ? (element) => onUserMessageMount?.(item.eventIndex!, element)
+        : undefined}
+      data-query-event-index={item.kind === "user" ? item.eventIndex : undefined}
+    >
       {item.kind === "user" && (
         <>
           <div className="label-row">
@@ -1241,6 +1250,10 @@ function SideChatOverlay({
 
 export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
+  const [queryIndex, setQueryIndex] = useState<QueryIndexEntry[]>([]);
+  const [activeQueryEventIndex, setActiveQueryEventIndex] = useState<number>();
+  const [hoveredQueryPosition, setHoveredQueryPosition] = useState<number>();
+  const [pendingQueryJump, setPendingQueryJump] = useState<QueryIndexEntry>();
   /** How many trailing items to mount (virtualization window). */
   const [renderWindow, setRenderWindow] = useState(TRANSCRIPT_RENDER_CHUNK);
   const [eventsHasMore, setEventsHasMore] = useState(false);
@@ -1396,10 +1409,55 @@ export function App() {
   const [verifyMsg, setVerifyMsg] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
+  const queryNodesRef = useRef(new Map<number, HTMLDivElement>());
+  const queryJumpAnimationTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoApproveRef = useRef<HTMLDivElement>(null);
   /** When false, streaming tokens must not yank scroll away from the user. */
   const stickToBottomRef = useRef(true);
   const streamingRef = useRef(false);
+  const handleUserMessageMount = useCallback((eventIndex: number, element: HTMLDivElement | null) => {
+    if (element) {
+      queryNodesRef.current.set(eventIndex, element);
+    } else {
+      queryNodesRef.current.delete(eventIndex);
+    }
+  }, []);
+  const updateActiveQueryFromViewport = useCallback(() => {
+    const container = messagesRef.current;
+    if (!container || queryNodesRef.current.size === 0) return;
+    const center = container.getBoundingClientRect().top + container.clientHeight * 0.38;
+    let closest: number | undefined;
+    let distance = Number.POSITIVE_INFINITY;
+    for (const [eventIndex, element] of queryNodesRef.current) {
+      const rect = element.getBoundingClientRect();
+      const nextDistance = Math.abs(rect.top - center);
+      if (nextDistance < distance) {
+        distance = nextDistance;
+        closest = eventIndex;
+      }
+    }
+    if (closest !== undefined) {
+      setActiveQueryEventIndex((previous) => previous === closest ? previous : closest);
+    }
+  }, []);
+  const navigateToQuery = useCallback((entry: QueryIndexEntry) => {
+    const itemIndex = items.findIndex(
+      (item) => item.kind === "user" && item.eventIndex === entry.eventIndex,
+    );
+    if (itemIndex >= 0) {
+      setRenderWindow((current) => Math.max(current, items.length - itemIndex + 1));
+      setPendingQueryJump(entry);
+      return;
+    }
+    post({ type: "jump_to_query", eventIndex: entry.eventIndex });
+  }, [items]);
+  const navigateRelativeQuery = useCallback((direction: -1 | 1) => {
+    if (queryIndex.length === 0) return;
+    const current = queryIndex.findIndex((entry) => entry.eventIndex === activeQueryEventIndex);
+    const fallback = direction < 0 ? queryIndex.length : -1;
+    const next = Math.max(0, Math.min(queryIndex.length - 1, (current >= 0 ? current : fallback) + direction));
+    navigateToQuery(queryIndex[next]);
+  }, [activeQueryEventIndex, navigateToQuery, queryIndex]);
   const handleAskDraftChange = useCallback((requestId: string, draft: string) => {
     setItems((prev) =>
       prev.map((it) => (it.kind === "ask" && it.requestId === requestId ? { ...it, draft } : it)),
@@ -2199,6 +2257,9 @@ export function App() {
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
+          setQueryIndex([]);
+          setActiveQueryEventIndex(undefined);
+          setPendingQueryJump(undefined);
           setItems((msg.items as ChatItem[]) || []);
           // Selecting or forking into a conversation should reveal its newest
           // turn immediately, even when the previously viewed chat was scrolled up.
@@ -2262,6 +2323,21 @@ export function App() {
           }
           break;
         }
+        case "query_index":
+          if (msg.chatId !== chatIdRef.current) break;
+          setQueryIndex(msg.entries);
+          break;
+        case "jump_to_query":
+          if (msg.chatId !== chatIdRef.current) break;
+          stickToBottomRef.current = false;
+          setItems((msg.items as ChatItem[]) || []);
+          setRenderWindow(Math.max(TRANSCRIPT_RENDER_CHUNK, msg.items.length));
+          setEventsHasMore(Boolean(msg.eventsHasMore));
+          setPendingQueryJump({
+            eventIndex: msg.targetEventIndex,
+            text: "",
+          });
+          break;
         case "prepend_items": {
           const older = (msg.items as ChatItem[]) || [];
           if (older.length) {
@@ -2289,6 +2365,7 @@ export function App() {
         case "user_echo":
           if (isStaleEvent(msg)) break;
           setItems((prev) => [...prev, { kind: "user", text: msg.text, timestamp: messageTimestamp() }]);
+          post({ type: "load_query_index" });
           setBusy(true);
           streamingRef.current = false;
           setUsage({});
@@ -2748,11 +2825,43 @@ export function App() {
     const onScroll = () => {
       const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
       stickToBottomRef.current = gap < 96;
+      updateActiveQueryFromViewport();
     };
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [panel]);
+  }, [panel, updateActiveQueryFromViewport]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(updateActiveQueryFromViewport);
+    return () => window.cancelAnimationFrame(frame);
+  }, [items, renderWindow, updateActiveQueryFromViewport]);
+
+  useEffect(() => {
+    if (!pendingQueryJump) return;
+    const target = queryNodesRef.current.get(pendingQueryJump.eventIndex);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (queryJumpAnimationTimerRef.current) {
+      clearTimeout(queryJumpAnimationTimerRef.current);
+    }
+    target.classList.remove("query-jump-target");
+    // Restart the highlight when the user selects the same query twice.
+    void target.offsetWidth;
+    target.classList.add("query-jump-target");
+    queryJumpAnimationTimerRef.current = setTimeout(() => {
+      target.classList.remove("query-jump-target");
+      queryJumpAnimationTimerRef.current = undefined;
+    }, 900);
+    setActiveQueryEventIndex(pendingQueryJump.eventIndex);
+    setPendingQueryJump(undefined);
+  }, [items, pendingQueryJump, renderWindow]);
+
+  useEffect(() => () => {
+    if (queryJumpAnimationTimerRef.current) {
+      clearTimeout(queryJumpAnimationTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (!stickToBottomRef.current) {
@@ -4021,6 +4130,10 @@ export function App() {
       </li>
     );
   };
+
+  const activeQueryPosition = queryIndex.findIndex(
+    (entry) => entry.eventIndex === activeQueryEventIndex,
+  );
 
   return (
     <div className="app">
@@ -6375,6 +6488,7 @@ export function App() {
                   onAskDraftChange={handleAskDraftChange}
                   onPlanFeedbackChange={handlePlanFeedbackChange}
                   onPlanFeedbackToggle={handlePlanFeedbackToggle}
+                  onUserMessageMount={handleUserMessageMount}
                   onRegenerate={
                     !busy && item.kind === "assistant" && !items.slice(absoluteIndex + 1).some((next) => next.kind === "assistant")
                       ? () => post({ type: "regenerate" })
@@ -6388,6 +6502,65 @@ export function App() {
             })}
             <div ref={bottomRef} />
           </main>
+
+          {queryIndex.length > 0 && (
+            <aside
+              className="query-index"
+              aria-label="Your messages"
+              onMouseLeave={() => setHoveredQueryPosition(undefined)}
+            >
+              <div className="query-index-ticks" role="list">
+                {queryIndex.map((entry, position) => {
+                  const hoverDistance = hoveredQueryPosition === undefined
+                    ? undefined
+                    : Math.abs(position - hoveredQueryPosition);
+                  const hoverDistanceClass = hoverDistance !== undefined && hoverDistance <= 2
+                    ? ` hover-distance-${hoverDistance}`
+                    : "";
+                  return (
+                    <button
+                      key={entry.eventIndex}
+                      type="button"
+                      role="listitem"
+                      className={`query-index-tick${hoverDistanceClass}${entry.eventIndex === activeQueryEventIndex ? " active" : ""}`}
+                      title={entry.text}
+                      aria-label={`Message ${position + 1} of ${queryIndex.length}: ${entry.text}`}
+                      aria-current={entry.eventIndex === activeQueryEventIndex ? "true" : undefined}
+                      onMouseEnter={() => setHoveredQueryPosition(position)}
+                      onFocus={() => setHoveredQueryPosition(position)}
+                      onBlur={() => setHoveredQueryPosition(undefined)}
+                      onClick={() => navigateToQuery(entry)}
+                    >
+                      <span className="query-index-mark" aria-hidden="true" />
+                      <span className="query-index-preview">{entry.text}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="query-index-actions" role="group" aria-label="Message navigation">
+                <button
+                  type="button"
+                  className="query-index-arrow"
+                  title="Previous message"
+                  aria-label="Previous message"
+                  disabled={activeQueryPosition <= 0}
+                  onClick={() => navigateRelativeQuery(-1)}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="query-index-arrow"
+                  title="Next message"
+                  aria-label="Next message"
+                  disabled={activeQueryPosition < 0 || activeQueryPosition >= queryIndex.length - 1}
+                  onClick={() => navigateRelativeQuery(1)}
+                >
+                  ↓
+                </button>
+              </div>
+            </aside>
+          )}
 
           <footer className="composer">
             <div ref={autoApproveRef} className="autoapprove">

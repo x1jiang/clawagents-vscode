@@ -677,6 +677,207 @@ body,
   gap: 12px;
 }
 
+/* A transcript map that lives over the panel edge, never in the message flow.
+ * It is intentionally almost imperceptible until the pointer reaches the edge. */
+.query-index {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  right: 0;
+  bottom: auto;
+  width: 58px;
+  height: auto;
+  min-height: 0;
+  opacity: 0.035;
+  transform: translateY(-50%);
+  transition: opacity 150ms ease;
+}
+
+.query-index:hover,
+.query-index:focus-within {
+  opacity: 0.5;
+}
+
+.query-index-ticks {
+  position: relative;
+  margin-left: 24px;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+}
+
+.query-index-tick {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 34px;
+  height: 10px;
+  flex: 0 0 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  animation: query-index-enter 150ms ease-out both;
+}
+
+@keyframes query-index-enter {
+  from {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.query-index-mark {
+  width: 12px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: width 120ms ease, height 120ms ease, background 120ms ease;
+}
+
+.query-index-tick.hover-distance-2 .query-index-mark {
+  width: 14px;
+}
+
+.query-index-tick.hover-distance-1 .query-index-mark {
+  width: 18px;
+}
+
+.query-index-tick.hover-distance-0 .query-index-mark {
+  width: 26px;
+  height: 3px;
+}
+
+.query-index-tick.active .query-index-mark {
+  background: var(--accent);
+}
+
+.query-index-tick:hover .query-index-mark,
+.query-index-tick:focus-visible .query-index-mark {
+  background: var(--fg);
+}
+
+.query-index-tick:focus-visible {
+  outline: none;
+}
+
+.query-index-preview {
+  position: absolute;
+  right: 42px;
+  top: 50%;
+  display: block;
+  width: min(280px, 52vw);
+  max-height: 4.2em;
+  overflow: hidden;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  background: var(--input-bg);
+  box-shadow: 0 3px 10px color-mix(in srgb, #000 20%, transparent);
+  font: inherit;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translateY(-50%) translateX(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.query-index-tick:hover .query-index-preview,
+.query-index-tick:focus-visible .query-index-preview {
+  opacity: 0.68;
+  transform: translateY(-50%);
+}
+
+.query-index-actions {
+  position: absolute;
+  top: 50%;
+  bottom: auto;
+  left: 0;
+  width: 22px;
+  height: 48px;
+  display: grid;
+  grid-template-rows: repeat(2, 1fr);
+  gap: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+}
+
+.query-index:hover .query-index-actions,
+.query-index:focus-within .query-index-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.query-index-arrow {
+  width: 22px;
+  height: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--fg);
+  background: var(--input-bg);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.query-index-arrow:first-child {
+  border-radius: 5px 5px 0 0;
+}
+
+.query-index-arrow:last-child {
+  border-top: 0;
+  border-radius: 0 0 5px 5px;
+}
+
+.query-index-arrow:hover:not(:disabled),
+.query-index-arrow:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.query-index-arrow:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Query jumps leave enough preceding context to resume reading naturally. */
+.item-user {
+  scroll-margin-top: 140px;
+}
+
+.item-user.query-jump-target .user-text {
+  animation: query-jump-highlight 900ms ease-out;
+}
+
+@keyframes query-jump-highlight {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  24% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .query-index-tick,
+  .item-user.query-jump-target .user-text {
+    animation: none;
+  }
+}
+
 .empty {
   color: var(--muted);
   line-height: 1.5;

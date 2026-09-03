@@ -45,6 +45,7 @@ import type {
   InteractionStyle,
   JobSummary,
   ModelRoute,
+  QueryIndexEntry,
   WebviewToHost,
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
@@ -541,7 +542,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       (typeof chat.title === "string" ? chat.title : undefined);
     this.post({
       type: "restore",
-      items: eventsToItems(events),
+      items: eventsToItems(events, this.eventsOffset),
       draft: draft ?? this.draftForChat(chatId),
       mode: (chat.mode as AgentMode) || this.mode,
       chatId,
@@ -558,6 +559,27 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       eventsHasMore: this.eventsHasMore,
       modelRoute,
     });
+    // Navigation previews are much smaller than the transcript, so load them
+    // separately rather than defeating the transcript's pagination cap.
+    void this.postQueryIndex(chatId);
+  }
+
+  private async postQueryIndex(chatId: string): Promise<void> {
+    try {
+      const result = await this.gateway.getChatQueryIndex(chatId);
+      if (this.chatId !== chatId) return;
+      const entries: QueryIndexEntry[] = result.entries
+        .filter((entry) => Number.isInteger(entry.event_index) && entry.event_index >= 0)
+        .map((entry) => ({
+          eventIndex: entry.event_index,
+          text: entry.text,
+          timestamp: entry.ts == null ? undefined : String(entry.ts),
+        }));
+      this.post({ type: "query_index", chatId, entries });
+    } catch {
+      // The transcript remains usable if an older sidecar has not yet exposed
+      // the optional index endpoint.
+    }
   }
 
   private rememberLiveRunEvent(chatId: string, event: HostToWebview): void {
@@ -628,9 +650,31 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.eventsHasMore = Boolean(chat.events_has_more);
     this.post({
       type: "prepend_items",
-      items: eventsToItems(events),
+      items: eventsToItems(events, this.eventsOffset),
       eventsOffset: this.eventsOffset,
       eventsTotal: Number(chat.events_total ?? 0) || undefined,
+      eventsHasMore: this.eventsHasMore,
+    });
+  }
+
+  private async jumpToQuery(eventIndex: number): Promise<void> {
+    if (!this.chatId) return;
+    const chatId = this.chatId;
+    const chat = await this.gateway.getChat(chatId, {
+      around: eventIndex,
+      tail: 240,
+    });
+    if (this.chatId !== chatId) return;
+    const events = (chat.events as Array<Record<string, unknown>>) || [];
+    this.eventsOffset = Number(chat.events_offset ?? 0) || 0;
+    this.eventsHasMore = Boolean(chat.events_has_more);
+    this.post({
+      type: "jump_to_query",
+      chatId,
+      targetEventIndex: eventIndex,
+      items: eventsToItems(events, this.eventsOffset),
+      eventsOffset: this.eventsOffset,
+      eventsTotal: Number(chat.events_total ?? events.length) || events.length,
       eventsHasMore: this.eventsHasMore,
     });
   }
@@ -1488,6 +1532,19 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "load_older_chat":
         try {
           await this.loadOlderChatEvents();
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
+      case "load_query_index":
+        if (this.chatId) void this.postQueryIndex(this.chatId);
+        break;
+      case "jump_to_query":
+        try {
+          await this.jumpToQuery(msg.eventIndex);
         } catch (err) {
           this.post({
             type: "error",
@@ -3523,15 +3580,17 @@ function completionStatus(value: unknown): string {
   return `Done · ${status}`;
 }
 
-function eventsToItems(events: Array<Record<string, unknown>>): unknown[] {
+function eventsToItems(events: Array<Record<string, unknown>>, eventsOffset = 0): unknown[] {
   const items: unknown[] = [];
-  for (const ev of events) {
+  for (let index = 0; index < events.length; index += 1) {
+    const ev = events[index];
     const kind = ev.kind;
     if (kind === "user") {
       items.push({
         kind: "user",
         text: stripEditorContextForDisplay(String(ev.text || "")),
         timestamp: eventTimestamp(ev.ts),
+        eventIndex: eventsOffset + index,
       });
     } else if (kind === "assistant") {
       items.push({

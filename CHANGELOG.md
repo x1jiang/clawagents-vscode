@@ -1,3 +1,7 @@
+## Unreleased
+
+- **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator stacks one evenly spaced mark for every user query and grows naturally with the conversation. At rest all marks are equal length and only the current query is highlighted; hovering makes the pointed mark longest and tapers its neighbours, while seamless hit areas, a subdued readable preview, and a brief landing animation keep navigation easy to follow.
+
 ## 1.0.177
 
 - **Gemini 3.8 Flash** (`gemini-3.8-flash`) is in the Google Gemini model picker. Cost estimate uses the introductory rate ($0.75 / $3.75 per 1M input/output through 31 December 2026). Existing saved Gemini models are unchanged (default remains 3.7 Flash).
