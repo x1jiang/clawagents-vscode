@@ -1,6 +1,6 @@
 Publisher **`clawagents`** · version **1.0.176**
 
-- [ ] GitHub release `v1.0.176` + VSIX (UI polish + edited-files summary after plain Done)
+- [x] GitHub release `v1.0.176` + VSIX (UI polish + edited-files summary after plain Done)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] GitHub release `v1.0.175` + VSIX (per-thread model routing, conversation-control polish)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
