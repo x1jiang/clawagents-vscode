@@ -38,6 +38,6 @@ export function collectTurnChangedFiles(
 
 export function isTurnTerminal(kind: string, text?: string): boolean {
   return kind === "error" || (kind === "status" && (
-    text?.startsWith("Done ·") || text === "Cancelled"
+    text === "Done" || text?.startsWith("Done ·") || text === "Cancelled"
   ));
 }
