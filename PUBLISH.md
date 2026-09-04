@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.177**
+Publisher **`clawagents`** · version **1.0.178**
 
+- [x] clawagents **6.20.69** on GitHub + PyPI (browser accessibility tools & hermetic test hardening)
+- [x] GitHub release `v1.0.178` + VSIX (browser accessibility tools; floor clawagents **6.20.69**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] GitHub release `v1.0.177` + VSIX (Gemini 3.8 Flash in the Google model picker)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] GitHub release `v1.0.176` + VSIX (UI polish + edited-files summary after plain Done)

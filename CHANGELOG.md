@@ -1,6 +1,7 @@
-## Unreleased
+## 1.0.178
 
 - **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator stacks one evenly spaced mark for every user query and grows naturally with the conversation. At rest all marks are equal length and only the current query is highlighted; hovering makes the pointed mark longest and tapers its neighbours, while seamless hit areas, a subdued readable preview, and a brief landing animation keep navigation easy to follow.
+- **Sidecar floor bumped to clawagents 6.20.69.** Requires **clawagents 6.20.69** for browser accessibility tool wiring (`create_claw_agent(browser=True)`), prompt cache boundary alignment, and hashline-guarded context edits.
 
 ## 1.0.177
 
