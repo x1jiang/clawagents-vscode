@@ -54,6 +54,8 @@ import {
   threadActivityLabel,
 } from "./threadUnread";
 import { ModelRouteCapsule } from "./ModelRouteCapsule";
+import { ToolRunGroup } from "./ToolRunGroup";
+import type { ToolCallItem } from "./toolPresentation";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -94,16 +96,7 @@ type ChatItem =
   | { kind: "user"; text: string; timestamp?: string; eventIndex?: number }
   | { kind: "assistant"; text: string; timestamp?: string }
   | { kind: "model_change"; text: string }
-  | {
-      kind: "tool";
-      id: string;
-      name: string;
-      args?: unknown;
-      success?: boolean;
-      output?: string;
-      filePath?: string;
-      status: "running" | "done";
-    }
+  | ToolCallItem
   | { kind: "status"; text: string }
   | { kind: "error"; text: string }
   | {
@@ -140,6 +133,57 @@ type ChatItem =
       /** Set when the run ended without this request being answered. */
       stale?: boolean;
     };
+
+type NonToolChatItem = Exclude<ChatItem, ToolCallItem>;
+
+type TranscriptBlock =
+  | { kind: "item"; item: NonToolChatItem; index: number }
+  | { kind: "tools"; calls: ToolCallItem[]; index: number; autoCollapse: boolean };
+
+/** Keep transcript semantics independent from the tool-run visual component. */
+function groupTranscriptItems(items: ChatItem[], offset = 0): TranscriptBlock[] {
+  const blocks: TranscriptBlock[] = [];
+  let index = 0;
+  while (index < items.length) {
+    const item = items[index];
+    if (item.kind !== "tool") {
+      blocks.push({ kind: "item", item, index: offset + index });
+      index += 1;
+      continue;
+    }
+    const start = index;
+    const calls: ToolCallItem[] = [];
+    const changedFiles: Array<{ item: Extract<NonToolChatItem, { kind: "file" }>; index: number }> = [];
+    // A successful write emits file_changed immediately after tool_completed.
+    // Bridge those events so a write-heavy run still forms one tool path; the
+    // file actions are rendered directly after the path with original indexes.
+    while (index < items.length && (items[index].kind === "tool" || items[index].kind === "file")) {
+      if (items[index].kind === "tool") {
+        calls.push(items[index] as ToolCallItem);
+      } else {
+        changedFiles.push({
+          item: items[index] as Extract<NonToolChatItem, { kind: "file" }>,
+          index: offset + index,
+        });
+      }
+      index += 1;
+    }
+    const next = items[index];
+    blocks.push({
+      kind: "tools",
+      calls,
+      index: offset + start,
+      autoCollapse:
+        next?.kind === "assistant" ||
+        next?.kind === "status" ||
+        next?.kind === "error",
+    });
+    for (const changedFile of changedFiles) {
+      blocks.push({ kind: "item", ...changedFile });
+    }
+  }
+  return blocks;
+}
 
 import {
   type Provider,
@@ -423,10 +467,6 @@ function formatCompletionStatus(status?: string): string {
   return `Done · ${value}`;
 }
 
-function looksLikeDiff(text: string): boolean {
-  return /^@@ |^\+\+\+ |^--- |^diff --git /m.test(text);
-}
-
 type PinnedContextProps = {
   text: string;
   draft: string;
@@ -620,7 +660,7 @@ const BackgroundJobs = memo(function BackgroundJobs({
 });
 
 type TranscriptItemProps = {
-  item: ChatItem;
+  item: NonToolChatItem;
   changedFiles?: ChangedFile[];
   showStreamingCursor: boolean;
   setItems: Dispatch<SetStateAction<ChatItem[]>>;
@@ -771,42 +811,6 @@ const TranscriptItem = memo(function TranscriptItem({
             )}
           </div>
         </>
-      )}
-      {item.kind === "tool" && (
-        <details open={item.status === "running" || item.success === false}>
-          <summary>
-            <span className={`dot ${item.status}${item.success === false ? " fail-dot" : ""}`} />
-            <code>{item.name}</code>
-            {item.status === "done" && (
-              <span className={item.success ? "ok" : "fail"}>
-                {item.success ? "ok" : "fail"}
-              </span>
-            )}
-            {item.filePath && (
-              <button
-                type="button"
-                className="linkish"
-                onClick={(e) => {
-                  e.preventDefault();
-                  post({ type: "open_file", path: item.filePath! });
-                }}
-              >
-                open
-              </button>
-            )}
-          </summary>
-          {item.args != null && <pre className="tool-body">{safeJson(item.args)}</pre>}
-          {item.output ? (
-            <pre className={`tool-body ${looksLikeDiff(item.output) ? "diff" : ""}`}>
-              {item.output}
-            </pre>
-          ) : (
-            item.status === "done" &&
-            item.success === false && (
-              <pre className="tool-body muted">No error details returned.</pre>
-            )
-          )}
-        </details>
       )}
       {item.kind === "permission" && (
         <div className="permission">
@@ -1186,7 +1190,18 @@ function SideChatOverlay({
         </div>
       </header>
       <div className="side-chat-messages">
-        {sideChat.items.map((item, index) => {
+        {groupTranscriptItems(sideChat.items).map((block) => {
+          if (block.kind === "tools") {
+            return (
+              <ToolRunGroup
+                key={`tools-${block.index}-${block.calls[0]?.id || "run"}`}
+                calls={block.calls}
+                autoCollapse={block.autoCollapse}
+                onOpenFile={(path) => post({ type: "open_file", path })}
+              />
+            );
+          }
+          const { item, index } = block;
           const terminalText = item.kind === "status" || item.kind === "error" ? item.text : undefined;
           const changedFiles = isTurnTerminal(item.kind, terminalText)
             ? collectTurnChangedFiles(sideChat.items, index)
@@ -1785,13 +1800,31 @@ export function App() {
             else items.push({ kind: "assistant", text: msg.text, timestamp: messageTimestamp() });
             return { ...current, items };
           }
-          case "tool_started": return append({ kind: "tool", id: msg.id, name: msg.name, status: "running" });
+          case "tool_started": return append({
+            kind: "tool",
+            id: msg.id,
+            name: msg.name,
+            args: msg.args,
+            filePath: msg.filePath,
+            status: "running",
+            startedAt: Date.now(),
+          });
           case "tool_completed": {
             let matched = false;
+            const completedAt = Date.now();
             const items = current.items.map((item) => {
               if (item.kind === "tool" && item.id === msg.id) {
                 matched = true;
-                return { ...item, status: "done" as const, success: msg.success, output: msg.output };
+                return {
+                  ...item,
+                  status: "done" as const,
+                  success: msg.success,
+                  output: msg.output,
+                  filePath: msg.filePath || item.filePath,
+                  durationMs: item.startedAt === undefined
+                    ? undefined
+                    : completedAt - item.startedAt,
+                };
               }
               return item;
             });
@@ -2431,6 +2464,7 @@ export function App() {
               args: msg.args,
               filePath: msg.filePath,
               status: "running",
+              startedAt: Date.now(),
             },
           ]);
           break;
@@ -2438,6 +2472,7 @@ export function App() {
           if (isStaleEvent(msg)) break;
           setItems((prev) => {
             let matched = false;
+            const completedAt = Date.now();
             const next = prev.map((it) => {
               if (
                 it.kind === "tool" &&
@@ -2451,6 +2486,9 @@ export function App() {
                   success: msg.success,
                   output: msg.output,
                   filePath: msg.filePath || it.filePath,
+                  durationMs: it.startedAt === undefined
+                    ? undefined
+                    : completedAt - it.startedAt,
                 };
               }
               return it;
@@ -6473,8 +6511,22 @@ export function App() {
                 </button>
               </div>
             )}
-            {items.slice(Math.max(0, items.length - renderWindow)).map((item, i, arr) => {
-              const absoluteIndex = items.length - arr.length + i;
+            {groupTranscriptItems(
+              items.slice(Math.max(0, items.length - renderWindow)),
+              Math.max(0, items.length - renderWindow),
+            ).map((block) => {
+              if (block.kind === "tools") {
+                return (
+                  <ToolRunGroup
+                    key={`tools-${block.index}-${block.calls[0]?.id || "run"}`}
+                    calls={block.calls}
+                    autoCollapse={block.autoCollapse}
+                    onOpenFile={(path) => post({ type: "open_file", path })}
+                  />
+                );
+              }
+              const item = block.item;
+              const absoluteIndex = block.index;
               const terminalText = item.kind === "status" || item.kind === "error" ? item.text : undefined;
               const changedFiles = isTurnTerminal(item.kind, terminalText)
                 ? collectTurnChangedFiles(items, absoluteIndex)
