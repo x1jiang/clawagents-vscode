@@ -1,3 +1,8 @@
+## 1.0.180
+
+- **Context meter now knows the real window for every model in the picker.** The meter assumed 200K for all Claude Opus/Sonnet 4.x and showed nothing for Claude 5-series, Grok, Bedrock/Mantle-prefixed ids or third-party Mantle models. It now normalizes ids the same way cost estimation does (`us.anthropic.…-v1:0`, `openai.…`, `zai.…`) and uses vendor-documented windows: Opus 4.6/4.7/4.8, Opus 5, Sonnet 4.6, Sonnet 5, Fable 5 → 1M; Sonnet 4.5 / Haiku 4.5 / Opus 4.5 → 200K; Grok 4.5 500K, Grok 4.3 / 4.20 1M, Grok Build 256K; DeepSeek V3.2 164K, Kimi K2.5 256K, GLM-5 200K, gpt-oss 128K, Nova Pro/Lite 300K.
+- **Sidecar floor bumped to clawagents 6.20.71.** The Python side received the same context-window corrections (Opus 4.6+ was compacting at a 200K budget; Sonnet 4.5 was budgeted at 1M; Gemini Pro at 2M instead of 1M), gains profiles for `gemini-3.8-flash` and the Mantle third-party ids, and fixes Bedrock `us.anthropic.…` ids never matching a profile. Python 3.14 is now in its CI matrix.
+
 ## 1.0.179
 
 - **Always-on context is now the last thing the model reads.** The pinned-context banner text used to be injected mid-prompt inside the project-rules block, after the full tool catalog, where models weighed it weakly. With clawagents 6.20.70 it rides as its own block at the very end of the system message on every LLM round, framed as taking precedence over project rules and tool notes, and it survives context compaction. It is no longer sent twice.

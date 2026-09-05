@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.179**
+Publisher **`clawagents`** · version **1.0.180**
 
+- [x] clawagents **6.20.71** on GitHub + PyPI (correct Claude/Gemini context windows, Mantle profiles, Bedrock id normalization, Python 3.14)
+- [x] GitHub release `v1.0.180` + VSIX (context meter uses real per-model windows + Bedrock/Mantle id normalization; floor clawagents **6.20.71**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.70** on GitHub + PyPI (configurable base prompt, append mechanisms, pinned context at the prompt tail)
 - [x] GitHub release `v1.0.179` + VSIX (always-on context rides at the prompt tail; floor clawagents **6.20.70**)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
