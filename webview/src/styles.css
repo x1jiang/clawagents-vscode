@@ -1063,19 +1063,317 @@ button.inline-path-link code {
   animation: pulse 1s ease-in-out infinite;
 }
 
-details {
+.tool-run {
+  min-width: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tool-run-summary,
+.tool-call-summary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.tool-run-summary::-webkit-details-marker,
+.tool-call-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-run-summary {
+  min-height: 30px;
+  gap: 7px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.tool-run-summary:hover,
+.tool-run-summary:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  outline: none;
+}
+
+.tool-run-leading {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  border-radius: 50%;
+  color: #43b581;
+  background: color-mix(in srgb, #43b581 13%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tool-run.is-running .tool-run-leading {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.tool-run.has-error .tool-run-leading {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.tool-run-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-run-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.78;
+  white-space: nowrap;
+}
+
+.tool-run-chevron,
+.tool-chevron {
+  display: inline-block;
+  flex: 0 0 auto;
+  color: var(--muted);
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 140ms ease;
+}
+
+.tool-run[open] > .tool-run-summary .tool-run-chevron,
+.tool-call[open] > .tool-call-summary .tool-chevron {
+  transform: rotate(0deg);
+}
+
+.tool-run-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 3px 15px;
+  padding: 3px 0 3px 13px;
+}
+
+.tool-run-list::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 78%, transparent);
+  content: "";
+}
+
+.tool-call {
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.tool-call-summary {
+  gap: 7px;
+  min-height: 30px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+
+.tool-call-summary:hover,
+.tool-call-summary:focus-visible {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  outline: none;
+}
+
+.tool-call-icon {
+  display: inline-grid;
+  width: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  color: color-mix(in srgb, var(--muted) 86%, var(--fg));
+}
+
+.tool-call-context .tool-call-icon,
+.tool-call-search .tool-call-icon {
+  color: color-mix(in srgb, var(--accent) 75%, var(--muted));
+}
+
+.tool-call-edit .tool-call-icon {
+  color: color-mix(in srgb, #d7a100 72%, var(--muted));
+}
+
+.tool-call-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.tool-call-title,
+.tool-call-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-title {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.tool-call-detail {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+  opacity: 0.82;
+}
+
+.tool-duration {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.tool-status-glyph {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.tool-status-glyph.succeeded {
+  color: #43b581;
+  background: color-mix(in srgb, #43b581 13%, transparent);
+}
+
+.tool-status-glyph.failed {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 13%, transparent);
+}
+
+.tool-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: tool-spin 700ms linear infinite;
+}
+
+@keyframes tool-spin {
+  to { transform: rotate(360deg); }
+}
+
+.tool-call-body {
+  margin: 2px 5px 7px 31px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--input-bg) 72%, transparent);
+}
+
+.tool-call-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 9px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tool-call-meta code {
+  color: var(--fg);
+  font-size: 10px;
+}
+
+.tool-open-file {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.tool-open-file:hover,
+.tool-open-file:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.tool-data-section h4 {
+  margin: 8px 0 3px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tool-call-body .tool-body {
+  margin-top: 0;
+  padding: 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+}
+
+/* This panel previously inherited the old global details styling. */
+.skill-warnings {
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 6px 8px;
   background: color-mix(in srgb, var(--input-bg) 80%, transparent);
 }
 
-summary {
-  cursor: pointer;
+.skill-warnings > summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  cursor: pointer;
+}
+
+@media (max-width: 420px) {
+  .tool-call-detail {
+    display: none;
+  }
+
+  .tool-run-meta {
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-spinner {
+    animation-duration: 1.8s;
+  }
+
+  .tool-run-chevron,
+  .tool-chevron {
+    transition: none;
+  }
 }
 
 .dot {

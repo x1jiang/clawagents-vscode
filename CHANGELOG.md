@@ -1,5 +1,6 @@
 ## Unreleased
 
+- **Tool runs are now concise, inspectable timelines.** Live tool calls remain expanded while work is in progress, then collapse into an English summary when the agent replies. The summary shows tool count and elapsed time; expand it for per-tool purpose, status, duration, arguments, output/error, and file access. Common read, search, command, edit, Context Mode, skill, and web tools have dedicated presentation, while new tools receive a useful fallback automatically.
 - **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator stacks one evenly spaced mark for every user query and grows naturally with the conversation. At rest all marks are equal length and only the current query is highlighted; hovering makes the pointed mark longest and tapers its neighbours, while seamless hit areas, a subdued readable preview, and a brief landing animation keep navigation easy to follow.
 
 ## 1.0.177
