@@ -1,3 +1,8 @@
+## 1.0.179
+
+- **Always-on context is now the last thing the model reads.** The pinned-context banner text used to be injected mid-prompt inside the project-rules block, after the full tool catalog, where models weighed it weakly. With clawagents 6.20.70 it rides as its own block at the very end of the system message on every LLM round, framed as taking precedence over project rules and tool notes, and it survives context compaction. It is no longer sent twice.
+- **Sidecar floor bumped to clawagents 6.20.70.** Also brings a configurable built-in base prompt (`.clawagents/base-prompt.md`, `CLAW_BASE_PROMPT[_FILE]`) and append files (`.clawagents/base-prompt-append.md`, `CLAW_BASE_PROMPT_APPEND[_FILE]`) that land after the extension's own instructions.
+
 ## 1.0.178
 
 - **Jump between your messages without losing your place.** A near-invisible, edge-hover transcript navigator stacks one evenly spaced mark for every user query and grows naturally with the conversation. At rest all marks are equal length and only the current query is highlighted; hovering makes the pointed mark longest and tapers its neighbours, while seamless hit areas, a subdued readable preview, and a brief landing animation keep navigation easy to follow.

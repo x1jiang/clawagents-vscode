@@ -1,5 +1,8 @@
-Publisher **`clawagents`** · version **1.0.178**
+Publisher **`clawagents`** · version **1.0.179**
 
+- [x] clawagents **6.20.70** on GitHub + PyPI (configurable base prompt, append mechanisms, pinned context at the prompt tail)
+- [x] GitHub release `v1.0.179` + VSIX (always-on context rides at the prompt tail; floor clawagents **6.20.70**)
+      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
 - [x] clawagents **6.20.69** on GitHub + PyPI (browser accessibility tools & hermetic test hardening)
 - [x] GitHub release `v1.0.178` + VSIX (browser accessibility tools; floor clawagents **6.20.69**)
       · Marketplace/OpenVSX publish still pending — you upload the VSIX.
