@@ -54,10 +54,6 @@ import {
   threadActivityLabel,
 } from "./threadUnread";
 import { ModelRouteCapsule } from "./ModelRouteCapsule";
-import {
-  QueryNavigatorMemory,
-  queryEntriesFromVisibleItems,
-} from "./queryNavigatorMemory";
 import { ToolRunGroup } from "./ToolRunGroup";
 import {
   perceivedToolStart,
@@ -1294,7 +1290,6 @@ export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [queryIndex, setQueryIndex] = useState<QueryIndexEntry[]>([]);
   const [activeQueryEventIndex, setActiveQueryEventIndex] = useState<number>();
-  const queryNavigatorMemoryRef = useRef(new QueryNavigatorMemory());
   const [hoveredQueryPosition, setHoveredQueryPosition] = useState<number>();
   const [pendingQueryJump, setPendingQueryJump] = useState<QueryIndexEntry>();
   /** How many trailing items to mount (virtualization window). */
@@ -1458,21 +1453,6 @@ export function App() {
   /** When false, streaming tokens must not yank scroll away from the user. */
   const stickToBottomRef = useRef(true);
   const streamingRef = useRef(false);
-  const restoreCachedQueryNavigator = useCallback((
-    ownerChatId: string | undefined,
-    visibleItems?: readonly ChatItem[],
-  ) => {
-    const visibleEntries = visibleItems
-      ? queryEntriesFromVisibleItems(visibleItems)
-      : [];
-    const snapshot = visibleEntries.length > 0
-      ? queryNavigatorMemoryRef.current.rememberVisibleEntries(ownerChatId, visibleEntries)
-      : queryNavigatorMemoryRef.current.read(ownerChatId);
-    setQueryIndex(snapshot.entries);
-    setActiveQueryEventIndex(snapshot.activeEventIndex);
-    setHoveredQueryPosition(undefined);
-    setPendingQueryJump(undefined);
-  }, []);
   const handleUserMessageMount = useCallback((eventIndex: number, element: HTMLDivElement | null) => {
     if (element) {
       queryNodesRef.current.set(eventIndex, element);
@@ -1495,11 +1475,7 @@ export function App() {
       }
     }
     if (closest !== undefined) {
-      setActiveQueryEventIndex((previous) => {
-        if (previous === closest) return previous;
-        queryNavigatorMemoryRef.current.rememberActive(chatIdRef.current, closest);
-        return closest;
-      });
+      setActiveQueryEventIndex((previous) => previous === closest ? previous : closest);
     }
   }, []);
   const navigateToQuery = useCallback((entry: QueryIndexEntry) => {
@@ -2355,9 +2331,10 @@ export function App() {
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
-          const restoredItems = (msg.items as ChatItem[]) || [];
-          restoreCachedQueryNavigator(restoredChatId, restoredItems);
-          setItems(restoredItems);
+          setQueryIndex([]);
+          setActiveQueryEventIndex(undefined);
+          setPendingQueryJump(undefined);
+          setItems((msg.items as ChatItem[]) || []);
           // Selecting or forking into a conversation should reveal its newest
           // turn immediately, even when the previously viewed chat was scrolled up.
           stickToBottomRef.current = true;
@@ -2420,16 +2397,10 @@ export function App() {
           }
           break;
         }
-        case "query_index": {
-          const snapshot = queryNavigatorMemoryRef.current.rememberEntries(
-            msg.chatId,
-            msg.entries,
-          );
+        case "query_index":
           if (msg.chatId !== chatIdRef.current) break;
-          setQueryIndex(snapshot.entries);
-          setActiveQueryEventIndex(snapshot.activeEventIndex);
+          setQueryIndex(msg.entries);
           break;
-        }
         case "jump_to_query":
           if (msg.chatId !== chatIdRef.current) break;
           stickToBottomRef.current = false;
@@ -2743,9 +2714,6 @@ export function App() {
         }
         case "done": {
           if (isStaleEvent(msg)) break;
-          // user_echo can request the index before the sidecar has persisted
-          // the prompt. Refresh once the completed run is durably recorded.
-          post({ type: "load_query_index" });
           setBusy(false);
           streamingRef.current = false;
           markStalePlanApprovals(setItems);
@@ -2969,10 +2937,6 @@ export function App() {
       target.classList.remove("query-jump-target");
       queryJumpAnimationTimerRef.current = undefined;
     }, 900);
-    queryNavigatorMemoryRef.current.rememberActive(
-      chatIdRef.current,
-      pendingQueryJump.eventIndex,
-    );
     setActiveQueryEventIndex(pendingQueryJump.eventIndex);
     setPendingQueryJump(undefined);
   }, [items, pendingQueryJump, renderWindow]);
@@ -3238,7 +3202,6 @@ export function App() {
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
     showPanel("chat");
     beginDraftHandoff();
-    restoreCachedQueryNavigator(c.id);
     chatIdRef.current = c.id;
     setChatId(c.id);
     setBusy(Boolean(c.running));
@@ -3256,7 +3219,6 @@ export function App() {
     );
     if (tab.id === chatIdRef.current) return;
     beginDraftHandoff();
-    restoreCachedQueryNavigator(tab.id);
     chatIdRef.current = tab.id;
     setChatId(tab.id);
     setBusy(Boolean(tab.running));
@@ -3277,7 +3239,6 @@ export function App() {
     if (replacement) {
       pendingNewChatRef.current = false;
       beginDraftHandoff();
-      restoreCachedQueryNavigator(replacement.id);
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
       setBusy(Boolean(replacement.running));
@@ -3291,7 +3252,6 @@ export function App() {
       setChatId(undefined);
       showPanel("history");
       post({ type: "deselect_chat" });
-      restoreCachedQueryNavigator(undefined);
     }
   };
 
@@ -3306,7 +3266,6 @@ export function App() {
     setChatId(undefined);
     showPanel("history");
     post({ type: "deselect_chat" });
-    restoreCachedQueryNavigator(undefined);
   };
 
   const toggleConversationTabPin = (tab: ConversationTab) => {
