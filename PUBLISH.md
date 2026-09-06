@@ -1,4 +1,8 @@
-Publisher **`clawagents`** · version **1.0.182**
+Publisher **`clawagents`** · version **1.0.183**
+
+- [x] clawagents **6.20.75** on PyPI + GitHub: Gemma Q4 bounded coordination, retry recovery and verified completion.
+- [x] GitHub release `v1.0.183` + VSIX; Python floor **6.20.75**.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
 - [x] clawagents **6.20.74** on PyPI + GitHub: Meta Glimmer integration and harder coding benchmarks.
 - [x] GitHub release `v1.0.182` + VSIX; Python floor **6.20.74**.
