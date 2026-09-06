@@ -4852,12 +4852,16 @@ export function App() {
               New
             </button>
           </div>
-          {selectedChats.length > 0 ? (
-            <div className="history-bulk-toolbar" role="toolbar" aria-label="Selected conversation actions">
-              <strong>{selectedChats.length} selected</strong>
+          <div
+            className="history-bulk-toolbar"
+            role="toolbar"
+            aria-label="Selected conversation actions"
+          >
+              <strong>{selectedChats.length ? `${selectedChats.length} selected` : "Select conversations"}</strong>
               <button
                 type="button"
                 className="ghost tiny"
+                disabled={selectedChats.length === 0}
                 onClick={() => {
                   setPendingBulkDelete(false);
                   post({
@@ -4872,6 +4876,7 @@ export function App() {
               <button
                 type="button"
                 className="ghost tiny"
+                disabled={selectedChats.length === 0}
                 onClick={() => {
                   setPendingBulkDelete(false);
                   post({
@@ -4903,19 +4908,24 @@ export function App() {
                   </button>
                 </>
               ) : (
-                <button type="button" className="danger tiny" onClick={() => setPendingBulkDelete(true)}>
+                <button
+                  type="button"
+                  className="danger tiny"
+                  disabled={selectedChats.length === 0}
+                  onClick={() => setPendingBulkDelete(true)}
+                >
                   Delete
                 </button>
               )}
               <button
                 type="button"
                 className="ghost tiny history-selection-clear"
+                disabled={selectedChats.length === 0}
                 onClick={clearHistorySelection}
               >
                 Clear
               </button>
-            </div>
-          ) : null}
+          </div>
           {historySearching && historyQuery.trim() ? (
             <div className="muted tiny history-hint">Searching…</div>
           ) : (
