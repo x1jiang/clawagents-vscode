@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from clawagents.provider_profiles import BUILTIN_PROVIDER_PROFILES, load_provider_profiles
 
+from meta_provider import meta_base_url, meta_model
 from pricing import attach_prices
 from url_trust import is_trusted_base_url
 
@@ -535,6 +536,13 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
                 ),
             }
         )
+    # Catalog discovery is offline for this private endpoint. Selecting Meta
+    # requires the same explicit URL trust as any other custom endpoint.
+    out.append({
+        "id": "meta", "name": "Meta (Glimmer)", "available": True,
+        "base_url": meta_base_url(),
+        "models": [{"id": meta_model(), "label": meta_model(), "available": True}],
+    })
     # Named profiles from ~/.clawagents/profiles.json (and cwd). Skip library
     # builtins — those are already listed above (openai/anthropic/gemini/ollama/
     # bedrock). Exposing ``profile:bedrock-gateway`` duplicated AWS Bedrock in
@@ -659,7 +667,9 @@ def _probe_key(provider: str, key: str) -> tuple[bool, str]:
     # OpenAI (+ compatible): prefer Settings base_url when trusted.
     if provider == "openai":
         settings_base, ssl_verify = _settings_base_url()
-        if settings_base:
+        from settings_store import load_settings
+
+        if settings_base and str(load_settings().get("provider") or "auto") in {"auto", "openai", "ollama"}:
             ok, detail, _models = _probe_compatible_endpoint(
                 settings_base, key, ssl_verify=ssl_verify
             )

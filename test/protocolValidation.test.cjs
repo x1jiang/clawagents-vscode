@@ -141,3 +141,9 @@ test("accepts bounded, unique chat batches and rejects unsafe IDs", () => {
     undefined,
   );
 });
+
+test("accepts Meta per-thread routes", () => {
+  const message = { type: "set_chat_model_route", chatId: "meta-thread",
+    modelRoute: { provider: "meta", model: "Muse-Glimmer-30B", wire_api: "chat_completions" } };
+  assert.deepEqual(parseWebviewToHost(message), message);
+});

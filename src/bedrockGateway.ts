@@ -20,6 +20,7 @@ const NON_BEDROCK_PROVIDERS = new Set([
   "anthropic",
   "gemini",
   "ollama",
+  "meta",
 ]);
 
 /** True for `bedrock-mantle.<region>.api.aws` hosts. */

@@ -198,6 +198,11 @@ export function trustedPythonPathSetting(): string {
  * `.env` must not run code or rewrite the interpreter search path on start.
  */
 export const DOTENV_ALLOWLIST = new Set([
+  "META_API_KEY",
+  "glimmer_30B_backend",
+  "glimmer_30B_model",
+  "GLIMMER_30B_BACKEND",
+  "GLIMMER_30B_MODEL",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",

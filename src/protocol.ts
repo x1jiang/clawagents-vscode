@@ -601,7 +601,7 @@ function autoApprove(value: unknown): boolean {
 function modelRoute(value: unknown): boolean {
   if (value === undefined) return true;
   if (!record(value) || !text(value.provider, 64) || !text(value.model, 256)) return false;
-  if (!/^(auto|openai|anthropic|gemini|bedrock|ollama|xai|profile:[A-Za-z0-9._-]+)$/.test(value.provider)) {
+  if (!/^(auto|openai|anthropic|gemini|bedrock|ollama|xai|meta|profile:[A-Za-z0-9._-]+)$/.test(value.provider)) {
     return false;
   }
   return optionalText(value.reasoning_effort, 32)

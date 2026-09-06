@@ -45,7 +45,7 @@ _MODEL_ROUTE_KEYS = (
     "wire_api",
 )
 _MODEL_ROUTE_PROVIDERS = frozenset(
-    {"auto", "openai", "anthropic", "gemini", "bedrock", "ollama", "xai"}
+    {"auto", "openai", "anthropic", "gemini", "bedrock", "ollama", "xai", "meta"}
 )
 _REASONING_EFFORTS = frozenset({"", "none", "low", "medium", "high", "xhigh", "max"})
 
@@ -188,6 +188,7 @@ def _model_route_notice_label(route: dict[str, Any] | None) -> str:
         "bedrock": "AWS Bedrock",
         "ollama": "Ollama",
         "xai": "xAI",
+        "meta": "Meta (Glimmer)",
     }
     if provider == "bedrock":
         mode = str(clean.get("bedrock_mode") or "").lower()
@@ -233,6 +234,27 @@ def settings_with_model_route(
     for key in _MODEL_ROUTE_KEYS:
         if key in clean:
             merged[key] = clean[key]
+    # Shared proxy settings belong to their provider, especially when a chat
+    # switches between a private Meta endpoint and a keyed OpenAI route.
+    from meta_provider import is_meta_model, meta_base_url
+
+    target = str(merged.get("provider") or "auto")
+    if target == "profile:meta" or (target == "auto" and is_meta_model(str(merged.get("model") or ""))):
+        target = merged["provider"] = "meta"
+    original = str(settings.get("provider") or "auto")
+    if target == "meta" and original != "meta":
+        endpoint = meta_base_url()
+        merged["trust_custom_base_url"] = bool(
+            settings.get("trust_custom_base_url")
+            and str(settings.get("base_url") or "").rstrip("/") == endpoint
+        )
+        merged["base_url"] = endpoint
+    elif target == "meta" and not merged.get("base_url"):
+        merged["base_url"] = meta_base_url()
+        merged["trust_custom_base_url"] = False
+    elif original in {"meta", "profile:meta"} and target != "meta":
+        merged["base_url"] = ""
+        merged["trust_custom_base_url"] = False
     return merged
 
 
@@ -1302,6 +1324,25 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     if effective_model:
         kwargs["model"] = effective_model
     provider = str(settings.get("provider") or "auto").strip().lower()
+    from meta_provider import is_meta_model, meta_base_url, meta_model
+
+    if provider in {"meta", "profile:meta"} or (provider == "auto" and is_meta_model(str(effective_model or ""))):
+        from url_trust import is_trusted_base_url
+        from spawn_secrets import get_secret
+
+        endpoint = str(settings.get("base_url") or meta_base_url()).strip().rstrip("/")
+        if not is_trusted_base_url(endpoint) and not settings.get("trust_custom_base_url"):
+            raise ValueError("Meta endpoint is not trusted. Select Meta in Settings and approve its Base URL.")
+        _apply_aws_settings(settings, active=False)
+        return {
+            "profile": "meta",
+            "model": effective_model if effective_model and effective_model != "default" else meta_model(),
+            "base_url": endpoint,
+            # Explicit placeholder prevents fallback to OPENAI_API_KEY.
+            "api_key": get_secret("META_API_KEY") or "not-needed",
+            "wire_api": "chat_completions",
+            "ssl_verify": bool(settings.get("ssl_verify", True)),
+        }
     base_url = (settings.get("base_url") or "").strip() or None
     mode = str(settings.get("bedrock_mode") or "iam").strip().lower()
     # xAI rides the OpenAI-compatible wire; the engine supplies

@@ -1,4 +1,8 @@
-Publisher **`clawagents`** · version **1.0.181**
+Publisher **`clawagents`** · version **1.0.182**
+
+- [ ] clawagents **6.20.74** on PyPI + GitHub: Meta Glimmer integration and harder coding benchmarks.
+- [ ] GitHub release `v1.0.182` + VSIX; Python floor **6.20.74**.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
 - [x] clawagents **6.20.73** on GitHub + PyPI (honor configured Python in local commands; preserve symlinked virtualenvs)
 - [x] GitHub release `v1.0.181` + VSIX (explicit Python selection, no silent fallback, deferred settings restart; floor **6.20.73**)

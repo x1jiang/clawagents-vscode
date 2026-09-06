@@ -142,3 +142,14 @@ test("readSecretKey purges path-like SecretStorage values", async () => {
   assert.equal(stored["clawagents.openaiApiKey"], undefined);
   assert.equal(await cfg.resolveProviderApiKey("openai"), "sk-dotenv-ok");
 });
+test("Meta environment overrides pass the workspace allowlist and sanitization", () => {
+  const { DOTENV_ALLOWLIST, sanitizeApiKey } = require(outputFile);
+  for (const [key, value] of Object.entries({
+    glimmer_30B_backend: "http://129.106.31.72:7790/v1",
+    glimmer_30B_model: "Muse-Glimmer-30B",
+    META_API_KEY: "dedicated-meta-key",
+  })) {
+    assert.equal(DOTENV_ALLOWLIST.has(key), true);
+    assert.equal(sanitizeApiKey(value), value);
+  }
+});

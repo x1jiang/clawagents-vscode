@@ -15,6 +15,8 @@ import { normalizeModelId } from "./pricing";
  * the Mantle third-party ids.
  */
 const WINDOWS: Array<[string, number]> = [
+  // Deployment /v1/models reports max_model_len=196608.
+  ["muse-glimmer-30b", 196_608],
   // OpenAI
   ["gpt-5.6", 1_050_000],
   ["gpt-5.5", 400_000],

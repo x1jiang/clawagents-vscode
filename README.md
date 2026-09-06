@@ -119,3 +119,24 @@ On Windows, use the full `venv\\Scripts\\python.exe` path in JSON. The interpret
 Custom mode runs the sidecar with this interpreter and prepends its directory to PATH for local agent commands. Managed mode creates a separate extension-owned venv using the selected base Python. A missing configured interpreter is an error, never a reason to silently choose system Python. Settings changes restart the sidecar when active tasks finish; **ClawAgents: Restart Sidecar** applies them immediately.
 
 In **Output → ClawAgents Sidecar**, `Starting sidecar:` shows the interpreter and `PATH pin:` shows its command directory. To verify a local agent command, run `python -c "import sys; print(sys.executable); print(sys.prefix)"`. Explicit absolute commands and separately configured containers/remote execution environments retain their own interpreter selection.
+
+### Meta / Muse-Glimmer-30B
+
+Choose **Meta (Glimmer)** in ClawAgents Settings. The preset selects
+`Muse-Glimmer-30B` at `http://129.106.31.72:7790/v1`; approve the displayed
+endpoint with **Trust and save**. Meta also appears in the per-chat provider
+selector. Chat Completions is selected automatically, with no inherited OpenAI
+reasoning settings or API key. The default backend does not require a key.
+
+Optional workspace `.env` or shell overrides (restart the sidecar after changes):
+
+```dotenv
+glimmer_30B_backend=http://129.106.31.72:7790/v1
+glimmer_30B_model=Muse-Glimmer-30B
+# META_API_KEY=your-dedicated-key  # only for authenticated deployments
+```
+
+Select Meta again to apply changed environment defaults to Settings. Custom
+remote URLs still require approval. This integration requires a Python core
+containing the `meta` provider profile; during monorepo development, select the
+interpreter where the sibling `clawagents_py` is installed in editable mode.

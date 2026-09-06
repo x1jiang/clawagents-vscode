@@ -235,6 +235,9 @@ def _looks_like_ollama_local_id(model: str) -> bool:
 
 def _default_model_for_provider(provider: str) -> str:
     p = (provider or "").strip().lower()
+    if p == "meta":
+        from meta_provider import meta_model
+        return meta_model()
     if p == "openai":
         return "gpt-5.6-terra"
     if p == "gemini":
@@ -256,7 +259,12 @@ def _model_fits_provider(model: str, provider: str) -> bool:
         return False
     p = (provider or "").strip().lower()
     ml = m.lower()
+    from meta_provider import is_meta_model
+    if p == "meta":
+        return is_meta_model(m)
     if p == "openai":
+        if is_meta_model(m):
+            return False
         if _looks_like_ollama_local_id(m):
             return False
         if ml.startswith("claude") or "gemini" in ml or ml.startswith("grok"):

@@ -105,3 +105,7 @@ test("contextUsage clamps the ratio at 1", () => {
   const half = contextUsage("Claude-Opus-4-8", 500_000);
   assert.deepEqual(half, { ratio: 0.5, window: 1_000_000 });
 });
+
+test("Glimmer meter matches the deployed context limit", () => {
+  assert.equal(contextWindowFor("Muse-Glimmer-30B"), 196_608);
+});

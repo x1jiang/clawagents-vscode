@@ -1,8 +1,8 @@
 {
   "name": "clawagents",
   "displayName": "ClawAgents",
-  "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.181",
+  "description": "Coding agent for VS Code \u2014 chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
+  "version": "1.0.182",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -133,7 +133,7 @@
       },
       {
         "command": "clawagents.clearApiKey",
-        "title": "ClawAgents: Clear API Key…"
+        "title": "ClawAgents: Clear API Key\u2026"
       },
       {
         "command": "clawagents.installPythonDeps",
@@ -149,31 +149,31 @@
       },
       {
         "command": "clawagents.graphifyExtract",
-        "title": "ClawAgents: Graphify — Build Graph (code-only)"
+        "title": "ClawAgents: Graphify \u2014 Build Graph (code-only)"
       },
       {
         "command": "clawagents.graphifyExtractFull",
-        "title": "ClawAgents: Graphify — Full Extract (docs + LLM)"
+        "title": "ClawAgents: Graphify \u2014 Full Extract (docs + LLM)"
       },
       {
         "command": "clawagents.graphifyUpdate",
-        "title": "ClawAgents: Graphify — Augment Graph (update)"
+        "title": "ClawAgents: Graphify \u2014 Augment Graph (update)"
       },
       {
         "command": "clawagents.graphifyAdoptUpstream",
-        "title": "ClawAgents: Graphify — Use Existing graphify-out"
+        "title": "ClawAgents: Graphify \u2014 Use Existing graphify-out"
       },
       {
         "command": "clawagents.graphifyStatus",
-        "title": "ClawAgents: Graphify — Show Status"
+        "title": "ClawAgents: Graphify \u2014 Show Status"
       },
       {
         "command": "clawagents.graphifyOpenFolder",
-        "title": "ClawAgents: Graphify — Reveal Graph Folder"
+        "title": "ClawAgents: Graphify \u2014 Reveal Graph Folder"
       },
       {
         "command": "clawagents.graphifyAppendAgentsMd",
-        "title": "ClawAgents: Graphify — Append AGENTS.md Block"
+        "title": "ClawAgents: Graphify \u2014 Append AGENTS.md Block"
       }
     ],
     "keybindings": [
@@ -296,7 +296,7 @@
         "clawagents.contextMode": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools — sandboxed code execution and indexed search. Requires context-mode >=1.0.169; auto-installed when clawagents.ensureCompanions is true. The sidebar Settings checkbox overrides this per workspace."
+          "description": "Enable Context Mode (github.com/mksglu/context-mode): token-efficient ctx_* tools \u2014 sandboxed code execution and indexed search. Requires context-mode >=1.0.169; auto-installed when clawagents.ensureCompanions is true. The sidebar Settings checkbox overrides this per workspace."
         },
         "clawagents.graphify": {
           "type": "boolean",
@@ -311,7 +311,7 @@
         "clawagents.syncPathPythons": {
           "type": "boolean",
           "default": false,
-          "description": "When true, activation may offer (with confirmation) to upgrade clawagents on other PATH interpreters below this extension's floor. Default off — only clawagents.pythonPath is managed unless you opt in or run Install/Doctor."
+          "description": "When true, activation may offer (with confirmation) to upgrade clawagents on other PATH interpreters below this extension's floor. Default off \u2014 only clawagents.pythonPath is managed unless you opt in or run Install/Doctor."
         },
         "clawagents.alpacaDeployPath": {
           "type": "string",

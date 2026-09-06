@@ -1,6 +1,10 @@
 /** Env vars safe to forward into the sidecar / pip (avoid leaking secrets). */
 const SAFE_ENV_KEYS = new Set([
   "PATH",
+  "glimmer_30B_backend",
+  "glimmer_30B_model",
+  "GLIMMER_30B_BACKEND",
+  "GLIMMER_30B_MODEL",
   "HOME",
   "USER",
   "USERPROFILE",

@@ -229,6 +229,7 @@ import {
   overlayHostKeyAvailability,
   effectiveProviderLabel,
   defaultModelForProvider,
+  META_DEFAULT_BASE_URL,
   modelFitsProvider,
   isWeakAutoDefaultModel,
 } from "./providerCatalog";
@@ -2231,7 +2232,7 @@ export function App() {
           const incomingProv = String(incoming.provider || "").toLowerCase();
           if (
             msg.saveOutcome !== "ok" &&
-            ["openai", "anthropic", "gemini", "ollama"].includes(localProv) &&
+            ["openai", "anthropic", "gemini", "ollama", "meta"].includes(localProv) &&
             incomingProv === "bedrock"
           ) {
             break;
@@ -3693,7 +3694,7 @@ export function App() {
       };
     } else {
       next.provider = choice;
-      next.model = defaultModelForProvider(choice);
+      next.model = providers.find((p) => p.id === choice)?.models?.[0]?.id || defaultModelForProvider(choice);
       next.bedrock_mode = "iam";
       next.wire_api = "auto";
     }
@@ -5002,10 +5003,12 @@ export function App() {
                   };
                   if (
                     leavingBedrock ||
+                    String(prev.provider || "") === "meta" ||
                     /bedrock-mantle\./i.test(prevUrl) ||
                     /\/api\/v1\/?$/i.test(prevUrl)
                   ) {
                     next.base_url = "";
+                    next.trust_custom_base_url = false;
                     next.bedrock_mode = "iam";
                     next.wire_api = "auto";
                   }
@@ -5014,9 +5017,21 @@ export function App() {
                   if (
                     choice !== "auto" &&
                     prevModel &&
-                    !modelFitsProvider(prevModel, choice)
+                    (String(prev.provider || "") === "meta" || !modelFitsProvider(prevModel, choice))
                   ) {
-                    next.model = defaultModelForProvider(choice);
+                    next.model = providers.find((p) => p.id === choice)?.models?.[0]?.id || defaultModelForProvider(choice);
+                  }
+                  if (choice === "meta") {
+                    const meta = providers.find((p) => p.id === "meta");
+                    next.base_url = meta?.base_url || META_DEFAULT_BASE_URL;
+                    next.trust_custom_base_url = Boolean(
+                      prev.trust_custom_base_url &&
+                      prevUrl.replace(/\/$/, "") === String(next.base_url).replace(/\/$/, ""),
+                    );
+                    next.model = meta?.models?.[0]?.id || defaultModelForProvider("meta");
+                    next.wire_api = "chat_completions";
+                    next.reasoning_effort = "";
+                    next.bedrock_mode = "iam";
                   }
                   skipSettingsAutosave.current = true;
                   settingsRef.current = next;
@@ -5105,7 +5120,7 @@ export function App() {
               </label>
             )}
             <label>
-              Base URL (optional — OpenAI-compatible / Ollama / BAG)
+              Base URL (optional — OpenAI-compatible / Meta / Ollama / BAG)
               <input
                 value={String(settings.base_url || "")}
                 onChange={(e) => setSettings((s) => ({ ...s, base_url: e.target.value }))}
@@ -5125,6 +5140,14 @@ export function App() {
                 disabled={selectedProvider === "gemini"}
               />
             </label>
+            {settingsProvider === "meta" && (
+              <p className="settings-hint">
+                Meta Glimmer uses Chat Completions. No API key is required by default;
+                authenticated deployments use META_API_KEY. Set glimmer_30B_backend
+                and glimmer_30B_model in the sidecar environment to override defaults.
+                Approve this endpoint when prompted before starting a chat.
+              </p>
+            )}
             {(selectedProvider === "openai" ||
               selectedProvider === "auto" ||
               selectedProvider === "ollama" ||

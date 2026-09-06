@@ -1,3 +1,5 @@
+node_modules
+webview/node_modules
 src/**
 webview/src/**
 webview/node_modules/**

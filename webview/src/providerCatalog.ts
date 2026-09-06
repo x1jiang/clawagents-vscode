@@ -27,6 +27,9 @@ export const LOCAL_DOCUMENT_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
+export const META_DEFAULT_MODEL = "Muse-Glimmer-30B";
+export const META_DEFAULT_BASE_URL = "http://129.106.31.72:7790/v1";
+
 export const PREFERRED_OPENAI_MODEL = "gpt-5.6-terra";
 export const PREFERRED_GEMINI_MODEL = "gemini-3.7-flash";
 export const PREFERRED_ANTHROPIC_MODEL = "claude-sonnet-4-5";
@@ -82,6 +85,8 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     name: "Ollama (local)",
     models: [{ id: "llama3.1", label: "Llama 3.1" }],
   },
+  { id: "meta", name: "Meta (Glimmer)", base_url: META_DEFAULT_BASE_URL,
+    models: [{ id: META_DEFAULT_MODEL, label: META_DEFAULT_MODEL }] },
   {
     id: "bedrock",
     name: "AWS Bedrock",
@@ -254,6 +259,8 @@ export function isWeakAutoDefaultModel(model: string): boolean {
 
 export function defaultModelForProvider(provider: string): string {
   switch (String(provider || "").trim().toLowerCase()) {
+    case "meta":
+      return META_DEFAULT_MODEL;
     case "openai":
       return PREFERRED_OPENAI_MODEL;
     case "gemini":
@@ -281,7 +288,10 @@ export function modelFitsProvider(model: string, provider: string): boolean {
   const p = String(provider || "").trim().toLowerCase();
   const ml = m.toLowerCase();
   switch (p) {
+    case "meta":
+      return !/^(gpt-|claude|gemini|grok)/.test(ml) && !isNativeBedrockModelId(m);
     case "openai":
+      if (ml.startsWith("muse-glimmer")) return false;
       if (isMantleCatalogModelId(m) || isNativeBedrockModelId(m)) return false;
       if (modelLooksLikeOllamaLocalId(m)) return false;
       if (ml.startsWith("claude") || ml.includes("gemini") || ml.startsWith("grok")) {
@@ -501,6 +511,7 @@ export function providerDisplayLabel(settings: Record<string, unknown>): string 
     if (mode === "bag") return "Bedrock Gateway";
     return "Bedrock IAM";
   }
+  if (p === "meta") return "Meta (Glimmer)";
   if (p === "openai") return "OpenAI";
   if (p === "anthropic") return "Anthropic";
   if (p === "gemini") return "Gemini";

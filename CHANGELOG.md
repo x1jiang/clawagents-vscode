@@ -1,3 +1,10 @@
+## 1.0.182
+
+- Add Meta (Glimmer) to Settings and per-chat model selection, with configurable backend/model and the 196,608-token context meter.
+- Route through Chat Completions with dedicated Meta credentials and existing custom-endpoint approval. Provider switches cannot reuse Meta endpoints for OpenAI keys.
+- Require clawagents 6.20.74 for the Meta profile, compact tool surface, and structured content coercion fix.
+- Include the Python comparison results from a frozen, independently graded coding challenge suite in the release notes.
+
 ## 1.0.181
 
 - Preserve the selected virtualenv directory on PATH even when Python is a symlink to a system interpreter. Clear stale VIRTUAL_ENV values.
