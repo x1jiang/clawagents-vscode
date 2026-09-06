@@ -262,6 +262,7 @@ export class SidecarManager {
     const keyVars: Record<string, string[]> = {
       openai: ["OPENAI_API_KEY"],
       meta: ["META_API_KEY"],
+      "profile:gemma-agentic": ["GEMMA_AGENTIC_API_KEY"],
       anthropic: ["ANTHROPIC_API_KEY"],
       gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
       bedrock: ["BEDROCK_API_KEY", "MANTLE_API_KEY"],

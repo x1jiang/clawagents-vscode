@@ -1,6 +1,8 @@
 /** Env vars safe to forward into the sidecar / pip (avoid leaking secrets). */
 const SAFE_ENV_KEYS = new Set([
   "PATH",
+  "GEMMA_AGENTIC_BASE_URL",
+  "GEMMA_AGENTIC_MODEL",
   "glimmer_30B_backend",
   "glimmer_30B_model",
   "GLIMMER_30B_BACKEND",

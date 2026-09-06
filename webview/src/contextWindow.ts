@@ -15,6 +15,9 @@ import { normalizeModelId } from "./pricing";
  * the Mantle third-party ids.
  */
 const WINDOWS: Array<[string, number]> = [
+  ["gemma4-agentic-v2", 16_384],
+  ["gemma4-v2-", 16_384],
+  ["gemma-4-12b-agentic-fable5-composer2.5-v2", 16_384],
   // Deployment /v1/models reports max_model_len=196608.
   ["muse-glimmer-30b", 196_608],
   // OpenAI

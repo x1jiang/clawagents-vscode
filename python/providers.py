@@ -543,13 +543,19 @@ def build_provider_catalog(*, probe_keys: bool = True) -> list[dict[str, Any]]:
         "base_url": meta_base_url(),
         "models": [{"id": meta_model(), "label": meta_model(), "available": True}],
     })
+    from gemma_provider import gemma_base_url, gemma_model, GEMMA_PROFILE
+    out.append({
+        "id": GEMMA_PROFILE, "name": "Gemma Agentic Q4 (coordinator)", "available": True,
+        "base_url": gemma_base_url(),
+        "models": [{"id": gemma_model(), "label": gemma_model(), "available": True}],
+    })
     # Named profiles from ~/.clawagents/profiles.json (and cwd). Skip library
     # builtins — those are already listed above (openai/anthropic/gemini/ollama/
     # bedrock). Exposing ``profile:bedrock-gateway`` duplicated AWS Bedrock in
     # the Settings dropdown; gateway mode lives on the Bedrock card (Base URL).
     catalog_ids = {p["id"] for p in out}
     for name, profile in load_provider_profiles().items():
-        if name in BUILTIN_PROVIDER_PROFILES or name in catalog_ids:
+        if name in BUILTIN_PROVIDER_PROFILES or name in catalog_ids or f"profile:{name}" in catalog_ids:
             continue
         out.append(
             {

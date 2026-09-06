@@ -27,6 +27,9 @@ export const LOCAL_DOCUMENT_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 
+export const GEMMA_DEFAULT_MODEL = "gemma4-agentic-v2";
+export const GEMMA_DEFAULT_BASE_URL = "http://127.0.0.1:18080/v1";
+
 export const META_DEFAULT_MODEL = "Muse-Glimmer-30B";
 export const META_DEFAULT_BASE_URL = "http://129.106.31.72:7790/v1";
 
@@ -110,6 +113,7 @@ export const FALLBACK_PROVIDERS: Provider[] = [
       { id: "openai.gpt-oss-120b-1:0", label: "GPT-OSS 120B" },
     ],
   },
+  { id: "profile:gemma-agentic", name: "Gemma Agentic Q4 (coordinator)", base_url: GEMMA_DEFAULT_BASE_URL, models: [{id: GEMMA_DEFAULT_MODEL, label: GEMMA_DEFAULT_MODEL}] },
 ];
 
 /** Default Mantle model — chat-completions safe (frontier GPT/Claude use other paths). */
@@ -259,6 +263,8 @@ export function isWeakAutoDefaultModel(model: string): boolean {
 
 export function defaultModelForProvider(provider: string): string {
   switch (String(provider || "").trim().toLowerCase()) {
+    case "profile:gemma-agentic":
+      return GEMMA_DEFAULT_MODEL;
     case "meta":
       return META_DEFAULT_MODEL;
     case "openai":
@@ -288,6 +294,8 @@ export function modelFitsProvider(model: string, provider: string): boolean {
   const p = String(provider || "").trim().toLowerCase();
   const ml = m.toLowerCase();
   switch (p) {
+    case "profile:gemma-agentic":
+      return ml.startsWith("gemma");
     case "meta":
       return !/^(gpt-|claude|gemini|grok)/.test(ml) && !isNativeBedrockModelId(m);
     case "openai":

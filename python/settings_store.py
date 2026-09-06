@@ -235,6 +235,9 @@ def _looks_like_ollama_local_id(model: str) -> bool:
 
 def _default_model_for_provider(provider: str) -> str:
     p = (provider or "").strip().lower()
+    if p == "profile:gemma-agentic":
+        from gemma_provider import gemma_model
+        return gemma_model()
     if p == "meta":
         from meta_provider import meta_model
         return meta_model()
@@ -259,6 +262,9 @@ def _model_fits_provider(model: str, provider: str) -> bool:
         return False
     p = (provider or "").strip().lower()
     ml = m.lower()
+    from gemma_provider import is_gemma_model
+    if p == "profile:gemma-agentic":
+        return is_gemma_model(m)
     from meta_provider import is_meta_model
     if p == "meta":
         return is_meta_model(m)

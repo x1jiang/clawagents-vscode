@@ -199,6 +199,9 @@ export function trustedPythonPathSetting(): string {
  */
 export const DOTENV_ALLOWLIST = new Set([
   "META_API_KEY",
+  "GEMMA_AGENTIC_API_KEY",
+  "GEMMA_AGENTIC_BASE_URL",
+  "GEMMA_AGENTIC_MODEL",
   "glimmer_30B_backend",
   "glimmer_30B_model",
   "GLIMMER_30B_BACKEND",

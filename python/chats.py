@@ -238,7 +238,13 @@ def settings_with_model_route(
     # switches between a private Meta endpoint and a keyed OpenAI route.
     from meta_provider import is_meta_model, meta_base_url
 
+    from gemma_provider import GEMMA_PROFILE, gemma_base_url, is_gemma_model
     target = str(merged.get("provider") or "auto")
+    if target == "auto" and is_gemma_model(merged.get("model")):
+        target = merged["provider"] = GEMMA_PROFILE
+    if str(settings.get("provider")) == GEMMA_PROFILE and target != GEMMA_PROFILE:
+        merged["base_url"] = ""
+        merged["trust_custom_base_url"] = False
     if target == "profile:meta" or (target == "auto" and is_meta_model(str(merged.get("model") or ""))):
         target = merged["provider"] = "meta"
     original = str(settings.get("provider") or "auto")
@@ -254,6 +260,13 @@ def settings_with_model_route(
         merged["trust_custom_base_url"] = False
     elif original in {"meta", "profile:meta"} and target != "meta":
         merged["base_url"] = ""
+        merged["trust_custom_base_url"] = False
+    if target == GEMMA_PROFILE and original != GEMMA_PROFILE:
+        endpoint = gemma_base_url()
+        merged["base_url"] = endpoint
+        merged["trust_custom_base_url"] = bool(settings.get("trust_custom_base_url") and str(settings.get("base_url") or "").rstrip("/") == endpoint)
+    elif target == GEMMA_PROFILE and not merged.get("base_url"):
+        merged["base_url"] = gemma_base_url()
         merged["trust_custom_base_url"] = False
     return merged
 
@@ -1326,6 +1339,17 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     provider = str(settings.get("provider") or "auto").strip().lower()
     from meta_provider import is_meta_model, meta_base_url, meta_model
 
+    from gemma_provider import GEMMA_PROFILE, gemma_model, gemma_base_url, is_gemma_model
+    if provider == GEMMA_PROFILE or (provider == "auto" and is_gemma_model(effective_model)):
+        from url_trust import is_trusted_base_url
+        from spawn_secrets import get_secret
+        endpoint = str(settings.get("base_url") or gemma_base_url()).strip().rstrip("/")
+        if not is_trusted_base_url(endpoint) and not settings.get("trust_custom_base_url"):
+            raise ValueError("Approve the Gemma server Base URL in Settings before connecting.")
+        _apply_aws_settings(settings, active=False)
+        return {"profile": "gemma-agentic", "model": effective_model if effective_model and effective_model != "default" else gemma_model(),
+                "base_url": endpoint, "api_key": get_secret("GEMMA_AGENTIC_API_KEY") or "not-needed",
+                "wire_api": "chat_completions", "ssl_verify": bool(settings.get("ssl_verify", True))}
     if provider in {"meta", "profile:meta"} or (provider == "auto" and is_meta_model(str(effective_model or ""))):
         from url_trust import is_trusted_base_url
         from spawn_secrets import get_secret

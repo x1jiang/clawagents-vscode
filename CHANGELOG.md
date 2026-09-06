@@ -1,3 +1,8 @@
+# 1.0.183
+
+- Add Gemma Agentic Q4 coordinator profile, local endpoint defaults, isolated credentials and 16K context display.
+- Require clawagents 6.20.75 for bounded independent workers, failed-worker retries and verified completion.
+
 ## 1.0.182
 
 - Add Meta (Glimmer) to Settings and per-chat model selection, with configurable backend/model and the 196,608-token context meter.

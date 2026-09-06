@@ -229,3 +229,11 @@ test("Meta is selectable without a cloud key and has its own model route", () =>
   assert.equal(mod.providerDisplayLabel({ provider: "meta" }), "Meta (Glimmer)");
   assert.equal(mod.modelsForKeys([row], "meta")[0].id, "Muse-Glimmer-30B");
 });
+
+ test("Gemma coordinator defaults and stale vendor model rejection", () => {
+  assert.equal(mod.defaultModelForProvider("profile:gemma-agentic"), "gemma4-agentic-v2");
+  assert.equal(mod.modelFitsProvider("gpt-5.6-luna", "profile:gemma-agentic"), false);
+  assert.equal(mod.modelFitsProvider("gemma4-agentic-v2", "profile:gemma-agentic"), true);
+  const row = mod.FALLBACK_PROVIDERS.find(p => p.id === "profile:gemma-agentic");
+  assert.equal(row.base_url, "http://127.0.0.1:18080/v1");
+});

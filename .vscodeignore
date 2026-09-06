@@ -26,3 +26,7 @@ test/**
 PUBLISH.md
 **/.git/**
 **/__pycache__/**
+
+**/.clawagents/**
+**/.env
+**/.env.*

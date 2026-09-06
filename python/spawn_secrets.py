@@ -12,6 +12,7 @@ import os
 _SPAWN_SECRET_KEYS = (
     "OPENAI_API_KEY",
     "META_API_KEY",
+    "GEMMA_AGENTIC_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
@@ -112,6 +113,8 @@ def resolve_api_key(provider: str, model: str | None = None) -> str | None:
     p = (provider or "auto").strip().lower()
     m = (model or "").strip().lower()
 
+    if p == "profile:gemma-agentic":
+        return get_secret("GEMMA_AGENTIC_API_KEY") or None
     if p in {"meta", "profile:meta"}:
         return get_secret("META_API_KEY") or None
     if p == "bedrock":

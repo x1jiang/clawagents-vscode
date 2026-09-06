@@ -230,6 +230,7 @@ import {
   effectiveProviderLabel,
   defaultModelForProvider,
   META_DEFAULT_BASE_URL,
+  GEMMA_DEFAULT_BASE_URL,
   modelFitsProvider,
   isWeakAutoDefaultModel,
 } from "./providerCatalog";
@@ -2232,7 +2233,7 @@ export function App() {
           const incomingProv = String(incoming.provider || "").toLowerCase();
           if (
             msg.saveOutcome !== "ok" &&
-            ["openai", "anthropic", "gemini", "ollama", "meta"].includes(localProv) &&
+            ["openai", "anthropic", "gemini", "ollama", "meta", "profile:gemma-agentic"].includes(localProv) &&
             incomingProv === "bedrock"
           ) {
             break;
@@ -5003,7 +5004,7 @@ export function App() {
                   };
                   if (
                     leavingBedrock ||
-                    String(prev.provider || "") === "meta" ||
+                    ["meta", "profile:gemma-agentic"].includes(String(prev.provider || "")) ||
                     /bedrock-mantle\./i.test(prevUrl) ||
                     /\/api\/v1\/?$/i.test(prevUrl)
                   ) {
@@ -5017,9 +5018,18 @@ export function App() {
                   if (
                     choice !== "auto" &&
                     prevModel &&
-                    (String(prev.provider || "") === "meta" || !modelFitsProvider(prevModel, choice))
+                    (["meta", "profile:gemma-agentic"].includes(String(prev.provider || "")) || !modelFitsProvider(prevModel, choice))
                   ) {
                     next.model = providers.find((p) => p.id === choice)?.models?.[0]?.id || defaultModelForProvider(choice);
+                  }
+                  if (choice === "profile:gemma-agentic") {
+                    const gemma = providers.find((p) => p.id === choice);
+                    next.base_url = gemma?.base_url || GEMMA_DEFAULT_BASE_URL;
+                    next.trust_custom_base_url = Boolean(prev.trust_custom_base_url && prevUrl.replace(/\/$/, "") === String(next.base_url).replace(/\/$/, ""));
+                    next.model = gemma?.models?.[0]?.id || defaultModelForProvider(choice);
+                    next.wire_api = "chat_completions";
+                    next.reasoning_effort = "";
+                    next.bedrock_mode = "iam";
                   }
                   if (choice === "meta") {
                     const meta = providers.find((p) => p.id === "meta");

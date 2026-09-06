@@ -109,3 +109,8 @@ test("contextUsage clamps the ratio at 1", () => {
 test("Glimmer meter matches the deployed context limit", () => {
   assert.equal(contextWindowFor("Muse-Glimmer-30B"), 196_608);
 });
+
+test("Gemma coordinator uses the tested 16K server window", () => {
+  assert.equal(contextWindowFor("gemma4-agentic-v2"), 16384);
+  assert.equal(contextWindowFor("gemma4-v2-Q4_K_M.gguf"), 16384);
+});
