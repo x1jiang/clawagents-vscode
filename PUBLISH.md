@@ -1,4 +1,7 @@
-Publisher **`clawagents`** · version **1.0.184**
+Publisher **`clawagents`** · version **1.0.185**
+
+- [x] GitHub release `v1.0.185` + VSIX: explicit local Gemma setup, verified downloads, GPU/CPU selection and managed server lifecycle; Python floor **6.20.76**.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
 - [x] clawagents **6.20.76** on PyPI + GitHub: require a configured Meta endpoint.
 - [x] GitHub release `v1.0.184` + VSIX; Python floor **6.20.76**.
