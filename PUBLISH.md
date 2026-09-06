@@ -1,4 +1,8 @@
-Publisher **`clawagents`** · version **1.0.183**
+Publisher **`clawagents`** · version **1.0.184**
+
+- [x] clawagents **6.20.76** on PyPI + GitHub: require a configured Meta endpoint.
+- [x] GitHub release `v1.0.184` + VSIX; Python floor **6.20.76**.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
 - [x] clawagents **6.20.75** on PyPI + GitHub: Gemma Q4 bounded coordination, retry recovery and verified completion.
 - [x] GitHub release `v1.0.183` + VSIX; Python floor **6.20.75**.
