@@ -31,7 +31,7 @@ export const GEMMA_DEFAULT_MODEL = "gemma4-agentic-v2";
 export const GEMMA_DEFAULT_BASE_URL = "http://127.0.0.1:18080/v1";
 
 export const META_DEFAULT_MODEL = "Muse-Glimmer-30B";
-export const META_DEFAULT_BASE_URL = "http://129.106.31.72:7790/v1";
+export const META_DEFAULT_BASE_URL = "";
 
 export const PREFERRED_OPENAI_MODEL = "gpt-5.6-terra";
 export const PREFERRED_GEMINI_MODEL = "gemini-3.7-flash";

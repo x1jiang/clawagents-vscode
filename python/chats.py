@@ -1355,6 +1355,8 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         from spawn_secrets import get_secret
 
         endpoint = str(settings.get("base_url") or meta_base_url()).strip().rstrip("/")
+        if not endpoint:
+            raise ValueError("Meta requires a Base URL. Enter your server endpoint in Settings.")
         if not is_trusted_base_url(endpoint) and not settings.get("trust_custom_base_url"):
             raise ValueError("Meta endpoint is not trusted. Select Meta in Settings and approve its Base URL.")
         _apply_aws_settings(settings, active=False)

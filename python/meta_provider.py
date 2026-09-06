@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-META_DEFAULT_BASE_URL = "http://129.106.31.72:7790/v1"
+META_DEFAULT_BASE_URL = ""
 META_DEFAULT_MODEL = "Muse-Glimmer-30B"
 
 

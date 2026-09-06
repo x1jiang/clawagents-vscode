@@ -1,3 +1,8 @@
+# 1.0.184
+
+- Require a user-configured Meta Base URL; remove the provisioned endpoint from the picker and sidecar defaults.
+- Require clawagents 6.20.76, which rejects missing Meta endpoints before creating a client.
+
 # 1.0.183
 
 - Add Gemma Agentic Q4 coordinator profile, local endpoint defaults, isolated credentials and 16K context display.

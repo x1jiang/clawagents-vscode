@@ -5130,12 +5130,14 @@ export function App() {
               </label>
             )}
             <label>
-              Base URL (optional — OpenAI-compatible / Meta / Ollama / BAG)
+              {settingsProvider === "meta" ? "Base URL (required)" : "Base URL (optional — OpenAI-compatible / Ollama / BAG)"}
               <input
                 value={String(settings.base_url || "")}
                 onChange={(e) => setSettings((s) => ({ ...s, base_url: e.target.value }))}
                 placeholder={
-                  selectedProvider === "bedrock"
+                  settingsProvider === "meta"
+                    ? "Enter your Meta server endpoint (https://host/v1)"
+                    : selectedProvider === "bedrock"
                     ? String(settings.bedrock_mode || "iam") === "mantle"
                       ? "https://bedrock-mantle.us-east-1.api.aws/v1"
                       : String(settings.bedrock_mode || "iam") === "bag"
@@ -5154,7 +5156,8 @@ export function App() {
               <p className="settings-hint">
                 Meta Glimmer uses Chat Completions. No API key is required by default;
                 authenticated deployments use META_API_KEY. Set glimmer_30B_backend
-                and glimmer_30B_model in the sidecar environment to override defaults.
+                and glimmer_30B_model in the sidecar environment, or enter your server
+                Base URL above. No server endpoint is supplied automatically.
                 Approve this endpoint when prompted before starting a chat.
               </p>
             )}

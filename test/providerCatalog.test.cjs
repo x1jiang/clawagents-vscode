@@ -221,7 +221,7 @@ test("mantle xAI Grok uses openai/v1 Responses wire", () => {
 
 test("Meta is selectable without a cloud key and has its own model route", () => {
   const row = mod.FALLBACK_PROVIDERS.find((p) => p.id === "meta");
-  assert.equal(row.base_url, "http://129.106.31.72:7790/v1");
+  assert.equal(row.base_url, "");
   assert.equal(mod.defaultModelForProvider("meta"), "Muse-Glimmer-30B");
   assert.equal(mod.modelFitsProvider("Muse-Glimmer-30B", "meta"), true);
   assert.equal(mod.modelFitsProvider("gpt-5.6-luna", "meta"), false);
