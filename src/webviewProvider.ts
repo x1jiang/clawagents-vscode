@@ -19,6 +19,7 @@ import {
   wrapSelectionBlock,
 } from "./config";
 import { GatewayClient, isSidecarTransportError } from "./gatewayClient";
+import { eventsToItems } from "./chatItems";
 import {
   decodeLocalAttachment,
   detectDocumentMediaType,
@@ -3558,56 +3559,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
-}
-
-function stripEditorContextForDisplay(text: string): string {
-  const mark = "\n\n---\nEditor context:\n";
-  const idx = text.indexOf(mark);
-  return idx >= 0 ? text.slice(0, idx).replace(/\s+$/, "") : text;
-}
-
-function eventTimestamp(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value * 1000).toISOString();
-  }
-  return undefined;
-}
-
-function completionStatus(value: unknown): string {
-  const status = String(value || "").trim();
-  if (!status || /^(done|complete|completed)$/i.test(status)) return "Done";
-  return `Done · ${status}`;
-}
-
-function eventsToItems(events: Array<Record<string, unknown>>, eventsOffset = 0): unknown[] {
-  const items: unknown[] = [];
-  for (let index = 0; index < events.length; index += 1) {
-    const ev = events[index];
-    const kind = ev.kind;
-    if (kind === "user") {
-      items.push({
-        kind: "user",
-        text: stripEditorContextForDisplay(String(ev.text || "")),
-        timestamp: eventTimestamp(ev.ts),
-        eventIndex: eventsOffset + index,
-      });
-    } else if (kind === "assistant") {
-      items.push({
-        kind: "assistant",
-        text: String(ev.text || ""),
-        timestamp: eventTimestamp(ev.ts),
-      });
-    } else if (kind === "model_change") {
-      items.push({ kind: "model_change", text: String(ev.text || "") });
-    } else if (kind === "done") {
-      items.push({
-        kind: "status",
-        text: `${completionStatus(ev.status)}${ev.iterations != null ? ` · ${ev.iterations} iters` : ""}`,
-      });
-    }
-  }
-  return items;
 }
 
 function getNonce(): string {
