@@ -54,7 +54,10 @@ import {
   threadActivityLabel,
 } from "./threadUnread";
 import { ModelRouteCapsule } from "./ModelRouteCapsule";
-import { QueryNavigatorMemory } from "./queryNavigatorMemory";
+import {
+  QueryNavigatorMemory,
+  queryEntriesFromVisibleItems,
+} from "./queryNavigatorMemory";
 import { ToolRunGroup } from "./ToolRunGroup";
 import {
   perceivedToolStart,
@@ -1455,8 +1458,16 @@ export function App() {
   /** When false, streaming tokens must not yank scroll away from the user. */
   const stickToBottomRef = useRef(true);
   const streamingRef = useRef(false);
-  const restoreCachedQueryNavigator = useCallback((ownerChatId: string | undefined) => {
-    const snapshot = queryNavigatorMemoryRef.current.read(ownerChatId);
+  const restoreCachedQueryNavigator = useCallback((
+    ownerChatId: string | undefined,
+    visibleItems?: readonly ChatItem[],
+  ) => {
+    const visibleEntries = visibleItems
+      ? queryEntriesFromVisibleItems(visibleItems)
+      : [];
+    const snapshot = visibleEntries.length > 0
+      ? queryNavigatorMemoryRef.current.rememberVisibleEntries(ownerChatId, visibleEntries)
+      : queryNavigatorMemoryRef.current.read(ownerChatId);
     setQueryIndex(snapshot.entries);
     setActiveQueryEventIndex(snapshot.activeEventIndex);
     setHoveredQueryPosition(undefined);
@@ -2344,8 +2355,9 @@ export function App() {
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
-          restoreCachedQueryNavigator(restoredChatId);
-          setItems((msg.items as ChatItem[]) || []);
+          const restoredItems = (msg.items as ChatItem[]) || [];
+          restoreCachedQueryNavigator(restoredChatId, restoredItems);
+          setItems(restoredItems);
           // Selecting or forking into a conversation should reveal its newest
           // turn immediately, even when the previously viewed chat was scrolled up.
           stickToBottomRef.current = true;
@@ -2731,6 +2743,9 @@ export function App() {
         }
         case "done": {
           if (isStaleEvent(msg)) break;
+          // user_echo can request the index before the sidecar has persisted
+          // the prompt. Refresh once the completed run is durably recorded.
+          post({ type: "load_query_index" });
           setBusy(false);
           streamingRef.current = false;
           markStalePlanApprovals(setItems);
