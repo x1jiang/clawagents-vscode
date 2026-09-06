@@ -34,9 +34,14 @@ test("restoring a conversation returns only that conversation's draft", () => {
 });
 
 test("thread navigation saves immediately without assigning the old draft to the new chat", () => {
-  assert.match(
+  const tabSelection = section(
     app,
-    /beginDraftHandoff\(\);\s*chatIdRef\.current = tab\.id/,
+    "const selectConversationTab",
+    "const closeConversationTab",
+  );
+  assert.match(
+    tabSelection,
+    /beginDraftHandoff\(\);[\s\S]*chatIdRef\.current = tab\.id/,
   );
   assert.match(
     app,

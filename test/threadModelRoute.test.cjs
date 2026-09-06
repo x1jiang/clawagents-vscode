@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const root = path.join(__dirname, "..");
 const provider = fs.readFileSync(path.join(root, "src", "webviewProvider.ts"), "utf8");
+const chatItems = fs.readFileSync(path.join(root, "src", "chatItems.ts"), "utf8");
 const app = fs.readFileSync(path.join(root, "webview", "src", "App.tsx"), "utf8");
 const capsule = fs.readFileSync(path.join(root, "webview", "src", "ModelRouteCapsule.tsx"), "utf8");
 const styles = fs.readFileSync(path.join(root, "webview", "src", "styles.css"), "utf8");
@@ -24,7 +25,7 @@ test("thread model route is restored, patched, queued, and sent atomically", () 
   assert.match(capsule, /onModelChange/);
   assert.match(capsule, /onEffortChange/);
   assert.match(provider, /type: "model_changed"/);
-  assert.match(provider, /kind === "model_change"/);
+  assert.match(chatItems, /kind === "model_change"/);
   assert.match(app, /kind: "model_change"/);
   assert.match(app, /model: sideChat\.modelRoute\?\.model \|\| undefined/);
   assert.match(provider, /modelRoute: sideModelRoute/);

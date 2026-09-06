@@ -500,11 +500,61 @@ def fork_chat(source_chat_id: str, *, title: str | None = None) -> dict[str, Any
     return new_meta
 
 
-def append_ui_event(chat_id: str, event: dict[str, Any]) -> None:
+TOOL_UI_ARGS_MAX_CHARS = 4_000
+TOOL_UI_OUTPUT_MAX_CHARS = 8_000
+
+
+def _bounded_tool_args(value: Any) -> Any:
+    """Keep useful tool arguments without letting one call dominate the UI log."""
+    try:
+        encoded = json.dumps(value, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        encoded = str(value)
+    if len(encoded) <= TOOL_UI_ARGS_MAX_CHARS:
+        return value
+    return {
+        "truncated": True,
+        "preview": encoded[:TOOL_UI_ARGS_MAX_CHARS].rstrip() + "…",
+    }
+
+
+def append_tool_ui_event(
+    chat_id: str,
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    perceived_started_at: float | None = None,
+) -> float:
+    """Persist the bounded subset required to reconstruct a tool card."""
+    event: dict[str, Any] = {
+        "kind": kind,
+        "id": str(payload.get("call_id") or payload.get("id") or ""),
+        "name": str(payload.get("name") or payload.get("tool_name") or "tool"),
+    }
+    if kind == "tool_started":
+        event["args"] = _bounded_tool_args(payload.get("args") or {})
+        if perceived_started_at is not None:
+            event["perceived_started_at"] = perceived_started_at
+    else:
+        output = payload.get("output")
+        if not str(output or "").strip():
+            output = payload.get("error") or payload.get("reason") or ""
+        event.update(
+            {
+                "success": bool(payload.get("success", True)),
+                "output": str(output or "")[:TOOL_UI_OUTPUT_MAX_CHARS],
+            }
+        )
+    return append_ui_event(chat_id, event)
+
+
+def append_ui_event(chat_id: str, event: dict[str, Any]) -> float:
     ensure_dirs()
     path = chat_ui_log_path(chat_id)
+    timestamp = now_ts()
     with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"ts": now_ts(), **event}, default=str) + "\n")
+        f.write(json.dumps({"ts": timestamp, **event}, default=str) + "\n")
+    return timestamp
 
 
 def read_ui_events(
@@ -1580,7 +1630,10 @@ async def run_chat_turn(
 
     # Chat history shows only what the user typed; full `content` (with optional
     # editor context) still goes to the agent below.
-    append_ui_event(chat_id, {"kind": "user", "text": display_user_text(content)})
+    tool_stage_started_at = append_ui_event(
+        chat_id,
+        {"kind": "user", "text": display_user_text(content)},
+    )
 
     augmented = build_augmented_task(chat_id, content, settings)
     session = JsonlFileSession(chat_id, dir_path=SESSIONS_MEMORY_DIR)
@@ -1895,7 +1948,7 @@ async def run_chat_turn(
             return
 
     def _on_stream_event(ev: Any) -> None:
-        nonlocal saw_assistant
+        nonlocal saw_assistant, tool_stage_started_at
         if cancel_check():
             return
         kind = getattr(ev, "kind", "")
@@ -1907,32 +1960,42 @@ async def run_chat_turn(
             text = str(getattr(ev, "content", "") or "")
             if text.strip():
                 saw_assistant = True
-                append_ui_event(chat_id, {"kind": "assistant", "text": text})
+                tool_stage_started_at = append_ui_event(
+                    chat_id,
+                    {"kind": "assistant", "text": text},
+                )
                 on_event("assistant_message", {"content": text})
         elif kind == "tool_started":
-            on_event(
+            payload = {
+                "name": getattr(ev, "tool_name", "") or "tool",
+                "call_id": getattr(ev, "call_id", "") or "",
+                "args": getattr(ev, "args", None) or {},
+            }
+            append_tool_ui_event(
+                chat_id,
                 "tool_started",
-                {
-                    "name": getattr(ev, "tool_name", "") or "tool",
-                    "call_id": getattr(ev, "call_id", "") or "",
-                    "args": getattr(ev, "args", None) or {},
-                },
+                payload,
+                perceived_started_at=tool_stage_started_at,
             )
+            on_event("tool_started", payload)
         elif kind == "tool_result":
             out = getattr(ev, "output", "") or ""
             err = getattr(ev, "error", None)
-            on_event(
+            payload = {
+                "name": getattr(ev, "tool_name", "") or "tool",
+                "call_id": getattr(ev, "call_id", "") or "",
+                "success": bool(getattr(ev, "success", True)),
+                # Empty output + non-empty error is common for blocked
+                # commands; surface the error so the webview isn't blank.
+                "output": out if str(out).strip() else (err or ""),
+                "error": err,
+            }
+            tool_stage_started_at = append_tool_ui_event(
+                chat_id,
                 "tool_completed",
-                {
-                    "name": getattr(ev, "tool_name", "") or "tool",
-                    "call_id": getattr(ev, "call_id", "") or "",
-                    "success": bool(getattr(ev, "success", True)),
-                    # Empty output + non-empty error is common for blocked
-                    # commands; surface the error so the webview isn't blank.
-                    "output": out if str(out).strip() else (err or ""),
-                    "error": err,
-                },
+                payload,
             )
+            on_event("tool_completed", payload)
         elif kind == "usage":
             # Cumulative across LLM calls this run (for totals / cache %).
             # Cost is summed per-request so the >272K long-context multiplier
@@ -1981,13 +2044,22 @@ async def run_chat_turn(
             )
 
     def _on_legacy_event(kind: str, data: dict[str, Any] | None = None) -> None:
+        nonlocal tool_stage_started_at
         if cancel_check():
             return
         # tool_skipped has no typed equivalent; without forwarding it, a
         # Plan-mode / permission denial leaves the UI with no tool card
         # update (or a stuck "running" card if tool_call was shown).
         if kind in ("warn", "error", "tool_skipped"):
-            on_event(kind, data or {})
+            payload = data or {}
+            if kind == "tool_skipped":
+                payload = {**payload, "success": False}
+                tool_stage_started_at = append_tool_ui_event(
+                    chat_id,
+                    "tool_completed",
+                    payload,
+                )
+            on_event(kind, payload)
             return
         _forward_legacy(kind, data or {})
 
@@ -2232,7 +2304,10 @@ async def run_chat_turn(
     # event reached the stream (e.g. older runtime without typed emission),
     # surface it so the turn is never silently blank.
     if not saw_assistant and out_text.strip() and not cancel_check():
-        append_ui_event(chat_id, {"kind": "assistant", "text": out_text})
+        tool_stage_started_at = append_ui_event(
+            chat_id,
+            {"kind": "assistant", "text": out_text},
+        )
         on_event("assistant_message", {"content": out_text})
 
     append_ui_event(
