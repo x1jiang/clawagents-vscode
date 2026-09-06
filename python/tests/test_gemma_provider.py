@@ -50,3 +50,11 @@ def test_switch_to_gemma_discards_unrelated_url_trust(monkeypatch):
     assert not settings["trust_custom_base_url"]
     with pytest.raises(ValueError, match="Approve"):
         chats._resolve_model_kwargs(None, settings)
+
+
+@pytest.mark.parametrize("alias", ["gemma-3-12b-it", "gemma4-v2-Q4_K_M", "GEMMA4:e4b"])
+def test_served_gemma_alias_is_not_healed_away(monkeypatch, alias):
+    monkeypatch.delenv("GEMMA_AGENTIC_MODEL", raising=False)
+    assert settings_store._model_fits_provider(alias, GEMMA_PROFILE)
+    healed, changed = settings_store.heal_incompatible_model({"provider": GEMMA_PROFILE, "model": alias})
+    assert not changed and healed["model"] == alias

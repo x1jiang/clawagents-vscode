@@ -16,4 +16,14 @@ def meta_model() -> str:
 
 
 def is_meta_model(model: str) -> bool:
-    return model.strip().lower() in {META_DEFAULT_MODEL.lower(), meta_model().lower()}
+    """Default name, the configured env name, or any Glimmer variant.
+
+    Mirrors the webview's prefix rule (``providerCatalog.ts`` treats
+    ``muse-glimmer*`` as Meta): an exact-only check made the host "heal" a
+    served alias such as ``Muse-Glimmer-30B-FP8`` back to the default on every
+    settings round-trip while the webview believed it fit.
+    """
+    value = str(model or "").strip().lower()
+    if not value:
+        return False
+    return value in {META_DEFAULT_MODEL.lower(), meta_model().lower()} or "glimmer" in value

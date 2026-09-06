@@ -121,3 +121,21 @@ test('invalid manifest cannot run relative paths or missing model files',()=>{
   assert.equal(mod.validManifest({...manifest,model:path.join(root,'absent')}),false);
   assert.equal(mod.validManifest(manifest),true);
 });
+
+test('oversized /v1/models body settles the readiness probe instead of hanging',async()=>{
+  const server=http.createServer((req,res)=>{res.setHeader('content-type','application/json');res.end('{"data":['+'{"id":"x"},'.repeat(20000)+'{"id":"y"}]}');});
+  servers.push(server);
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const started=Date.now();
+  const ready=await Promise.race([mod.serverHasModel(server.address().port,'gemma-nonce'), new Promise(r=>setTimeout(()=>r('hung'),6000))]);
+  assert.equal(ready,false);
+  assert.ok(Date.now()-started<5000);
+});
+
+test('a server that never finishes the body cannot wedge the probe',async()=>{
+  const server=http.createServer((req,res)=>{res.setHeader('content-type','application/json');res.write('{"data":[');/* never ends */});
+  servers.push(server);
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const ready=await Promise.race([mod.serverHasModel(server.address().port,'gemma-nonce'), new Promise(r=>setTimeout(()=>r('hung'),8000))]);
+  assert.equal(ready,false);
+});

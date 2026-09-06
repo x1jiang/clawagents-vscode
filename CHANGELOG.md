@@ -1,3 +1,8 @@
+# 1.0.186
+
+- Require clawagents 6.20.77: the sidecar's Chat Completions path captures `reasoning_content`, recovers `max_tokens` cuts mid-reasoning, no longer hard-stops runs on repeated reads or edit-test cycles, escalates repeated identical tool failures, and defaults Meta to a 16K output budget. Workspace `.clawagents/profiles.json` files are now opt-in in the engine.
+- Fix a local Gemma readiness probe that never settled when another service on the freed port answered `/v1/models` with more than 64 KB, which wedged setup, cancel and stop until window reload. Each probe now has a hard 4-second bound.
+- Keep served Muse/Gemma aliases (`Muse-Glimmer-30B-FP8`, `gemma-3-12b-it`) instead of healing them back to the default on every settings round-trip; the sidecar now applies the same prefix rule as the webview.
 # 1.0.185
 
 - Add an explicit Gemma-only **Set up / start locally** action with download consent, progress, cancellation and stop controls.

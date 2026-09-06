@@ -1,4 +1,8 @@
-Publisher **`clawagents`** · version **1.0.185**
+Publisher **`clawagents`** · version **1.0.186**
+
+- [x] clawagents **6.20.77** on PyPI + GitHub: reasoning-channel capture, output-limit recovery, non-fatal read repeats, workspace profile trust gate.
+- [x] GitHub release `v1.0.186` + VSIX: local Gemma readiness-probe hang fix, served Muse/Gemma aliases kept; Python floor **6.20.77**.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
 - [x] GitHub release `v1.0.185` + VSIX: explicit local Gemma setup, verified downloads, GPU/CPU selection and managed server lifecycle; Python floor **6.20.76**.
       · Marketplace/OpenVSX unavailable: no publishing credentials configured.

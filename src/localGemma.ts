@@ -42,19 +42,31 @@ async function freePort(): Promise<number> {
   });
 }
 
+/** Upper bound on one readiness probe; the socket timeout below only covers idle gaps. */
+const PROBE_DEADLINE_MS = 4000;
+
 export async function serverHasModel(port: number, alias: string): Promise<boolean> {
   return new Promise(resolve => {
+    let settled = false;
+    const done = (value: boolean) => { if (!settled) { settled = true; clearTimeout(guard); resolve(value); } };
     const req = http.get({ host: "127.0.0.1", port, path: "/v1/models", timeout: 1500 }, response => {
       let data = "";
-      response.on("data", b => { data += String(b); if (data.length > 65536) response.destroy(); });
-      response.on("error", () => resolve(false));
+      // `destroy()` without an error emits only `close`, never `end`/`error`;
+      // an oversized body from a port-race neighbour used to hang this
+      // promise — and with it setup, cancel and stop — until window reload.
+      response.on("data", b => { data += String(b); if (data.length > 65536) { response.destroy(); done(false); } });
+      response.on("error", () => done(false));
+      response.on("close", () => done(false));
       response.on("end", () => {
-        try { resolve(response.statusCode === 200 && JSON.parse(data).data?.some((m: { id?: string; aliases?: string[] }) => m.id === alias || (Array.isArray(m.aliases) && m.aliases.includes(alias))) === true); }
-        catch { resolve(false); }
+        try { done(response.statusCode === 200 && JSON.parse(data).data?.some((m: { id?: string; aliases?: string[] }) => m.id === alias || (Array.isArray(m.aliases) && m.aliases.includes(alias))) === true); }
+        catch { done(false); }
       });
     });
-    req.on("timeout", () => req.destroy());
-    req.on("error", () => resolve(false));
+    const guard = setTimeout(() => { req.destroy(); done(false); }, PROBE_DEADLINE_MS);
+    guard.unref();
+    req.on("timeout", () => { req.destroy(); done(false); });
+    req.on("error", () => done(false));
+    req.on("close", () => done(false));
   });
 }
 

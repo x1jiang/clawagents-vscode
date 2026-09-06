@@ -15,5 +15,9 @@ def gemma_base_url():
 
 
 def is_gemma_model(model):
+    """Configured name, the known agentic ids, or any ``gemma*`` id — the same
+    prefix rule the webview applies, so a served alias is not healed away."""
     value=str(model or '').strip().lower()
-    return value==gemma_model().lower() or any(n in value for n in ('gemma4-agentic-v2','gemma4-v2-','gemma-4-12b-agentic-fable5-composer2.5-v2'))
+    if not value:
+        return False
+    return value==gemma_model().lower() or value.startswith('gemma') or any(n in value for n in ('gemma4-agentic-v2','gemma4-v2-','gemma-4-12b-agentic-fable5-composer2.5-v2'))

@@ -128,3 +128,15 @@ def test_meta_missing_endpoint_rejected_even_with_saved_trust(monkeypatch, trust
     assert meta_base_url() == ""
     with pytest.raises(ValueError, match="Enter your server endpoint"):
         chats._resolve_model_kwargs(None, {"provider": "meta", "trust_custom_base_url": trusted})
+
+
+@pytest.mark.parametrize("alias", ["Muse-Glimmer-30B-FP8", "muse-glimmer-30b:latest", "Custom-Glimmer-v2"])
+def test_served_glimmer_alias_is_not_healed_away(monkeypatch, alias):
+    """Host and webview must agree a Glimmer variant fits Meta, or Settings flips it back on every save."""
+    monkeypatch.delenv("glimmer_30B_model", raising=False)
+    monkeypatch.delenv("GLIMMER_30B_MODEL", raising=False)
+    assert settings_store._model_fits_provider(alias, "meta")
+    assert not settings_store._model_fits_provider(alias, "openai")
+    healed, changed = settings_store.heal_incompatible_model({"provider": "meta", "model": alias})
+    assert not changed and healed["model"] == alias
+    assert not settings_store._model_fits_provider("gpt-5.6-luna", "meta")
