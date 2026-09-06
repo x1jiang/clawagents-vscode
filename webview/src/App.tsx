@@ -54,6 +54,7 @@ import {
   threadActivityLabel,
 } from "./threadUnread";
 import { ModelRouteCapsule } from "./ModelRouteCapsule";
+import { QueryNavigatorMemory } from "./queryNavigatorMemory";
 import { ToolRunGroup } from "./ToolRunGroup";
 import {
   perceivedToolStart,
@@ -1290,6 +1291,7 @@ export function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [queryIndex, setQueryIndex] = useState<QueryIndexEntry[]>([]);
   const [activeQueryEventIndex, setActiveQueryEventIndex] = useState<number>();
+  const queryNavigatorMemoryRef = useRef(new QueryNavigatorMemory());
   const [hoveredQueryPosition, setHoveredQueryPosition] = useState<number>();
   const [pendingQueryJump, setPendingQueryJump] = useState<QueryIndexEntry>();
   /** How many trailing items to mount (virtualization window). */
@@ -1453,6 +1455,13 @@ export function App() {
   /** When false, streaming tokens must not yank scroll away from the user. */
   const stickToBottomRef = useRef(true);
   const streamingRef = useRef(false);
+  const restoreCachedQueryNavigator = useCallback((ownerChatId: string | undefined) => {
+    const snapshot = queryNavigatorMemoryRef.current.read(ownerChatId);
+    setQueryIndex(snapshot.entries);
+    setActiveQueryEventIndex(snapshot.activeEventIndex);
+    setHoveredQueryPosition(undefined);
+    setPendingQueryJump(undefined);
+  }, []);
   const handleUserMessageMount = useCallback((eventIndex: number, element: HTMLDivElement | null) => {
     if (element) {
       queryNodesRef.current.set(eventIndex, element);
@@ -1475,7 +1484,11 @@ export function App() {
       }
     }
     if (closest !== undefined) {
-      setActiveQueryEventIndex((previous) => previous === closest ? previous : closest);
+      setActiveQueryEventIndex((previous) => {
+        if (previous === closest) return previous;
+        queryNavigatorMemoryRef.current.rememberActive(chatIdRef.current, closest);
+        return closest;
+      });
     }
   }, []);
   const navigateToQuery = useCallback((entry: QueryIndexEntry) => {
@@ -2331,9 +2344,7 @@ export function App() {
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
-          setQueryIndex([]);
-          setActiveQueryEventIndex(undefined);
-          setPendingQueryJump(undefined);
+          restoreCachedQueryNavigator(restoredChatId);
           setItems((msg.items as ChatItem[]) || []);
           // Selecting or forking into a conversation should reveal its newest
           // turn immediately, even when the previously viewed chat was scrolled up.
@@ -2397,10 +2408,16 @@ export function App() {
           }
           break;
         }
-        case "query_index":
+        case "query_index": {
+          const snapshot = queryNavigatorMemoryRef.current.rememberEntries(
+            msg.chatId,
+            msg.entries,
+          );
           if (msg.chatId !== chatIdRef.current) break;
-          setQueryIndex(msg.entries);
+          setQueryIndex(snapshot.entries);
+          setActiveQueryEventIndex(snapshot.activeEventIndex);
           break;
+        }
         case "jump_to_query":
           if (msg.chatId !== chatIdRef.current) break;
           stickToBottomRef.current = false;
@@ -2937,6 +2954,10 @@ export function App() {
       target.classList.remove("query-jump-target");
       queryJumpAnimationTimerRef.current = undefined;
     }, 900);
+    queryNavigatorMemoryRef.current.rememberActive(
+      chatIdRef.current,
+      pendingQueryJump.eventIndex,
+    );
     setActiveQueryEventIndex(pendingQueryJump.eventIndex);
     setPendingQueryJump(undefined);
   }, [items, pendingQueryJump, renderWindow]);
@@ -3202,6 +3223,7 @@ export function App() {
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
     showPanel("chat");
     beginDraftHandoff();
+    restoreCachedQueryNavigator(c.id);
     chatIdRef.current = c.id;
     setChatId(c.id);
     setBusy(Boolean(c.running));
@@ -3219,6 +3241,7 @@ export function App() {
     );
     if (tab.id === chatIdRef.current) return;
     beginDraftHandoff();
+    restoreCachedQueryNavigator(tab.id);
     chatIdRef.current = tab.id;
     setChatId(tab.id);
     setBusy(Boolean(tab.running));
@@ -3239,6 +3262,7 @@ export function App() {
     if (replacement) {
       pendingNewChatRef.current = false;
       beginDraftHandoff();
+      restoreCachedQueryNavigator(replacement.id);
       chatIdRef.current = replacement.id;
       setChatId(replacement.id);
       setBusy(Boolean(replacement.running));
@@ -3252,6 +3276,7 @@ export function App() {
       setChatId(undefined);
       showPanel("history");
       post({ type: "deselect_chat" });
+      restoreCachedQueryNavigator(undefined);
     }
   };
 
@@ -3266,6 +3291,7 @@ export function App() {
     setChatId(undefined);
     showPanel("history");
     post({ type: "deselect_chat" });
+    restoreCachedQueryNavigator(undefined);
   };
 
   const toggleConversationTabPin = (tab: ConversationTab) => {
