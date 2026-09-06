@@ -113,6 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.globalStorageUri.fsPath,
   );
   provider = new ClawAgentsWebviewProvider(context, sidecar, config);
+  context.subscriptions.push(provider);
 
   trackEditorFocus(context.subscriptions);
 
@@ -212,6 +213,8 @@ export function activate(context: vscode.ExtensionContext): void {
       await provider?.newChat();
       void vscode.window.showInformationMessage(`ClawAgents root: ${pick.label}`);
     }),
+    vscode.commands.registerCommand("clawagents.setupLocalGemma", async () => { await provider?.setupLocalGemma(); }),
+    vscode.commands.registerCommand("clawagents.stopLocalGemma", () => { provider?.stopLocalGemma(); }),
     vscode.commands.registerCommand("clawagents.installPythonDeps", async () => {
       const manager = sidecar;
       if (!manager) {
@@ -465,6 +468,8 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  provider?.dispose();
+  provider = undefined;
   sidecar?.dispose();
   sidecar = undefined;
 }

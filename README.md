@@ -140,3 +140,7 @@ Select Meta again to apply changed environment defaults to Settings. Custom
 remote URLs still require approval. This integration requires a Python core
 containing the `meta` provider profile; during monorepo development, select the
 interpreter where the sibling `clawagents_py` is installed in editable mode.
+
+## Optional local Gemma
+
+Choose **Gemma Agentic Q4 (coordinator)** in Settings, then **Set up / start locally**. Installation happens only after you request local setup and confirm the download; remote Gemma endpoints remain supported. The helper selects available GPU acceleration or CPU, downloads the Q4 model when missing, starts its server and configures the endpoint. See [local setup, hardware support and controls](LOCAL_GEMMA.md).

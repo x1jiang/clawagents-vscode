@@ -1,0 +1,38 @@
+{
+  "llama-b10826-bin-macos-arm64.tar.gz": {
+    "sha256": "15c1b2f460331d9a20709ebde21240d7e60fdb5cf15e1f8db0309af3a5bbc6d2",
+    "size": 11131064
+  },
+  "llama-b10826-bin-macos-x64.tar.gz": {
+    "sha256": "adcd2066b2a1a3d8e774e36c8f97d166defccd01d947d9e39667b0435e8361b0",
+    "size": 11186543
+  },
+  "llama-b10826-bin-ubuntu-arm64.tar.gz": {
+    "sha256": "9947a1d80a82c4e5c89df2f68f8d09ddef184c768ced7f68b4d32f8e5526332a",
+    "size": 13378979
+  },
+  "llama-b10826-bin-ubuntu-vulkan-arm64.tar.gz": {
+    "sha256": "4b2c5679b96b588f02d7229cae792967a1cc827105576070382684c090091d83",
+    "size": 27523826
+  },
+  "llama-b10826-bin-ubuntu-vulkan-x64.tar.gz": {
+    "sha256": "431a689e55892e8a28839d7a2c0a60d78be019a13de64c9dcd8d8889bb31c937",
+    "size": 33804397
+  },
+  "llama-b10826-bin-ubuntu-x64.tar.gz": {
+    "sha256": "c708a8d84853c86ad3400428b5d6ef2b504e297d98ccdcf8362195c6638b7fd9",
+    "size": 16739377
+  },
+  "llama-b10826-bin-win-cpu-arm64.zip": {
+    "sha256": "505922964bfa06ae8931bcdd7872358d4368477794c42b82dcfb208be9ff923a",
+    "size": 11979455
+  },
+  "llama-b10826-bin-win-cpu-x64.zip": {
+    "sha256": "5828cccc7261b14607d23de3144f35fac4249d9fd207e13bff5e31dd8ae39d56",
+    "size": 18412429
+  },
+  "llama-b10826-bin-win-vulkan-x64.zip": {
+    "sha256": "106c96ff398e3c6c7a9df9fb17f2c6a67e6dc1623c37dfafde46711a4245c845",
+    "size": 35227832
+  }
+}

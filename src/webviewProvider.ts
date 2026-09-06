@@ -51,6 +51,7 @@ import type {
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
 import { isBareFileName, isWorkspaceSearchCandidate } from "./pathReferences";
+import { LocalGemmaManager } from "./localGemma";
 import { SidecarManager } from "./sidecar";
 import { ThreadRunCoordinator } from "./threadRunCoordinator";
 
@@ -275,6 +276,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private lastRunningJobs = 0;
   /** Serialize settings saves — concurrent autosaves + live /providers probes
    *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
+  private readonly localGemma: LocalGemmaManager;
+  private gemmaSetupInFlight?: Promise<void>;
   private saveSettingsChain: Promise<void> = Promise.resolve();
   /** Preserve UI order when provider/model/effort changes arrive in a burst. */
   private chatRouteSaveChain: Promise<void> = Promise.resolve();
@@ -294,6 +297,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     private readonly sidecar: SidecarManager,
     private readonly config: ExtensionConfig,
   ) {
+    this.localGemma = new LocalGemmaManager(
+      path.join(context.globalStorageUri.fsPath, "gemma-local"),
+      path.join(context.extensionPath, "python", "local_gemma.py"),
+      line => this.sidecar.output.appendLine(`[Gemma] ${line}`),
+      state => this.post({ type: "gemma_local_status", ...state }),
+    );
     hostDictation.configure(context.extensionPath, context.globalState);
     this.gateway = new GatewayClient(() => this.sidecar.current);
     this.mode = this.config.defaultMode;
@@ -1948,10 +1957,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "setup_local_gemma":
+        await this.setupLocalGemma();
+        break;
+      case "stop_local_gemma":
+        this.stopLocalGemma();
+        break;
       case "restart_sidecar":
         await this.restartSidecar();
         break;
       case "load_settings":
+        this.post({ type: "gemma_local_status", ...this.localGemma.status });
         try {
           await this.sidecar.ensureStarted();
           const settings = await this.gateway.getSettings();
@@ -3078,7 +3094,67 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.autoOpen.schedule(filePath);
   }
 
+  setupLocalGemma(): Promise<void> {
+    if (this.gemmaSetupInFlight) return this.gemmaSetupInFlight;
+    this.gemmaSetupInFlight = this.runLocalGemmaSetup().finally(() => { this.gemmaSetupInFlight = undefined; });
+    return this.gemmaSetupInFlight;
+  }
+
+  private async runLocalGemmaSetup(): Promise<void> {
+    try {
+      if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before running local model setup.");
+      if (this.busy) throw new Error("Finish or cancel the current task before setting up local Gemma.");
+      await this.saveSettingsChain.catch(() => undefined);
+      await this.sidecar.ensureStarted();
+      const settings = await this.gateway.getSettings();
+      if (settings.provider !== "profile:gemma-agentic") {
+        throw new Error("Select Gemma Agentic Q4 in Settings first, then choose Set up locally.");
+      }
+      const host = vscode.env.remoteName ? `the ${vscode.env.remoteName} extension host` : "this computer";
+      const choice = await vscode.window.showInformationMessage(
+        `Set up Gemma Q4 on ${host}? This downloads about 7.4 GB plus the runtime when missing. It uses GPU acceleration when available, otherwise CPU. Files are kept in extension storage. Allow at least 12 GB free disk space and preferably 16 GB RAM.`,
+        { modal: true }, "Set up locally",
+      );
+      if (choice !== "Set up locally") return;
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Local Gemma setup", cancellable: true }, async (progress, token) => {
+        const controller = new AbortController();
+        const cancel = token.onCancellationRequested(() => controller.abort());
+        try {
+          await this.saveSettingsChain.catch(() => undefined);
+          if ((await this.gateway.getSettings()).provider !== "profile:gemma-agentic") throw new Error("Local setup cancelled because the provider changed.");
+          const python = await this.sidecar.resolvePythonRuntime();
+          if (token.isCancellationRequested) controller.abort();
+          const timer = setInterval(() => progress.report({ message: this.localGemma.status.message }), 700);
+          let endpoint: string;
+          try { endpoint = await this.localGemma.setup(python, controller.signal); }
+          finally { clearInterval(timer); }
+          // Serialize with Settings autosave. Do not overwrite another provider
+          // the user selected during a long download.
+          this.saveSettingsChain = this.saveSettingsChain.catch(() => undefined).then(async () => {
+            const current = await this.gateway.getSettings();
+            if (controller.signal.aborted || this.busy || current.provider !== "profile:gemma-agentic" ||
+                current.base_url !== settings.base_url || current.model !== settings.model) {
+              this.localGemma.stop();
+              throw new Error("Gemma files are installed. Settings or the active task changed during setup; finish the task and choose Set up locally again to configure it.");
+            }
+            const saved = await this.gateway.putSettings({ provider: "profile:gemma-agentic", model: "gemma4-agentic-v2", base_url: endpoint,
+              trust_custom_base_url: false, wire_api: "chat_completions", reasoning_effort: "", bedrock_mode: "iam" });
+            await this.postSettingsWithKeyFlags(saved, await this.gateway.getProviders({ probe: false }), "ok");
+          });
+          await this.saveSettingsChain;
+        } finally { cancel.dispose(); }
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.post({ type: "gemma_local_status", phase: /cancelled/i.test(message) ? "idle" : "error", message });
+      if (!/cancelled/i.test(message)) void vscode.window.showErrorMessage(message);
+    }
+  }
+
+  stopLocalGemma(): void { this.localGemma.stop(); }
+
   dispose(): void {
+    this.localGemma.dispose();
     this.autoOpen.dispose();
     this.stopJobPolling();
   }

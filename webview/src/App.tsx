@@ -1335,6 +1335,7 @@ export function App() {
   // so committing per keystroke stacks one modal per 500ms pause.
   const [graphPathDraft, setGraphPathDraft] = useState<string | null>(null);
   const [providerKeyDraft, setProviderKeyDraft] = useState("");
+  const [localGemmaStatus, setLocalGemmaStatus] = useState<{ phase: string; message: string; endpoint?: string }>({ phase: "idle", message: "Runtime and model are installed only when you choose Set up locally." });
   const [providerSetupMsg, setProviderSetupMsg] = useState("");
   const [sidecar, setSidecar] = useState<"stopped" | "starting" | "running" | "error">(
     "stopped",
@@ -2308,6 +2309,9 @@ export function App() {
           break;
         case "diagnostics":
           setDiagnostics(msg.data);
+          break;
+        case "gemma_local_status":
+          setLocalGemmaStatus({ phase: msg.phase, message: msg.message, endpoint: msg.endpoint });
           break;
         case "graphify_status":
           setGraphifyStatus(msg.data || null);
@@ -5024,7 +5028,7 @@ export function App() {
                   }
                   if (choice === "profile:gemma-agentic") {
                     const gemma = providers.find((p) => p.id === choice);
-                    next.base_url = gemma?.base_url || GEMMA_DEFAULT_BASE_URL;
+                    next.base_url = localGemmaStatus.phase === "running" && localGemmaStatus.endpoint ? localGemmaStatus.endpoint : gemma?.base_url || GEMMA_DEFAULT_BASE_URL;
                     next.trust_custom_base_url = Boolean(prev.trust_custom_base_url && prevUrl.replace(/\/$/, "") === String(next.base_url).replace(/\/$/, ""));
                     next.model = gemma?.models?.[0]?.id || defaultModelForProvider(choice);
                     next.wire_api = "chat_completions";
@@ -5152,6 +5156,25 @@ export function App() {
                 disabled={selectedProvider === "gemini"}
               />
             </label>
+            {settingsProvider === "profile:gemma-agentic" && (
+              <div>
+                <p className="settings-hint">
+                  Connect to your own endpoint, or let ClawAgents set up Gemma Q4 locally.
+                  Setup downloads about 7.4 GB when missing and selects GPU or CPU automatically.
+                  With Remote SSH, installation runs on the remote extension host.
+                </p>
+                <button type="button" disabled={["preparing", "starting", "running"].includes(localGemmaStatus.phase)}
+                  onClick={() => post({ type: "setup_local_gemma" })}>
+                  {localGemmaStatus.phase === "running" ? "Local Gemma is running" : "Set up / start locally"}
+                </button>
+                {["preparing", "starting", "running"].includes(localGemmaStatus.phase) && (
+                  <button type="button" onClick={() => post({ type: "stop_local_gemma" })}>
+                    {localGemmaStatus.phase === "running" ? "Stop local Gemma" : "Cancel setup"}
+                  </button>
+                )}
+                <p className="settings-hint" role="status">{localGemmaStatus.message}</p>
+              </div>
+            )}
             {settingsProvider === "meta" && (
               <p className="settings-hint">
                 Meta Glimmer uses Chat Completions. No API key is required by default;

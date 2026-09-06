@@ -70,6 +70,7 @@ export type QueryIndexEntry = {
 };
 
 export type HostToWebview =
+  | { type: "gemma_local_status"; phase: string; message: string; endpoint?: string }
   | {
       type: "ready";
       workspace?: string;
@@ -456,6 +457,8 @@ export type WebviewToHost =
   | { type: "list_rewind"; open?: boolean }
   | { type: "rewind_to"; promptIndex: number }
   | { type: "interject"; text: string; chatId?: string }
+  | { type: "setup_local_gemma" }
+  | { type: "stop_local_gemma" }
   | { type: "restart_sidecar" }
   | { type: "load_settings" }
   | { type: "save_settings"; revision: number; settings: Record<string, unknown> }
@@ -531,7 +534,7 @@ export type WebviewToHost =
 
 const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
-  "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings",
+  "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings", "setup_local_gemma", "stop_local_gemma",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
   "load_stats", "bug_report_capture_screenshot", "load_older_chat", "load_query_index",
   "list_jobs", "load_pinned",

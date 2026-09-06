@@ -1,3 +1,10 @@
+# 1.0.185
+
+- Add an explicit Gemma-only **Set up / start locally** action with download consent, progress, cancellation and stop controls.
+- Reuse or install verified llama.cpp and Gemma Q4 files; detect GPU devices, fit GPU memory automatically, and retry startup on CPU.
+- Support macOS and Linux binaries, Windows binaries, and a source-build fallback for compatible Unix hosts with build tools. Remote workspaces install on the extension host.
+- Configure the loopback endpoint only after model readiness. Preserve settings changed during setup; stop owned servers on extension shutdown.
+
 # 1.0.184
 
 - Require a user-configured Meta Base URL; remove the provisioned endpoint from the picker and sidecar defaults.
