@@ -384,11 +384,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (provider?.busy) {
         void vscode.window.showInformationMessage(
-          "ClawAgents: settings saved — they apply after the current task (or Restart Sidecar).",
+          "ClawAgents: settings saved — they apply after all active tasks finish (or Restart Sidecar).",
         );
-        return;
       }
-      await provider?.restartSidecar();
+      await provider?.requestSidecarSettingsRestart();
     }),
   );
 

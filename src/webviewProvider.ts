@@ -946,7 +946,26 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.drainQueueIfIdle(targetChatId);
   }
 
+  private pendingSidecarSettings = false;
+  private applyingSidecarSettings: Promise<void> | undefined;
+
+  async requestSidecarSettingsRestart(): Promise<void> {
+    this.pendingSidecarSettings = true;
+    await this.applyPendingSidecarSettings();
+  }
+
+  private async applyPendingSidecarSettings(): Promise<void> {
+    if (this.applyingSidecarSettings) return this.applyingSidecarSettings;
+    if (!this.pendingSidecarSettings || this.busy) return;
+    this.pendingSidecarSettings = false;
+    this.applyingSidecarSettings = this.restartSidecar().finally(() => {
+      this.applyingSidecarSettings = undefined;
+    });
+    await this.applyingSidecarSettings;
+  }
+
   async restartSidecar(): Promise<void> {
+    this.pendingSidecarSettings = false;
     this.post({ type: "sidecar", state: "starting" });
     this.sidecar.stop();
     try {
@@ -3281,6 +3300,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "sidecar", state: "starting" });
 
     try {
+      await this.applyPendingSidecarSettings();
       await this.sidecar.ensureStarted();
       this.post({ type: "sidecar", state: "running" });
     } catch (err) {
@@ -3475,6 +3495,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     } finally {
       this.runs.finish(run);
+      await this.applyPendingSidecarSettings();
       this.liveRunEvents.delete(runChatId);
       this.post({ type: "thread_run_state", chatId: runChatId, running: false });
       // A job the turn detached is now unattended: the run's event stream is

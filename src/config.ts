@@ -141,52 +141,24 @@ const _purgedPathSecrets = new Set<string>();
 export type ProviderKind = keyof typeof SECRET_KEYS | "auto";
 export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
 
-/**
- * Resolve a usable Python executable. Remote hosts often have a stale
- * clawagents.pythonPath (e.g. /usr/local/bin/python3) that does not exist;
- * fall back to common locations before spawn fails obscurely.
- */
+/** Resolve only the requested interpreter; never substitute another Python. */
 export function resolvePythonExecutable(configured: string): string {
-  const candidates: string[] = [];
-  const push = (p?: string) => {
-    const t = (p || "").trim();
-    if (t && !candidates.includes(t)) {
-      candidates.push(t);
-    }
-  };
-  push(configured);
-  if (process.platform !== "win32") {
-    push("python3");
-    push("/usr/bin/python3");
-    push("/bin/python3");
+  const candidate = configured.trim() || (process.platform === "win32" ? "python" : "python3");
+  if (path.isAbsolute(candidate)) {
+    if (fs.existsSync(candidate)) return candidate;
   } else {
-    push("python");
-    push("py");
+    const finder = process.platform === "win32" ? "where" : "which";
+    const result = spawnSync(finder, [candidate], { encoding: "utf8" });
+    const resolved = (result.stdout || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line && fs.existsSync(line));
+    if (resolved) return resolved;
   }
-
-  for (const candidate of candidates) {
-    if (path.isAbsolute(candidate)) {
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-      continue;
-    }
-    // Bare command name — prefer PATH resolution via `which` / `where`.
-    try {
-      const finder = process.platform === "win32" ? "where" : "which";
-      const result = spawnSync(finder, [candidate], { encoding: "utf8" });
-      const resolved = (result.stdout || "")
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .find((l) => l && fs.existsSync(l));
-      if (resolved) {
-        return resolved;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return configured.trim() || candidates[0] || "python3";
+  throw new Error(
+    `Python interpreter "${candidate}" not found. Set clawagents.pythonPath in User ` +
+    `or Remote settings to an interpreter on this host. ClawAgents will not select another Python automatically.`,
+  );
 }
 
 /** Bare interpreter names safe even from workspace settings. */

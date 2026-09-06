@@ -1,3 +1,10 @@
+## 1.0.181
+
+- Preserve the selected virtualenv directory on PATH even when Python is a symlink to a system interpreter. Clear stale VIRTUAL_ENV values.
+- Report a missing configured interpreter instead of silently selecting system Python.
+- Apply Python settings changes after active tasks finish; clarify User/Remote settings and custom versus managed runtime behavior.
+- Require clawagents 6.20.73, which honors CLAWAGENTS_PYTHON in local shell execution and tells the agent to respect the selected environment.
+
 ## 1.0.180
 
 - **Context meter now knows the real window for every model in the picker.** The meter assumed 200K for all Claude Opus/Sonnet 4.x and showed nothing for Claude 5-series, Grok, Bedrock/Mantle-prefixed ids or third-party Mantle models. It now normalizes ids the same way cost estimation does (`us.anthropic.…-v1:0`, `openai.…`, `zai.…`) and uses vendor-documented windows: Opus 4.6/4.7/4.8, Opus 5, Sonnet 4.6, Sonnet 5, Fable 5 → 1M; Sonnet 4.5 / Haiku 4.5 / Opus 4.5 → 200K; Grok 4.5 500K, Grok 4.3 / 4.20 1M, Grok Build 256K; DeepSeek V3.2 164K, Kimi K2.5 256K, GLM-5 200K, gpt-oss 128K, Nova Pro/Lite 300K.

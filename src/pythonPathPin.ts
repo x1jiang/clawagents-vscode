@@ -14,22 +14,23 @@ export function pinPythonPathEnv(
   baseEnv: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
-  const abs = path.isAbsolute(python) ? python : python;
-  let binDir = "";
-  try {
-    if (path.isAbsolute(python) && fs.existsSync(python)) {
-      binDir = path.dirname(fs.realpathSync(python));
-    }
-  } catch {
-    binDir = path.isAbsolute(python) ? path.dirname(python) : "";
-  }
+  // Keep the venv entry point: realpath() points at the base interpreter.
+  const binDir = path.isAbsolute(python) ? path.dirname(python) : "";
   if (binDir) {
     const sep = process.platform === "win32" ? ";" : ":";
     const prior = env.PATH || process.env.PATH || "";
     const parts = prior.split(sep).filter((p) => p && p !== binDir);
     env.PATH = [binDir, ...parts].join(sep);
   }
-  env.CLAWAGENTS_PYTHON = abs;
+  if (binDir) {
+    const prefix = path.dirname(binDir);
+    if (fs.existsSync(path.join(prefix, "pyvenv.cfg"))) {
+      env.VIRTUAL_ENV = prefix;
+    } else {
+      delete env.VIRTUAL_ENV;
+    }
+  }
+  env.CLAWAGENTS_PYTHON = python;
   return env;
 }
 

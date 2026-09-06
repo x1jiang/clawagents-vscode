@@ -1,41 +1,43 @@
-const { describe, it } = require("node:test");
+const { describe, it, after } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
+const { buildSync } = require("esbuild");
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-pin-"));
+fs.mkdirSync(path.join(dir, "node_modules/vscode"), { recursive: true });
+fs.writeFileSync(path.join(dir, "node_modules/vscode/index.js"), "module.exports = {};");
+buildSync({ entryPoints: [path.join(__dirname, "../src/pythonPathPin.ts")], outfile: path.join(dir, "pin.cjs"), bundle: true, platform: "node", format: "cjs", external: ["vscode"], logLevel: "silent" });
+const { pinPythonPathEnv } = require(path.join(dir, "pin.cjs"));
+after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-// Load compiled logic via ts → we import the built dist after build.
-// For unit tests without full vscode, duplicate the PATH pin helper inline
-// against the TypeScript source by requiring the esbuild bundle is heavy;
-// instead re-implement the small pure helper contract here against source text.
-
-const pinSrc = fs.readFileSync(
-  path.join(__dirname, "..", "src", "pythonPathPin.ts"),
-  "utf8",
-);
-
-describe("pythonPathPin source", () => {
-  it("exports pinPythonPathEnv and probePathInterpreterDrift", () => {
-    assert.match(pinSrc, /export function pinPythonPathEnv/);
-    assert.match(pinSrc, /export function probePathInterpreterDrift/);
-    assert.match(pinSrc, /export async function ensurePathPythonFloor/);
-    assert.match(pinSrc, /CLAWAGENTS_PYTHON/);
-    assert.match(pinSrc, /\["-a", name\]/);
-    assert.match(pinSrc, /metadata\.version\('clawagents'\)/);
-    assert.doesNotMatch(pinSrc, /getattr\(clawagents, '__version__'/);
+describe("pinPythonPathEnv", () => {
+  it("preserves the venv directory when its interpreter is a symlink", () => {
+    const base = path.join(dir, "system");
+    const venv = path.join(dir, "venv with spaces");
+    fs.mkdirSync(base);
+    fs.mkdirSync(path.join(venv, "bin"), { recursive: true });
+    fs.writeFileSync(path.join(base, "python3"), "");
+    fs.writeFileSync(path.join(venv, "pyvenv.cfg"), "home = " + base);
+    const python = path.join(venv, "bin/python");
+    fs.symlinkSync(path.join(base, "python3"), python);
+    const prior = { PATH: [base, path.dirname(python), base].join(path.delimiter), VIRTUAL_ENV: "/stale", KEEP: "yes" };
+    const env = pinPythonPathEnv(python, prior);
+    assert.equal(env.PATH.split(path.delimiter)[0], path.dirname(python));
+    assert.equal(env.PATH.split(path.delimiter).filter(p => p === path.dirname(python)).length, 1);
+    assert.equal(env.CLAWAGENTS_PYTHON, python);
+    assert.equal(env.VIRTUAL_ENV, venv);
+    assert.equal(env.KEEP, "yes");
+    assert.equal(prior.VIRTUAL_ENV, "/stale");
   });
-
-  it("pinPythonPathEnv puts interpreter dir first", () => {
-    // Lightweight runtime check mirroring pinPythonPathEnv without vscode.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-pin-"));
-    const py = path.join(dir, "python3");
-    fs.writeFileSync(py, "");
-    const sep = process.platform === "win32" ? ";" : ":";
-    const prior = ["/usr/bin", "/opt/homebrew/bin"].join(sep);
-    const binDir = path.dirname(py);
-    const parts = prior.split(sep).filter((p) => p && p !== binDir);
-    const next = [binDir, ...parts].join(sep);
-    assert.equal(next.split(sep)[0], binDir);
-    fs.rmSync(dir, { recursive: true, force: true });
+  it("clears a stale virtualenv when selecting a non-venv interpreter", () => {
+    const python = path.join(dir, "python");
+    fs.writeFileSync(python, "");
+    assert.equal(pinPythonPathEnv(python, { PATH: "", VIRTUAL_ENV: "/old" }).VIRTUAL_ENV, undefined);
+  });
+  it("leaves PATH alone for an unresolved bare command", () => {
+    const env = pinPythonPathEnv("python3", { PATH: "/custom/bin" });
+    assert.equal(env.PATH, "/custom/bin");
+    assert.equal(env.CLAWAGENTS_PYTHON, "python3");
   });
 });

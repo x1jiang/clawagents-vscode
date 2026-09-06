@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.180",
+  "version": "1.0.181",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -247,7 +247,7 @@
           "type": "string",
           "default": "python3",
           "scope": "machine-overridable",
-          "description": "Base Python used to create the managed sidecar environment, or the exact sidecar interpreter when Python Runtime is Custom. Workspace absolute paths are ignored for security."
+          "description": "Set in User or Remote settings. With Python Runtime = custom, this exact interpreter is used for the sidecar and its local Python commands; a missing path is an error, never a fallback. With managed, it creates an isolated sidecar venv. Workspace absolute paths are ignored."
         },
         "clawagents.pythonRuntime": {
           "type": "string",
@@ -257,7 +257,7 @@
           ],
           "default": "managed",
           "scope": "machine-overridable",
-          "description": "Managed isolates sidecar packages in VS Code global storage. Custom uses clawagents.pythonPath directly."
+          "description": "Choose custom to use your selected Python environment for the sidecar and local Python commands. Managed creates an isolated environment in VS Code global storage. Changes apply when active tasks finish."
         },
         "clawagents.model": {
           "type": "string",

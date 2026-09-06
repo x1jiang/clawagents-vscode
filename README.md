@@ -102,3 +102,20 @@ npm run build
 # F5 → Run ClawAgents Extension
 npm run package
 ```
+
+### Selecting your Python interpreter
+
+In VS Code **User settings** (or **Remote settings** in an SSH window), set:
+
+```json
+{
+  "clawagents.pythonRuntime": "custom",
+  "clawagents.pythonPath": "/absolute/path/to/venv/bin/python"
+}
+```
+
+On Windows, use the full `venv\\Scripts\\python.exe` path in JSON. The interpreter must exist on the host running the extension. Workspace absolute paths are ignored for security; VS Code's separate Python extension selection does not configure ClawAgents.
+
+Custom mode runs the sidecar with this interpreter and prepends its directory to PATH for local agent commands. Managed mode creates a separate extension-owned venv using the selected base Python. A missing configured interpreter is an error, never a reason to silently choose system Python. Settings changes restart the sidecar when active tasks finish; **ClawAgents: Restart Sidecar** applies them immediately.
+
+In **Output → ClawAgents Sidecar**, `Starting sidecar:` shows the interpreter and `PATH pin:` shows its command directory. To verify a local agent command, run `python -c "import sys; print(sys.executable); print(sys.prefix)"`. Explicit absolute commands and separately configured containers/remote execution environments retain their own interpreter selection.
