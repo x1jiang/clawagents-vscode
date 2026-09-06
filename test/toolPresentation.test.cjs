@@ -61,3 +61,26 @@ test("durations stay compact from milliseconds through minutes", () => {
   assert.equal(presentation.formatToolDuration(1_260), "1.3s");
   assert.equal(presentation.formatToolDuration(68_000), "1m 8s");
 });
+
+test("tool stages include the wait users actually experienced", () => {
+  const promptAt = "2026-09-05T12:00:00.000Z";
+  const firstCompletedAt = Date.parse(promptAt) + 4_200;
+  assert.equal(
+    presentation.perceivedToolStart([{ kind: "user", timestamp: promptAt }], firstCompletedAt),
+    Date.parse(promptAt),
+  );
+  assert.equal(
+    presentation.perceivedToolStart([
+      { kind: "user", timestamp: promptAt },
+      { kind: "tool", completedAt: firstCompletedAt },
+    ], firstCompletedAt + 2_000),
+    firstCompletedAt,
+  );
+  assert.equal(
+    presentation.perceivedRunElapsed(
+      [{ kind: "tool", status: "done", startedAt: Date.parse(promptAt) }],
+      Date.parse(promptAt) + 9_600,
+    ),
+    9_600,
+  );
+});

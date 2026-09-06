@@ -18,9 +18,11 @@ export type ToolCallItem = {
   output?: string;
   filePath?: string;
   status: "running" | "done";
-  /** Browser time when the start event arrived. Live calls only. */
+  /** Start of this user-perceived stage (prompt or previous tool completion). */
   startedAt?: number;
-  /** Elapsed wall time between start and completion events. */
+  /** Browser time when the completion became visible to the client. */
+  completedAt?: number;
+  /** User-perceived stage time, including model/network/tool latency. */
   durationMs?: number;
 };
 
@@ -30,7 +32,38 @@ export type ToolPresentation = {
   detail?: string;
 };
 
+type PerceivedTimelineItem = {
+  kind: string;
+  timestamp?: string;
+  completedAt?: number;
+};
+
 const MAX_SUBJECT_LENGTH = 88;
+
+export function timestampMilliseconds(value?: string): number | undefined {
+  if (!value) return undefined;
+  const milliseconds = new Date(value).getTime();
+  return Number.isFinite(milliseconds) ? milliseconds : undefined;
+}
+
+/**
+ * Attribute the user's entire visible wait to the next tool stage: the first
+ * stage starts at their prompt, and later stages at the prior completion.
+ */
+export function perceivedToolStart(
+  items: PerceivedTimelineItem[],
+  fallback: number,
+): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "tool" && item.completedAt !== undefined) return item.completedAt;
+    if (item.kind === "user" || item.kind === "assistant") {
+      const timestamp = timestampMilliseconds(item.timestamp);
+      if (timestamp !== undefined) return timestamp;
+    }
+  }
+  return fallback;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -274,6 +307,19 @@ export function elapsedMs(call: ToolCallItem, now = Date.now()): number | undefi
   if (typeof call.durationMs === "number") return Math.max(0, call.durationMs);
   if (typeof call.startedAt === "number") return Math.max(0, now - call.startedAt);
   return undefined;
+}
+
+export function perceivedRunElapsed(
+  calls: ToolCallItem[],
+  endAt: number | undefined,
+  now = Date.now(),
+): number | undefined {
+  const startedAt = calls.find((call) => call.startedAt !== undefined)?.startedAt;
+  if (startedAt !== undefined) return Math.max(0, (endAt ?? now) - startedAt);
+  const durations = calls
+    .map((call) => elapsedMs(call, now))
+    .filter((value): value is number => value !== undefined);
+  return durations.length ? durations.reduce((sum, value) => sum + value, 0) : undefined;
 }
 
 export function formatToolDuration(milliseconds: number | undefined): string | undefined {

@@ -55,7 +55,11 @@ import {
 } from "./threadUnread";
 import { ModelRouteCapsule } from "./ModelRouteCapsule";
 import { ToolRunGroup } from "./ToolRunGroup";
-import type { ToolCallItem } from "./toolPresentation";
+import {
+  perceivedToolStart,
+  timestampMilliseconds,
+  type ToolCallItem,
+} from "./toolPresentation";
 
 /** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
 const EFFORT_OPTIONS = [
@@ -138,7 +142,13 @@ type NonToolChatItem = Exclude<ChatItem, ToolCallItem>;
 
 type TranscriptBlock =
   | { kind: "item"; item: NonToolChatItem; index: number }
-  | { kind: "tools"; calls: ToolCallItem[]; index: number; autoCollapse: boolean };
+  | {
+      kind: "tools";
+      calls: ToolCallItem[];
+      index: number;
+      autoCollapse: boolean;
+      perceivedEndAt?: number;
+    };
 
 /** Keep transcript semantics independent from the tool-run visual component. */
 function groupTranscriptItems(items: ChatItem[], offset = 0): TranscriptBlock[] {
@@ -169,6 +179,13 @@ function groupTranscriptItems(items: ChatItem[], offset = 0): TranscriptBlock[] 
       index += 1;
     }
     const next = items[index];
+    const lastCompletedAt = calls.reduce<number | undefined>(
+      (latest, call) => call.completedAt ?? latest,
+      undefined,
+    );
+    const responseStartedAt = next?.kind === "assistant"
+      ? timestampMilliseconds(next.timestamp)
+      : undefined;
     blocks.push({
       kind: "tools",
       calls,
@@ -177,6 +194,11 @@ function groupTranscriptItems(items: ChatItem[], offset = 0): TranscriptBlock[] 
         next?.kind === "assistant" ||
         next?.kind === "status" ||
         next?.kind === "error",
+      // While the group is the latest transcript block, leave this undefined
+      // so its clock includes the wait for the assistant's first output.
+      perceivedEndAt:
+        responseStartedAt ??
+        (next && next.kind !== "assistant" ? lastCompletedAt : undefined),
     });
     for (const changedFile of changedFiles) {
       blocks.push({ kind: "item", ...changedFile });
@@ -1197,6 +1219,7 @@ function SideChatOverlay({
                 key={`tools-${block.index}-${block.calls[0]?.id || "run"}`}
                 calls={block.calls}
                 autoCollapse={block.autoCollapse}
+                perceivedEndAt={block.perceivedEndAt}
                 onOpenFile={(path) => post({ type: "open_file", path })}
               />
             );
@@ -1800,15 +1823,18 @@ export function App() {
             else items.push({ kind: "assistant", text: msg.text, timestamp: messageTimestamp() });
             return { ...current, items };
           }
-          case "tool_started": return append({
-            kind: "tool",
-            id: msg.id,
-            name: msg.name,
-            args: msg.args,
-            filePath: msg.filePath,
-            status: "running",
-            startedAt: Date.now(),
-          });
+          case "tool_started": {
+            const receivedAt = Date.now();
+            return append({
+              kind: "tool",
+              id: msg.id,
+              name: msg.name,
+              args: msg.args,
+              filePath: msg.filePath,
+              status: "running",
+              startedAt: perceivedToolStart(current.items, receivedAt),
+            });
+          }
           case "tool_completed": {
             let matched = false;
             const completedAt = Date.now();
@@ -1821,6 +1847,7 @@ export function App() {
                   success: msg.success,
                   output: msg.output,
                   filePath: msg.filePath || item.filePath,
+                  completedAt,
                   durationMs: item.startedAt === undefined
                     ? undefined
                     : completedAt - item.startedAt,
@@ -1828,7 +1855,21 @@ export function App() {
               }
               return item;
             });
-            if (!matched) items.push({ kind: "tool", id: msg.id || msg.name, name: msg.name, status: "done", success: msg.success, output: msg.output });
+            if (!matched) {
+              const startedAt = perceivedToolStart(current.items, completedAt);
+              items.push({
+                kind: "tool",
+                id: msg.id || msg.name,
+                name: msg.name,
+                status: "done",
+                success: msg.success,
+                output: msg.output,
+                filePath: msg.filePath,
+                startedAt,
+                completedAt,
+                durationMs: completedAt - startedAt,
+              });
+            }
             return { ...current, items };
           }
           case "permission_required": return append({ kind: "permission", requestId: msg.requestId, tool: msg.tool, filePath: msg.filePath, command: msg.command, reason: msg.reason });
@@ -2455,18 +2496,18 @@ export function App() {
         case "tool_started":
           if (isStaleEvent(msg)) break;
           streamingRef.current = false;
-          setItems((prev) => [
-            ...prev,
-            {
+          setItems((prev) => {
+            const receivedAt = Date.now();
+            return [...prev, {
               kind: "tool",
               id: msg.id,
               name: msg.name,
               args: msg.args,
               filePath: msg.filePath,
               status: "running",
-              startedAt: Date.now(),
-            },
-          ]);
+              startedAt: perceivedToolStart(prev, receivedAt),
+            }];
+          });
           break;
         case "tool_completed":
           if (isStaleEvent(msg)) break;
@@ -2486,6 +2527,7 @@ export function App() {
                   success: msg.success,
                   output: msg.output,
                   filePath: msg.filePath || it.filePath,
+                  completedAt,
                   durationMs: it.startedAt === undefined
                     ? undefined
                     : completedAt - it.startedAt,
@@ -2495,6 +2537,7 @@ export function App() {
             });
             // tool_skipped (and similar) may arrive with no prior tool_started
             if (!matched) {
+              const startedAt = perceivedToolStart(prev, completedAt);
               next.push({
                 kind: "tool",
                 id: msg.id || msg.name,
@@ -2503,6 +2546,9 @@ export function App() {
                 success: msg.success,
                 output: msg.output,
                 filePath: msg.filePath,
+                startedAt,
+                completedAt,
+                durationMs: completedAt - startedAt,
               });
             }
             return next;
@@ -6521,6 +6567,7 @@ export function App() {
                     key={`tools-${block.index}-${block.calls[0]?.id || "run"}`}
                     calls={block.calls}
                     autoCollapse={block.autoCollapse}
+                    perceivedEndAt={block.perceivedEndAt}
                     onOpenFile={(path) => post({ type: "open_file", path })}
                   />
                 );

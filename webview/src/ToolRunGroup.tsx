@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   elapsedMs,
   formatToolDuration,
+  perceivedRunElapsed,
   presentTool,
   summarizeToolRun,
   type ToolCallItem,
@@ -12,6 +13,8 @@ type ToolRunGroupProps = {
   calls: ToolCallItem[];
   /** Becomes true as soon as assistant output follows this tool run. */
   autoCollapse: boolean;
+  /** First assistant output (or terminal event) as observed by the client. */
+  perceivedEndAt?: number;
   onOpenFile: (path: string) => void;
 };
 
@@ -129,7 +132,14 @@ function ToolCallDetails({
           <span className="tool-call-title">{presentation.title}</span>
           {presentation.detail && <span className="tool-call-detail">{presentation.detail}</span>}
         </span>
-        {duration && <span className="tool-duration">{duration}</span>}
+        {duration && (
+          <span
+            className="tool-duration"
+            title="Elapsed since your message or the previous visible step"
+          >
+            {duration}
+          </span>
+        )}
         <StatusGlyph call={call} />
         <span className="tool-chevron" aria-hidden="true">⌄</span>
       </summary>
@@ -137,7 +147,7 @@ function ToolCallDetails({
         <div className="tool-call-meta">
           <code>{call.name}</code>
           <span>{call.status === "running" ? "Running" : call.success === false ? "Failed" : "Completed"}</span>
-          {duration && <span>{duration}</span>}
+          {duration && <span title="User-perceived elapsed time">{duration} perceived</span>}
           {call.filePath && (
             <button type="button" className="tool-open-file" onClick={() => onOpenFile(call.filePath!)}>
               Open file
@@ -163,46 +173,51 @@ function ToolCallDetails({
   );
 }
 
-export function ToolRunGroup({ calls, autoCollapse, onOpenFile }: ToolRunGroupProps) {
-  const active = calls.some((call) => call.status === "running");
+export function ToolRunGroup({
+  calls,
+  autoCollapse,
+  perceivedEndAt,
+  onOpenFile,
+}: ToolRunGroupProps) {
+  const workInProgress = perceivedEndAt === undefined;
   const [expanded, setExpanded] = useState(!autoCollapse);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    if (active) setExpanded(true);
+    if (workInProgress) setExpanded(true);
     else if (autoCollapse) setExpanded(false);
-  }, [active, autoCollapse]);
+  }, [workInProgress, autoCollapse]);
 
   useEffect(() => {
-    if (!active) return undefined;
+    if (!workInProgress) return undefined;
     const timer = window.setInterval(() => setNow(Date.now()), 200);
     return () => window.clearInterval(timer);
-  }, [active]);
+  }, [workInProgress]);
 
   const totalDuration = useMemo(() => {
-    const durations = calls
-      .map((call) => elapsedMs(call, now))
-      .filter((value): value is number => value !== undefined);
-    return durations.length ? durations.reduce((sum, value) => sum + value, 0) : undefined;
-  }, [calls, now]);
+    return perceivedRunElapsed(calls, perceivedEndAt, now);
+  }, [calls, now, perceivedEndAt]);
   const failed = calls.filter((call) => call.success === false).length;
-  const summary = summarizeToolRun(calls, active);
+  const summary = summarizeToolRun(calls, workInProgress);
   const duration = formatToolDuration(totalDuration);
 
   return (
     <details
-      className={`tool-run${active ? " is-running" : ""}${failed ? " has-error" : ""}`}
+      className={`tool-run${workInProgress ? " is-running" : ""}${failed ? " has-error" : ""}`}
       open={expanded}
       onToggle={(event) => {
-        if (!active) setExpanded(event.currentTarget.open);
+        if (!workInProgress) setExpanded(event.currentTarget.open);
       }}
     >
       <summary className="tool-run-summary">
         <span className="tool-run-leading" aria-hidden="true">
-          {active ? <span className="tool-spinner" /> : failed ? "!" : "✓"}
+          {workInProgress ? <span className="tool-spinner" /> : failed ? "!" : "✓"}
         </span>
         <span className="tool-run-title">{summary}</span>
-        <span className="tool-run-meta">
+        <span
+          className="tool-run-meta"
+          title="Elapsed from your message until the response begins"
+        >
           {calls.length} tool{calls.length === 1 ? "" : "s"}
           {duration ? ` · ${duration}` : ""}
           {failed ? ` · ${failed} failed` : ""}
