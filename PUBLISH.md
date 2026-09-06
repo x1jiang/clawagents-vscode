@@ -1,7 +1,7 @@
 Publisher **`clawagents`** · version **1.0.181**
 
 - [x] clawagents **6.20.73** on GitHub + PyPI (honor configured Python in local commands; preserve symlinked virtualenvs)
-- [ ] GitHub release `v1.0.181` + VSIX (explicit Python selection, no silent fallback, deferred settings restart; floor **6.20.73**)
+- [x] GitHub release `v1.0.181` + VSIX (explicit Python selection, no silent fallback, deferred settings restart; floor **6.20.73**)
       · Marketplace/OpenVSX pending: no publishing credentials configured.
 - [x] clawagents **6.20.71** on GitHub + PyPI (correct Claude/Gemini context windows, Mantle profiles, Bedrock id normalization, Python 3.14)
 - [x] GitHub release `v1.0.180` + VSIX (context meter uses real per-model windows + Bedrock/Mantle id normalization; floor clawagents **6.20.71**)
