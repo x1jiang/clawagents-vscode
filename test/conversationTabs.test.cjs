@@ -28,7 +28,10 @@ test("the thread button stays in the navigation row and opens a hoverable popove
   assert.match(styles, /\.threads-popover\s*\{[^}]*position:\s*fixed;/s);
   assert.match(app, /Math\.max\(edge, triggerRect\.right - width\)/);
   assert.match(app, /window\.innerWidth - edge - width/);
-  assert.match(app, /onMouseEnter=\{\(\) => setThreadsPopoverOpen\(true\)\}/);
+  assert.match(app, /const THREADS_POPOVER_CLOSE_DELAY_MS = 180;/);
+  assert.match(app, /onMouseEnter=\{openThreadsPopover\}/);
+  assert.match(app, /onMouseLeave=\{scheduleThreadsPopoverClose\}/);
+  assert.match(app, /onMouseEnter=\{openThreadsPopover\}[\s\S]*onMouseLeave=\{scheduleThreadsPopoverClose\}/);
   assert.match(app, /aria-expanded=\{threadsPopoverOpen\}/);
   assert.match(app, /className="tabs-divider"[^>]*>\|<\/span>/);
 });

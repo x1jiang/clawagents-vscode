@@ -1,3 +1,7 @@
+# Unreleased
+
+- Keep the Threads hover menu open briefly while the pointer moves from its trigger into the fixed-position menu, so its rows and actions are reliably clickable without first pinning it.
+
 # 1.0.188
 
 - Require clawagents 6.20.79, retaining the Glimmer improvements from 1.0.187 and correctly reporting worker deadlines on Python 3.10.
