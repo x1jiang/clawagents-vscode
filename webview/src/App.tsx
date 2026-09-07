@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -29,6 +30,7 @@ import {
 import { parseInlinePathReference } from "../../src/pathReferences";
 import { ADVANCED_RESTORE_FEATURES_AVAILABLE } from "../../src/protocol";
 import {
+  collectPendingTurnChangedFiles,
   collectTurnChangedFiles,
   isTurnTerminal,
   type ChangedFile,
@@ -54,6 +56,8 @@ import {
   threadActivityLabel,
 } from "./threadUnread";
 import { ModelRouteCapsule } from "./ModelRouteCapsule";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
+import { ChangedFilesSummary } from "./ChangedFilesSummary";
 import { ToolRunGroup } from "./ToolRunGroup";
 import {
   perceivedToolStart,
@@ -84,6 +88,30 @@ const MODE_HELP = {
   autoApprove:
     "In Act, enabled categories run without asking; unchecked categories ask first. These toggles still apply when Auto skips ask_user.",
 } as const;
+
+// These messages are emitted by one agent run and therefore belong to exactly
+// one conversation. Keep the guard centralized so newly handled run events do
+// not accidentally leak into a chat opened while the old run is finishing.
+const RUN_SCOPED_EVENT_TYPES = new Set<HostToWebview["type"]>([
+  "stranded_interject",
+  "status",
+  "user_echo",
+  "assistant_delta",
+  "assistant_message",
+  "tool_started",
+  "tool_completed",
+  "permission_required",
+  "ask_user_required",
+  "plan_approval_required",
+  "plan_approved",
+  "file_changed",
+  "usage",
+  "compact_progress",
+  "checkpoint",
+  "done",
+  "error",
+  "cancelled",
+]);
 
 function modelSupportsEffort(model: string): boolean {
   let m = model.trim().toLowerCase();
@@ -261,6 +289,16 @@ type SkillsPreview = {
 
 type Panel = "chat" | "history" | "settings" | "diagnostics";
 
+type HistorySectionKey = "pinned" | "recent" | "archived";
+
+type HistorySectionsExpanded = Record<HistorySectionKey, boolean>;
+
+const DEFAULT_HISTORY_SECTIONS_EXPANDED: HistorySectionsExpanded = {
+  pinned: true,
+  recent: true,
+  archived: false,
+};
+
 type ConversationTab = {
   id: string;
   title: string;
@@ -329,6 +367,28 @@ function persistedConversationTabs(): ConversationTab[] {
     return tabs;
   } catch {
     return [];
+  }
+}
+
+function persistedHistorySectionsExpanded(): HistorySectionsExpanded {
+  try {
+    const saved = getVsCodeApi().getState() as { historySectionsExpanded?: unknown } | undefined;
+    const value = saved?.historySectionsExpanded;
+    if (!value || typeof value !== "object") return DEFAULT_HISTORY_SECTIONS_EXPANDED;
+    const sections = value as Partial<Record<HistorySectionKey, unknown>>;
+    return {
+      pinned: typeof sections.pinned === "boolean"
+        ? sections.pinned
+        : DEFAULT_HISTORY_SECTIONS_EXPANDED.pinned,
+      recent: typeof sections.recent === "boolean"
+        ? sections.recent
+        : DEFAULT_HISTORY_SECTIONS_EXPANDED.recent,
+      archived: typeof sections.archived === "boolean"
+        ? sections.archived
+        : DEFAULT_HISTORY_SECTIONS_EXPANDED.archived,
+    };
+  } catch {
+    return DEFAULT_HISTORY_SECTIONS_EXPANDED;
   }
 }
 
@@ -451,14 +511,6 @@ function markStalePlanApprovals(setItems: Dispatch<SetStateAction<ChatItem[]>>) 
     });
     return changed ? next : prev;
   });
-}
-
-function safeJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -695,40 +747,6 @@ type TranscriptItemProps = {
   onUserMessageMount?: (eventIndex: number, element: HTMLDivElement | null) => void;
 };
 
-function ChangedFilesSummary({ files }: { files: ChangedFile[] }) {
-  const [expanded, setExpanded] = useState(true);
-  return (
-    <section className="changed-files-summary" aria-label={`Edited ${files.length} files`}>
-      <button
-        type="button"
-        className="changed-files-title"
-        onClick={() => setExpanded((current) => !current)}
-        aria-expanded={expanded}
-        title={expanded ? "Collapse edited files" : "Expand edited files"}
-      >
-        <strong>Edited {files.length} file{files.length === 1 ? "" : "s"}</strong>
-        <span>{expanded ? "Click a file to open it" : "Click to show files"}</span>
-        <span className="changed-files-caret" aria-hidden="true">{expanded ? "▾" : "▸"}</span>
-      </button>
-      {expanded && (
-        <div className="changed-files-list">
-          {files.map((file) => (
-            <button
-              key={file.path}
-              type="button"
-              className="changed-file-link"
-              title={`Open ${file.path}`}
-              onClick={() => post({ type: "open_file", path: file.path })}
-            >
-              {file.path}
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
 /** Make unambiguous inline-code file references openable without changing agent output. */
 const assistantMarkdownComponents: Components = {
   code({ children, className, node: _node, ...props }) {
@@ -793,6 +811,9 @@ const TranscriptItem = memo(function TranscriptItem({
   onRegenerate,
   onUserMessageMount,
 }: TranscriptItemProps) {
+  // File events are presented by the turn-level ChangedFilesSummary. Keeping
+  // the raw rows as well creates a long duplicate list in write-heavy turns.
+  if (item.kind === "file") return null;
   const time = (item.kind === "user" || item.kind === "assistant")
     ? formatMessageTime(item.timestamp)
     : undefined;
@@ -1032,46 +1053,6 @@ const TranscriptItem = memo(function TranscriptItem({
           )}
         </div>
       )}
-      {item.kind === "file" && (
-        <div className="file-row">
-          <button
-            type="button"
-            className="file-chip"
-            onClick={() => post({ type: "open_file", path: item.path })}
-          >
-            Changed · {item.path}
-          </button>
-          <button
-            type="button"
-            className="ghost tiny"
-            onClick={() =>
-              post({
-                type: "diff_snapshot",
-                path: item.path,
-                snapshotId: item.snapshotId,
-                snapshotRel: item.snapshotRel,
-              })
-            }
-          >
-            Diff
-          </button>
-          {item.snapshotId && item.snapshotRel && (
-            <button
-              type="button"
-              className="ghost tiny"
-              onClick={() =>
-                post({
-                  type: "restore_snapshot",
-                  snapshotId: item.snapshotId!,
-                  rel: item.snapshotRel!,
-                })
-              }
-            >
-              Restore
-            </button>
-          )}
-        </div>
-      )}
       {item.kind === "status" && (
         <>
           {changedFiles?.length ? <ChangedFilesSummary files={changedFiles} /> : null}
@@ -1204,6 +1185,7 @@ function SideChatOverlay({
     setDraft("");
     onSend(text);
   };
+  const pendingChangedFiles = collectPendingTurnChangedFiles(sideChat.items);
   return (
     <aside className="side-chat" aria-label="Temporary side chat">
       <header className="side-chat-head">
@@ -1253,6 +1235,9 @@ function SideChatOverlay({
             />
           );
         })}
+        {pendingChangedFiles.length > 0 && (
+          <ChangedFilesSummary files={pendingChangedFiles} />
+        )}
         <div ref={sideChatBottomRef} />
       </div>
       <div className="side-chat-compose">
@@ -1353,10 +1338,13 @@ export function App() {
   const sideChatRef = useRef<SideChat | null>(null);
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
+  const [historySectionsExpanded, setHistorySectionsExpanded] =
+    useState<HistorySectionsExpanded>(persistedHistorySectionsExpanded);
   const [openChatMenuId, setOpenChatMenuId] = useState<string | undefined>();
   const [renamingChatId, setRenamingChatId] = useState<string | undefined>();
   const [renameDraft, setRenameDraft] = useState("");
   const [pendingDeleteChatId, setPendingDeleteChatId] = useState<string | undefined>();
+  const [historySelectionMode, setHistorySelectionMode] = useState(false);
   const [selectedChatIds, setSelectedChatIds] = useState<Set<string>>(() => new Set());
   const [selectionAnchorChatId, setSelectionAnchorChatId] = useState<string | undefined>();
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
@@ -1371,6 +1359,13 @@ export function App() {
   );
   const [threadsPopoverOpen, setThreadsPopoverOpen] = useState(false);
   const [threadsPopoverPinned, setThreadsPopoverPinned] = useState(false);
+  const threadsTriggerRef = useRef<HTMLButtonElement>(null);
+  const [threadsPopoverPosition, setThreadsPopoverPosition] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
   const [panel, setPanel] = useState<Panel>("chat");
   const panelRef = useRef<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
@@ -1688,32 +1683,6 @@ export function App() {
     [workspace],
   );
 
-  // These messages are emitted by one agent run and therefore belong to
-  // exactly one conversation. Keep the list centralized: a missing guard on
-  // assistant_message previously let an old run's canonical final response
-  // appear in a newly created chat even though its streamed deltas were
-  // correctly ignored.
-  const runScopedEventTypes = new Set<HostToWebview["type"]>([
-    "stranded_interject",
-    "status",
-    "user_echo",
-    "assistant_delta",
-    "assistant_message",
-    "tool_started",
-    "tool_completed",
-    "permission_required",
-    "ask_user_required",
-    "plan_approval_required",
-    "plan_approved",
-    "file_changed",
-    "usage",
-    "compact_progress",
-    "checkpoint",
-    "done",
-    "error",
-    "cancelled",
-  ]);
-
   const acknowledgeUnread = useCallback((id: string | undefined) => {
     if (!id) return;
     setUnreadChatIds((previous) => acknowledgeThreadUnread(previous, id));
@@ -1742,8 +1711,9 @@ export function App() {
       ...(previous && typeof previous === "object" ? previous : {}),
       conversationTabs: openConversationTabs,
       [THREAD_UNREAD_STATE_KEY]: serializeUnreadThreads(unreadChatIds),
+      historySectionsExpanded,
     });
-  }, [openConversationTabs, unreadChatIds]);
+  }, [historySectionsExpanded, openConversationTabs, unreadChatIds]);
 
   useEffect(() => {
     const acknowledgeVisibleThread = () => {
@@ -1760,6 +1730,41 @@ export function App() {
     const timer = window.setTimeout(() => setForkNotice(null), 4_000);
     return () => window.clearTimeout(timer);
   }, [forkNotice]);
+
+  useLayoutEffect(() => {
+    if (!threadsPopoverOpen) {
+      setThreadsPopoverPosition(null);
+      return;
+    }
+    const placeThreadsPopover = () => {
+      const trigger = threadsTriggerRef.current;
+      if (!trigger) return;
+      const edge = 8;
+      const gap = 5;
+      const minimumHeight = 80;
+      const triggerRect = trigger.getBoundingClientRect();
+      const width = Math.min(320, Math.max(0, window.innerWidth - edge * 2));
+      const maxLeft = Math.max(edge, window.innerWidth - edge - width);
+      const left = Math.min(Math.max(edge, triggerRect.right - width), maxLeft);
+      const top = Math.max(
+        edge,
+        Math.min(triggerRect.bottom + gap, window.innerHeight - edge - minimumHeight),
+      );
+      setThreadsPopoverPosition({
+        left,
+        top,
+        width,
+        maxHeight: Math.max(minimumHeight, window.innerHeight - top - edge),
+      });
+    };
+    placeThreadsPopover();
+    window.addEventListener("resize", placeThreadsPopover);
+    window.addEventListener("scroll", placeThreadsPopover, true);
+    return () => {
+      window.removeEventListener("resize", placeThreadsPopover);
+      window.removeEventListener("scroll", placeThreadsPopover, true);
+    };
+  }, [threadsPopoverOpen]);
 
   useEffect(() => {
     if (!threadsPopoverOpen) return;
@@ -1907,7 +1912,7 @@ export function App() {
       ) {
         setUnreadChatIds((previous) => markThreadUnread(previous, ownerChatId));
       }
-      if (runScopedEventTypes.has(msg.type) && isStaleEvent(msg)) {
+      if (RUN_SCOPED_EVENT_TYPES.has(msg.type) && isStaleEvent(msg)) {
         if (INTERACTIVE_EVENT_TYPES.has(msg.type)) {
           if (ownerChatId) {
             const reason =
@@ -3162,7 +3167,7 @@ export function App() {
   };
 
   const handleHistoryChatClick = (event: ReactMouseEvent<HTMLButtonElement>, c: ChatSummary) => {
-    const toggle = event.metaKey || event.ctrlKey;
+    const toggle = historySelectionMode || event.metaKey || event.ctrlKey;
     setOpenChatMenuId(undefined);
     setPendingDeleteChatId(undefined);
     setPendingBulkDelete(false);
@@ -4089,12 +4094,21 @@ export function App() {
           <button
             type="button"
             className="chat-item"
-            aria-pressed={isSelected}
-            title="Click to open · Shift-click selects a range · Cmd/Ctrl-click toggles selection"
+            aria-pressed={historySelectionMode || isSelected ? isSelected : undefined}
+            title={historySelectionMode
+              ? "Click to toggle selection · Shift-click selects a range"
+              : "Click to open · Shift-click selects a range · Cmd/Ctrl-click toggles selection"}
             onClick={(event) => handleHistoryChatClick(event, c)}
           >
             <div className="chat-title" title={title}>
-              {isSelected ? <span className="chat-selected-check" aria-hidden="true">✓</span> : null}
+              {historySelectionMode || isSelected ? (
+                <span
+                  className={`chat-selected-check ${isSelected ? "selected" : ""}`.trim()}
+                  aria-hidden="true"
+                >
+                  {isSelected ? "✓" : ""}
+                </span>
+              ) : null}
               {activity ? (
                 <span
                   className={`chat-activity-dot ${activity}`}
@@ -4106,8 +4120,9 @@ export function App() {
             <div className="muted tiny">{meta}</div>
           </button>
         )}
-        <div className="chat-row-actions">
-          <button
+        {!historySelectionMode ? (
+          <div className="chat-row-actions">
+            <button
             type="button"
             className={`ghost tiny chat-pin ${c.pinned ? "active" : ""}`}
             title={c.pinned ? "Unpin chat" : "Pin chat"}
@@ -4119,25 +4134,8 @@ export function App() {
           >
             {c.pinned ? "★" : "☆"}
           </button>
-          <button
-            type="button"
-            className="ghost tiny chat-fork"
-            title={busy ? "Stop the current run before forking" : "Fork this conversation"}
-            aria-label="Fork chat"
-            disabled={busy}
-            onClick={() => {
-              if (busy) return;
-              setOpenChatMenuId(undefined);
-              setPendingDeleteChatId(undefined);
-              pendingForkRef.current = true;
-              beginDraftHandoff();
-              post({ type: "fork_chat", chatId: c.id });
-            }}
-          >
-            <IconFork size={13} />
-          </button>
-          <div className="chat-menu-wrap">
-            <button
+            <div className="chat-menu-wrap">
+              <button
               type="button"
               className="ghost tiny chat-menu-trigger"
               title="Chat options"
@@ -4150,8 +4148,8 @@ export function App() {
             >
               ⋯
             </button>
-            {menuOpen ? (
-              <div className="chat-menu" role="menu">
+              {menuOpen ? (
+                <div className="chat-menu" role="menu">
                 {deletePending ? (
                   <>
                     <button
@@ -4176,6 +4174,22 @@ export function App() {
                   </>
                 ) : (
                   <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={busy}
+                      title={busy ? "Stop the current run before forking" : undefined}
+                      onClick={() => {
+                        if (busy) return;
+                        setOpenChatMenuId(undefined);
+                        setPendingDeleteChatId(undefined);
+                        pendingForkRef.current = true;
+                        beginDraftHandoff();
+                        post({ type: "fork_chat", chatId: c.id });
+                      }}
+                    >
+                      Fork
+                    </button>
                     <button type="button" role="menuitem" onClick={() => beginRenameChat(c)}>
                       Rename
                     </button>
@@ -4213,17 +4227,71 @@ export function App() {
                     </button>
                   </>
                 )}
-              </div>
-            ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
       </li>
+    );
+  };
+
+  const renderHistorySection = (
+    key: HistorySectionKey,
+    label: string,
+    sectionChats: ChatSummary[],
+  ) => {
+    if (!sectionChats.length) return null;
+    const searching = Boolean(historyQuery.trim());
+    const expanded = searching || historySectionsExpanded[key];
+    const selectedCount = sectionChats.filter((chat) => selectedChatIds.has(chat.id)).length;
+    const listId = `history-${key}-list`;
+    return (
+      <section className="chat-section" aria-label={`${label} chats`}>
+        <button
+          type="button"
+          className="chat-section-toggle"
+          aria-expanded={expanded}
+          aria-controls={listId}
+          disabled={searching}
+          title={searching
+            ? "Sections stay expanded while searching"
+            : `${expanded ? "Collapse" : "Expand"} ${label}`}
+          onClick={() => {
+            if (searching) return;
+            setHistorySectionsExpanded((previous) => ({
+              ...previous,
+              [key]: !previous[key],
+            }));
+          }}
+        >
+          <span
+            className={`chat-section-caret ${expanded ? "expanded" : ""}`.trim()}
+            aria-hidden="true"
+          >
+            ›
+          </span>
+          <span className="chat-section-label">{label}</span>
+          <span className="chat-section-count">{sectionChats.length}</span>
+          {selectedCount > 0 ? (
+            <span className="chat-section-selected">{selectedCount} selected</span>
+          ) : null}
+        </button>
+        <ul
+          id={listId}
+          className={`chat-list${key === "archived" ? " archived" : ""}`}
+          hidden={!expanded}
+        >
+          {sectionChats.map(renderHistoryChat)}
+        </ul>
+      </section>
     );
   };
 
   const activeQueryPosition = queryIndex.findIndex(
     (entry) => entry.eventIndex === activeQueryEventIndex,
   );
+  const pendingTurnChangedFiles = collectPendingTurnChangedFiles(items);
 
   return (
     <div className="app">
@@ -4409,13 +4477,13 @@ export function App() {
         </div>
         <nav className="tabs" aria-label="Navigation and open conversations">
           <div className="panel-tabs" role="tablist" aria-label="Panels">
-            {(["chat", "history", "settings", "diagnostics"] as Panel[]).map((p) => (
+            {(["chat", "history", "settings"] as Panel[]).map((p) => (
               <button
                 key={p}
                 type="button"
                 role="tab"
-                aria-selected={panel === p}
-                className={panel === p ? "tab active" : "tab"}
+                aria-selected={panel === p || (p === "settings" && panel === "diagnostics")}
+                className={panel === p || (p === "settings" && panel === "diagnostics") ? "tab active" : "tab"}
                 onClick={() => {
                   showPanel(p);
                   if (p === "chat" && chatIdRef.current) {
@@ -4426,10 +4494,6 @@ export function App() {
                   if (p === "settings") {
                     post({ type: "load_settings" });
                     post({ type: "graphify_action", action: "status" });
-                  }
-                  if (p === "diagnostics") {
-                    post({ type: "load_diagnostics" });
-                    post({ type: "load_stats" });
                   }
                 }}
               >
@@ -4456,6 +4520,7 @@ export function App() {
             >
               <span className="tabs-divider" aria-hidden="true">|</span>
               <button
+                ref={threadsTriggerRef}
                 type="button"
                 className={`threads-trigger${threadsPopoverPinned ? " active" : ""}`}
                 aria-haspopup="dialog"
@@ -4481,7 +4546,16 @@ export function App() {
                 ) : null}
               </button>
               {threadsPopoverOpen ? (
-                <div className="threads-popover" role="dialog" aria-label="Open threads">
+                <div
+                  className="threads-popover"
+                  role="dialog"
+                  aria-label="Open threads"
+                  style={
+                    threadsPopoverPosition
+                      ? threadsPopoverPosition
+                      : { visibility: "hidden" }
+                  }
+                >
                   <div className="threads-popover-header">
                     <strong>Open threads</strong>
                     <button
@@ -4847,9 +4921,21 @@ export function App() {
             />
             <button
               type="button"
+              className={`ghost history-select-toggle ${historySelectionMode ? "active" : ""}`.trim()}
+              aria-pressed={historySelectionMode}
+              onClick={() => {
+                if (historySelectionMode) clearHistorySelection();
+                setHistorySelectionMode((previous) => !previous);
+              }}
+            >
+              {historySelectionMode ? "Done" : "Select"}
+            </button>
+            <button
+              type="button"
               className="primary"
               onClick={() => {
                 clearHistorySelection();
+                setHistorySelectionMode(false);
                 beginDraftHandoff();
                 pendingNewChatRef.current = true;
                 post({ type: "new_chat" });
@@ -4858,12 +4944,13 @@ export function App() {
               New
             </button>
           </div>
-          <div
-            className="history-bulk-toolbar"
-            role="toolbar"
-            aria-label="Selected conversation actions"
-          >
-              <strong>{selectedChats.length ? `${selectedChats.length} selected` : "Select conversations"}</strong>
+          {selectedChats.length > 0 ? (
+            <div
+              className="history-bulk-toolbar"
+              role="toolbar"
+              aria-label="Selected conversation actions"
+            >
+              <strong>{selectedChats.length} selected</strong>
               <button
                 type="button"
                 className="ghost tiny"
@@ -4931,34 +5018,22 @@ export function App() {
               >
                 Clear
               </button>
-          </div>
+            </div>
+          ) : null}
           {historySearching && historyQuery.trim() ? (
             <div className="muted tiny history-hint">Searching…</div>
           ) : (
             <div className="muted tiny history-hint">
-              Shift-click selects a range · Cmd/Ctrl-click toggles individual conversations
+              {historySelectionMode
+                ? "Click conversations to select · Shift-click selects a range"
+                : "Select for batch actions · Shift-click selects a range · Cmd/Ctrl-click toggles"}
             </div>
           )}
           {chats.length ? (
             <div className="chat-sections">
-              {pinnedChats.length ? (
-                <section className="chat-section" aria-label="Pinned chats">
-                  <div className="chat-section-label">Pinned</div>
-                  <ul className="chat-list">{pinnedChats.map(renderHistoryChat)}</ul>
-                </section>
-              ) : null}
-              {regularChats.length ? (
-                <section className="chat-section" aria-label="Recent chats">
-                  <div className="chat-section-label">Recent</div>
-                  <ul className="chat-list">{regularChats.map(renderHistoryChat)}</ul>
-                </section>
-              ) : null}
-              {archivedChats.length ? (
-                <section className="chat-section" aria-label="Archived chats">
-                  <div className="chat-section-label">Archived</div>
-                  <ul className="chat-list archived">{archivedChats.map(renderHistoryChat)}</ul>
-                </section>
-              ) : null}
+              {renderHistorySection("pinned", "Pinned", pinnedChats)}
+              {renderHistorySection("recent", "Recent", regularChats)}
+              {renderHistorySection("archived", "Archived", archivedChats)}
             </div>
           ) : (
             <div className="muted">
@@ -4970,8 +5045,23 @@ export function App() {
 
       {panel === "settings" && (
         <div className="panel settings">
-          <section className="settings-section">
-            <h3 className="settings-heading">Default model for new chats</h3>
+          <div className="settings-overview">
+            <nav className="settings-nav" aria-label="Settings sections">
+              <a href="#settings-provider">Provider</a>
+              <a href="#settings-agent">Agent</a>
+              <a href="#settings-skills">Skills</a>
+              <a href="#settings-tools">Tools</a>
+              <a href="#settings-advanced">Advanced</a>
+              <a href="#settings-troubleshooting">Troubleshooting</a>
+            </nav>
+            <div className="settings-save-status" role="status" aria-live="polite">
+              {verifyMsg && !/^[a-z0-9_-]+:/i.test(verifyMsg)
+                ? verifyMsg
+                : "Changes save automatically"}
+            </div>
+          </div>
+          <section className="settings-section" id="settings-provider">
+            <h3 className="settings-heading">Provider connection</h3>
             <label>
               Provider
               <select
@@ -5147,13 +5237,13 @@ export function App() {
                       : String(settings.bedrock_mode || "iam") === "bag"
                         ? "http://localhost:8000/api/v1"
                         : "empty = native AWS IAM"
-                    : selectedProvider === "openai"
+                    : settingsProvider === "openai"
                       ? "empty = api.openai.com · or http://localhost:11434/v1"
-                      : selectedProvider === "gemini"
+                      : settingsProvider === "gemini"
                         ? "(unused for native Gemini — use OpenAI provider for proxies)"
                         : "http://localhost:11434/v1"
                 }
-                disabled={selectedProvider === "gemini"}
+                disabled={settingsProvider === "gemini"}
               />
             </label>
             {settingsProvider === "profile:gemma-agentic" && (
@@ -5436,11 +5526,9 @@ export function App() {
                         value={providerKeyDraft}
                         onChange={(e) => setProviderKeyDraft(e.target.value)}
                         placeholder={
-                          hasBedrockKey
-                            ? "••••••••  (saved — paste to replace)"
-                            : String(settings.bedrock_mode) === "mantle"
-                              ? "MANTLE_API_KEY / OneHUB key"
-                              : "BAG / LiteLLM gateway key"
+                          String(settings.bedrock_mode) === "mantle"
+                            ? "MANTLE_API_KEY / OneHUB key"
+                            : "BAG / LiteLLM gateway key"
                         }
                       />
                     </label>
@@ -5511,7 +5599,7 @@ export function App() {
                 )}
               </div>
             )}
-            {selectedProvider === "openai" && (
+            {settingsProvider === "openai" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">OpenAI / compatible endpoint</h4>
                 <p className="settings-hint">
@@ -5521,7 +5609,8 @@ export function App() {
                 <div className="provider-presets">
                   <button
                     type="button"
-                    className="ghost tiny"
+                    className={`ghost tiny${!String(settings.base_url || "").trim() ? " active" : ""}`}
+                    aria-pressed={!String(settings.base_url || "").trim()}
                     onClick={() => {
                       setSettings((s) => ({
                         ...s,
@@ -5536,7 +5625,8 @@ export function App() {
                   </button>
                   <button
                     type="button"
-                    className="ghost tiny"
+                    className={`ghost tiny${String(settings.base_url || "").includes("localhost:11434") ? " active" : ""}`}
+                    aria-pressed={String(settings.base_url || "").includes("localhost:11434")}
                     onClick={() => {
                       setSettings((s) => ({
                         ...s,
@@ -5552,7 +5642,8 @@ export function App() {
                   </button>
                   <button
                     type="button"
-                    className="ghost tiny"
+                    className={`ghost tiny${String(settings.base_url || "").includes("localhost:8000/api/v1") ? " active" : ""}`}
+                    aria-pressed={String(settings.base_url || "").includes("localhost:8000/api/v1")}
                     title="Point OpenAI provider at local Bedrock Access Gateway"
                     onClick={() => {
                       setSettings((s) => ({
@@ -5594,17 +5685,23 @@ export function App() {
                     autoComplete="off"
                     value={providerKeyDraft}
                     onChange={(e) => setProviderKeyDraft(e.target.value)}
-                    placeholder={
-                      hasOpenAIKey
-                        ? "••••••••  (saved — paste to replace)"
-                        : "sk-… / gateway token / ollama"
-                    }
+                    placeholder="sk-… / gateway token / ollama"
                   />
                 </label>
+                <div className="provider-status-row">
+                  <span className={`provider-status ${hasOpenAIKey ? "ok" : "muted"}`}>
+                    {hasOpenAIKey ? "Key saved" : "No key saved"}
+                  </span>
+                  <span className="settings-hint provider-endpoint" title={
+                    String(settings.base_url || "").trim() || "https://api.openai.com/v1"
+                  }>
+                    {String(settings.base_url || "").trim() || "Official api.openai.com"}
+                  </span>
+                </div>
                 <div className="provider-actions">
                   <button
                     type="button"
-                    className="primary tiny"
+                    className="ghost tiny"
                     disabled={!providerKeyDraft.trim()}
                     onClick={() => {
                       setProviderSetupMsg("Saving OpenAI key…");
@@ -5616,11 +5713,11 @@ export function App() {
                       setProviderKeyDraft("");
                     }}
                   >
-                    Save API key
+                    {hasOpenAIKey ? "Replace API key" : "Save API key"}
                   </button>
                   <button
                     type="button"
-                    className="ghost tiny"
+                    className="primary tiny"
                     onClick={() => {
                       const base = String(settings.base_url || "").trim();
                       if (!base) {
@@ -5642,9 +5739,10 @@ export function App() {
                   </button>
                   <button
                     type="button"
-                    className="ghost tiny"
+                    className="danger tiny"
                     disabled={!hasOpenAIKey}
                     onClick={() => {
+                      if (!window.confirm("Clear the saved OpenAI API key?")) return;
                       setProviderSetupMsg("Clearing OpenAI key…");
                       post({ type: "clear_provider_key", provider: "openai" });
                     }}
@@ -5652,16 +5750,14 @@ export function App() {
                     Clear key
                   </button>
                 </div>
-                <p className="settings-hint">
-                  Key: {hasOpenAIKey ? "saved" : "not set"}
-                  {String(settings.base_url || "").trim()
-                    ? ` · endpoint ${String(settings.base_url)}`
-                    : " · official api.openai.com"}
-                  {providerSetupMsg ? ` · ${providerSetupMsg}` : ""}
-                </p>
+                {providerSetupMsg && (
+                  <p className="settings-hint provider-feedback" role="status" aria-live="polite">
+                    {providerSetupMsg}
+                  </p>
+                )}
               </div>
             )}
-            {selectedProvider === "gemini" && (
+            {settingsProvider === "gemini" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">Google Gemini</h4>
                 <p className="settings-hint">
@@ -5675,11 +5771,7 @@ export function App() {
                     autoComplete="off"
                     value={providerKeyDraft}
                     onChange={(e) => setProviderKeyDraft(e.target.value)}
-                    placeholder={
-                      hasGeminiKey
-                        ? "••••••••  (saved — paste to replace)"
-                        : "AIza… from Google AI Studio"
-                    }
+                    placeholder="AIza… from Google AI Studio"
                   />
                 </label>
                 <div className="provider-actions">
@@ -5744,7 +5836,7 @@ export function App() {
                 </p>
               </div>
             )}
-            {selectedProvider === "xai" && (
+            {settingsProvider === "xai" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">xAI (Grok)</h4>
                 <p className="settings-hint">
@@ -5758,11 +5850,7 @@ export function App() {
                     autoComplete="off"
                     value={providerKeyDraft}
                     onChange={(e) => setProviderKeyDraft(e.target.value)}
-                    placeholder={
-                      hasXaiKey
-                        ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022  (saved \u2014 paste to replace)"
-                        : "xai-\u2026 from console.x.ai"
-                    }
+                    placeholder="xai-\u2026 from console.x.ai"
                   />
                 </label>
                 <div className="provider-actions">
@@ -5811,7 +5899,7 @@ export function App() {
                 </p>
               </div>
             )}
-            {selectedProvider === "anthropic" && (
+            {settingsProvider === "anthropic" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">Anthropic</h4>
                 <p className="settings-hint">
@@ -5825,11 +5913,7 @@ export function App() {
                     autoComplete="off"
                     value={providerKeyDraft}
                     onChange={(e) => setProviderKeyDraft(e.target.value)}
-                    placeholder={
-                      hasAnthropicKey
-                        ? "••••••••  (saved — paste to replace)"
-                        : "sk-ant-…"
-                    }
+                    placeholder="sk-ant-…"
                   />
                 </label>
                 <div className="provider-actions">
@@ -5877,6 +5961,118 @@ export function App() {
                 </p>
               </div>
             )}
+            <div className="settings-subsection">
+              <div className="settings-subsection-head">
+                <h4>Default model for new chats</h4>
+                <span className="settings-hint">Applies to new chats in this workspace.</span>
+              </div>
+              <div className="settings-field-grid">
+                <label>
+                  Model
+                  <select
+                    value={String(settings.model || "")}
+                    title="Only models for providers with a saved key"
+                    onChange={(e) => selectDefaultModel(e.target.value)}
+                  >
+                    <option value="">
+                      {providerModels.length ? "default" : "no key — configure provider above"}
+                    </option>
+                    {Boolean(String(settings.model || "").trim()) &&
+                      !providerModels.some((m) => m.id === String(settings.model)) && (
+                        <option value={String(settings.model)}>
+                          {String(settings.model)} (unavailable)
+                        </option>
+                      )}
+                    {providerModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label || m.id}
+                        {m.input_per_mtok != null
+                          ? ` · $${m.input_per_mtok}/$${m.output_per_mtok} per 1M`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {modelSupportsEffort(String(settings.model || activeModelId || "")) && (
+                  <label>
+                    Thinking effort
+                    <select
+                      value={String(settings.reasoning_effort || "medium")}
+                      onChange={(e) => selectDefaultEffort(e.target.value)}
+                    >
+                      {EFFORT_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+              {modelSupportsEffort(String(settings.model || activeModelId || "")) && (
+                <p className="settings-hint">
+                  Higher effort allows deeper reasoning. It also applies to tool use when the
+                  Responses API is selected or automatically chosen for GPT-5.5/5.6.
+                </p>
+              )}
+            </div>
+
+            {(settingsProvider === "openai" ||
+              settingsProvider === "auto" ||
+              settingsProvider === "ollama" ||
+              settingsProvider === "bedrock") && (
+              <details className="settings-compatibility">
+                <summary>
+                  <span className="settings-compatibility-title">
+                    <span className="settings-disclosure-caret" aria-hidden="true">›</span>
+                    Compatibility settings
+                  </span>
+                  <span className="settings-hint">Wire API and TLS</span>
+                </summary>
+                <div className="settings-compatibility-body">
+                  <label>
+                    Wire API
+                    <select
+                      value={String(settings.wire_api || "auto")}
+                      onChange={(e) => selectWireApi(e.target.value)}
+                    >
+                      <option value="auto">Auto (model decides)</option>
+                      <option value="responses">Responses (/v1/responses)</option>
+                      <option value="chat_completions">
+                        Chat Completions (/v1/chat/completions)
+                      </option>
+                    </select>
+                    <span className="settings-hint">
+                      {String(settings.bedrock_mode || "") === "mantle"
+                        ? "Mantle chooses the route by model; Claude Haiku/Sonnet use Mantle Messages."
+                        : "Use Responses for Codex or gateways that do not expose chat/completions."}
+                    </span>
+                  </label>
+                  <div className="settings-toggle-field">
+                    <label className="check settings-toggle-control">
+                      <input
+                        type="checkbox"
+                        checked={settings.ssl_verify !== false}
+                        onChange={(e) => selectSslVerify(e.target.checked)}
+                      />
+                      <span>Verify TLS certificates</span>
+                    </label>
+                    <p className="settings-hint">
+                      Keep enabled unless your organization uses a private certificate authority.
+                    </p>
+                    {settings.ssl_verify === false && (
+                      <p className="settings-warning" role="alert">
+                        TLS certificate verification is off for this endpoint.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </details>
+            )}
+          </section>
+
+          <section className="settings-section" id="settings-agent">
+            <h3 className="settings-heading">Agent defaults</h3>
             <label>
               Default mode
               <select
@@ -5924,13 +6120,13 @@ export function App() {
             </label>
           </section>
 
-          <section className="settings-section">
+          <section className="settings-section" id="settings-skills">
             <h3 className="settings-heading">Skills</h3>
             <p className="settings-hint">
               Register folders that contain skills. A folder with{" "}
               <code>SKILL.md</code> registers as one skill; a parent folder registers each
-              subfolder (or <code>.md</code> file) separately. Save to apply; detected list
-              refreshes after save.
+              subfolder (or <code>.md</code> file) separately. Changes save automatically;
+              the detected list refreshes after save.
             </p>
             <label className="check">
               <input
@@ -6200,8 +6396,8 @@ export function App() {
             )}
           </section>
 
-          <section className="settings-section">
-            <h3 className="settings-heading">Tools</h3>
+          <section className="settings-section" id="settings-tools">
+            <h3 className="settings-heading">Tools &amp; integrations</h3>
             <label className="check">
               <input
                 type="checkbox"
@@ -6450,11 +6646,7 @@ export function App() {
                 autoComplete="off"
                 value={providerKeyDraft}
                 onChange={(e) => setProviderKeyDraft(e.target.value)}
-                placeholder={
-                  hasTavilyKey
-                    ? "••••••••  (saved — paste to replace)"
-                    : "tvly-… from tavily.com"
-                }
+                placeholder="tvly-… from tavily.com"
               />
             </label>
             <div className="provider-actions">
@@ -6491,7 +6683,7 @@ export function App() {
             )}
           </section>
 
-          <section className="settings-section">
+          <section className="settings-section" id="settings-advanced">
             <h3 className="settings-heading">Advanced</h3>
             <p className="muted tiny" style={{ marginTop: 0 }}>
               Changes autosave after a short pause. API keys live under the Provider card
@@ -6525,7 +6717,11 @@ export function App() {
             <label className="check">
               <input
                 type="checkbox"
-                checked={Boolean(settings.context_observatory ?? settings.enable_context_observatory)}
+                checked={Boolean(
+                  settings.context_observatory ??
+                    settings.enable_context_observatory ??
+                    false,
+                )}
                 onChange={(e) =>
                   setSettings((s) => ({
                     ...s,
@@ -6538,35 +6734,44 @@ export function App() {
             </label>
           </section>
 
-          <div className="panel-actions">
-            <button
-              type="button"
-              className="primary"
-              title="Flush settings now (also autosaves ~0.5s after changes)"
-              onClick={() => {
-                window.clearTimeout(settingsSaveTimer.current);
-                const patch = normalizeSettingsForSave(settings);
-                pendingSettingsPatch.current = patch;
-                setVerifyMsg("Saving…");
-                postSettingsSave(patch, settings);
-              }}
-            >
-              Save settings
-            </button>
-          </div>
-          {verifyMsg && <div className="muted">{verifyMsg}</div>}
+          <section className="settings-section" id="settings-troubleshooting">
+            <h3 className="settings-heading">Troubleshooting</h3>
+            <p className="settings-hint">
+              Check the local runtime, workspace, provider access, and optional integrations.
+              Technical details stay hidden unless you choose to open them.
+            </p>
+            <div className="provider-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  showPanel("diagnostics");
+                  post({ type: "load_diagnostics" });
+                  post({ type: "load_stats" });
+                }}
+              >
+                Open system diagnostics
+              </button>
+            </div>
+          </section>
+
         </div>
       )}
 
       {panel === "diagnostics" && (
-        <div className="panel">
-          <pre className="tool-body">{safeJson(diagnostics)}</pre>
-          <h4>Local stats</h4>
-          <pre className="tool-body">{safeJson(stats)}</pre>
-          <button type="button" className="ghost" onClick={() => post({ type: "restart_sidecar" })}>
-            Restart sidecar
-          </button>
-        </div>
+        <DiagnosticsPanel
+          diagnostics={diagnostics}
+          stats={stats}
+          workspace={workspace}
+          sidecar={sidecar}
+          sidecarDetail={sidecarDetail}
+          onBack={() => showPanel("settings")}
+          onRefresh={() => {
+            post({ type: "load_diagnostics" });
+            post({ type: "load_stats" });
+          }}
+          onRestart={() => post({ type: "restart_sidecar" })}
+        />
       )}
 
       {panel === "chat" && (
@@ -6668,6 +6873,9 @@ export function App() {
                 />
               );
             })}
+            {pendingTurnChangedFiles.length > 0 && (
+              <ChangedFilesSummary files={pendingTurnChangedFiles} />
+            )}
             <div ref={bottomRef} />
           </main>
 

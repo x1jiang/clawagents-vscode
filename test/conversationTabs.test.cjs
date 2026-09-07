@@ -25,7 +25,9 @@ test("the thread popover can close, close all, pin, and unpin threads", () => {
 test("the thread button stays in the navigation row and opens a hoverable popover", () => {
   assert.match(styles, /\.tabs\s*\{[^}]*flex-wrap:\s*nowrap;/s);
   assert.match(styles, /\.threads-popover-root\s*\{[^}]*position:\s*relative;/s);
-  assert.match(styles, /\.threads-popover\s*\{[^}]*position:\s*absolute;/s);
+  assert.match(styles, /\.threads-popover\s*\{[^}]*position:\s*fixed;/s);
+  assert.match(app, /Math\.max\(edge, triggerRect\.right - width\)/);
+  assert.match(app, /window\.innerWidth - edge - width/);
   assert.match(app, /onMouseEnter=\{\(\) => setThreadsPopoverOpen\(true\)\}/);
   assert.match(app, /aria-expanded=\{threadsPopoverOpen\}/);
   assert.match(app, /className="tabs-divider"[^>]*>\|<\/span>/);

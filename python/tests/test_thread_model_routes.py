@@ -290,6 +290,11 @@ def test_chat_api_round_trips_model_route(tmp_path: Path, monkeypatch):
     chat_id = created.json()["id"]
     assert created.json()["model_route"]["provider"] == "anthropic"
 
+    metadata = client.get(f"/chats/{chat_id}/meta", headers=headers)
+    assert metadata.status_code == 200, metadata.text
+    assert metadata.json()["has_ui_events"] is False
+    assert "events" not in metadata.json()
+
     patched = client.patch(
         f"/chats/{chat_id}",
         headers=headers,

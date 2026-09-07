@@ -9,6 +9,8 @@ import * as path from "path";
 export const GET_PIP_URL = "https://bootstrap.pypa.io/pip/get-pip.py";
 /** Redirects may not leave PyPA infrastructure. */
 export const GET_PIP_ALLOWED_HOSTS = ["bootstrap.pypa.io"] as const;
+/** Package index used by the pip --python fallback. */
+export const PYPI_PIP_URL = "https://pypi.org/simple/";
 /** get-pip.py is ~2.5 MB; refuse anything that is not plausibly it. */
 const GET_PIP_MAX_BYTES = 16 * 1024 * 1024;
 const GET_PIP_MIN_BYTES = 1024;
@@ -87,7 +89,14 @@ function managedPythonIsUsable(python: string): boolean {
   return result.status === 0;
 }
 
-type CommandResult = { code: number | null; log: string };
+type CommandResult = { code: number | null; log: string; cancelled?: boolean };
+
+export type NetworkBootstrapRequest = {
+  kind: "pip_install" | "get_pip";
+  url: string;
+};
+
+type ConfirmNetworkBootstrap = (request: NetworkBootstrapRequest) => Promise<boolean>;
 
 function runCommand(
   command: string,
@@ -147,6 +156,26 @@ export function pipCanTargetOtherInterpreter(python: string): boolean {
   if (!version) return false;
   const [major, minor] = version;
   return major > 22 || (major === 22 && minor >= 3);
+}
+
+/** Keep the consented package source and the command that uses it in lockstep. */
+export function pipBootstrapArgs(targetPython: string): string[] {
+  return [
+    "-m",
+    "pip",
+    "--isolated",
+    // pip rejects --python after the subcommand name.
+    "--python",
+    targetPython,
+    "install",
+    "--index-url",
+    PYPI_PIP_URL,
+    "--disable-pip-version-check",
+    "--upgrade",
+    "pip",
+    "setuptools",
+    "wheel",
+  ];
 }
 
 function uvAvailable(): boolean {
@@ -235,13 +264,14 @@ type EnvBuilder = {
 
 /**
  * Ways to get a pip-equipped venv when the base interpreter has no ensurepip.
- * Each carries its own pip payload, so none of them needs root or apt.
+ * uv and virtualenv are local. The pip/get-pip fallbacks require explicit
+ * consent because both resolve executable packages over the network.
  */
 function pipFreeBuilders(
   identity: PythonIdentity,
   envDir: string,
   output: { appendLine(s: string): void },
-  confirmNetworkBootstrap?: (url: string) => Promise<boolean>,
+  confirmNetworkBootstrap?: ConfirmNetworkBootstrap,
 ): EnvBuilder[] {
   return [
     {
@@ -257,8 +287,16 @@ function pipFreeBuilders(
     },
     {
       label: "python -m venv --without-pip + pip --python",
-      usable: () => pipCanTargetOtherInterpreter(identity.executable),
+      usable: () => Boolean(confirmNetworkBootstrap)
+        && pipCanTargetOtherInterpreter(identity.executable),
       build: async () => {
+        if (!(await confirmNetworkBootstrap?.({ kind: "pip_install", url: PYPI_PIP_URL }))) {
+          return {
+            code: null,
+            log: "pip package bootstrap declined",
+            cancelled: true,
+          };
+        }
         const created = await runCommand(
           identity.executable,
           ["-m", "venv", "--without-pip", envDir],
@@ -267,18 +305,7 @@ function pipFreeBuilders(
         if (created.code !== 0) return created;
         return runCommand(
           identity.executable,
-          [
-            "-m",
-            "pip",
-            // pip rejects --python after the subcommand name.
-            "--python",
-            managedPythonExecutable(envDir),
-            "install",
-            "--upgrade",
-            "pip",
-            "setuptools",
-            "wheel",
-          ],
+          pipBootstrapArgs(managedPythonExecutable(envDir)),
           output,
         );
       },
@@ -290,8 +317,12 @@ function pipFreeBuilders(
       label: "python -m venv --without-pip + get-pip.py",
       usable: () => Boolean(confirmNetworkBootstrap),
       build: async () => {
-        if (!(await confirmNetworkBootstrap?.(GET_PIP_URL))) {
-          return { code: null, log: "pip bootstrap download declined" };
+        if (!(await confirmNetworkBootstrap?.({ kind: "get_pip", url: GET_PIP_URL }))) {
+          return {
+            code: null,
+            log: "pip bootstrap download declined",
+            cancelled: true,
+          };
         }
         const created = await runCommand(
           identity.executable,
@@ -327,7 +358,7 @@ function pipFreeBuilders(
 function ensurepipRemedy(identity: PythonIdentity): string {
   return [
     `${identity.executable} cannot create a virtual environment with pip: ensurepip is missing`,
-    "and no fallback (uv, virtualenv, or pip --python) was available.",
+    "and no approved fallback (uv, virtualenv, pip --python, or get-pip.py) succeeded.",
     "",
     "Fix with any one of:",
     `  sudo apt install python${identity.majorMinor}-venv`,
@@ -343,7 +374,7 @@ async function createManagedEnv(
   identity: PythonIdentity,
   envDir: string,
   output: { appendLine(s: string): void },
-  confirmNetworkBootstrap?: (url: string) => Promise<boolean>,
+  confirmNetworkBootstrap?: ConfirmNetworkBootstrap,
 ): Promise<void> {
   const stdlib = await runCommand(identity.executable, ["-m", "venv", envDir], output);
   if (stdlib.code === 0) return;
@@ -368,6 +399,10 @@ async function createManagedEnv(
       output.appendLine(`Managed Python environment created via ${builder.label}.`);
       return;
     }
+    if (result.cancelled) {
+      output.appendLine(`${builder.label} cancelled by user.`);
+      break;
+    }
     output.appendLine(`${builder.label} exited ${result.code}.`);
   }
   throw new Error(`${firstFailure}\n\n${ensurepipRemedy(identity)}`);
@@ -379,8 +414,8 @@ export async function ensureManagedPython(
   globalStoragePath: string,
   output: { appendLine(s: string): void },
   options?: {
-    /** Asked before pip is fetched from the network; omit to disable that fallback. */
-    confirmNetworkBootstrap?: (url: string) => Promise<boolean>;
+    /** Asked before bootstrap packages/code are fetched; omit to stay offline. */
+    confirmNetworkBootstrap?: ConfirmNetworkBootstrap;
   },
 ): Promise<string> {
   const identity = probePythonIdentity(basePython);

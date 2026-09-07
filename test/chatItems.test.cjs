@@ -89,5 +89,23 @@ test("a paged completion remains visible when its start is outside the restored 
     output: "failed",
     filePath: undefined,
     completedAt: 200_000,
+}]);
+});
+
+test("persisted file changes restore their diff and restore metadata", () => {
+  assert.deepEqual(eventsToItems([
+    {
+      kind: "files_changed",
+      files: [{
+        path: "src/app.ts",
+        snapshot_id: "snapshot-1",
+        snapshot_rel: "src/app.ts",
+      }],
+    },
+  ]), [{
+    kind: "file",
+    path: "src/app.ts",
+    snapshotId: "snapshot-1",
+    snapshotRel: "src/app.ts",
   }]);
 });
