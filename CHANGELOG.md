@@ -1,3 +1,9 @@
+# 1.0.187
+
+- Require clawagents 6.20.78 for Muse Glimmer reasoning-strength control, a smaller initial coding tool surface, and progress-aware recovery. Medium reasoning remains the default; explicit lower effort trades reasoning time for depth.
+- Include output-aware context budgeting for smaller servers, deadline-aware recovery, restoration of temporary output limits, and a single harness-owned retry budget through the updated engine.
+- Keep existing provider settings and endpoints; the extension upgrades the Python engine when its installed version is below the new floor.
+
 # 1.0.186
 
 - Require clawagents 6.20.77: the sidecar's Chat Completions path captures `reasoning_content`, recovers `max_tokens` cuts mid-reasoning, no longer hard-stops runs on repeated reads or edit-test cycles, escalates repeated identical tool failures, and defaults Meta to a 16K output budget. Workspace `.clawagents/profiles.json` files are now opt-in in the engine.

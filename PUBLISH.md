@@ -1,4 +1,8 @@
-Publisher **`clawagents`** · version **1.0.186**
+Publisher **`clawagents`** · version **1.0.187**
+
+- Release target: clawagents **6.20.78** and extension **1.0.187**. Glimmer reasoning-strength control, lean initial tools, output-aware context budgeting and bounded recovery; Python floor **6.20.78**.
+- Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
+
 
 - [x] clawagents **6.20.77** on PyPI + GitHub: reasoning-channel capture, output-limit recovery, non-fatal read repeats, workspace profile trust gate.
 - [x] GitHub release `v1.0.186` + VSIX: local Gemma readiness-probe hang fix, served Muse/Gemma aliases kept; Python floor **6.20.77**.
