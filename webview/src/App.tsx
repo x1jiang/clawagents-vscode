@@ -113,6 +113,8 @@ const RUN_SCOPED_EVENT_TYPES = new Set<HostToWebview["type"]>([
   "cancelled",
 ]);
 
+const THREADS_POPOVER_CLOSE_DELAY_MS = 180;
+
 function modelSupportsEffort(model: string): boolean {
   let m = model.trim().toLowerCase();
   if (!m) return false;
@@ -1360,12 +1362,31 @@ export function App() {
   const [threadsPopoverOpen, setThreadsPopoverOpen] = useState(false);
   const [threadsPopoverPinned, setThreadsPopoverPinned] = useState(false);
   const threadsTriggerRef = useRef<HTMLButtonElement>(null);
+  const threadsPopoverCloseTimerRef = useRef<number | undefined>(undefined);
   const [threadsPopoverPosition, setThreadsPopoverPosition] = useState<{
     left: number;
     top: number;
     width: number;
     maxHeight: number;
   } | null>(null);
+  const cancelThreadsPopoverClose = useCallback(() => {
+    if (threadsPopoverCloseTimerRef.current !== undefined) {
+      window.clearTimeout(threadsPopoverCloseTimerRef.current);
+      threadsPopoverCloseTimerRef.current = undefined;
+    }
+  }, []);
+  const openThreadsPopover = useCallback(() => {
+    cancelThreadsPopoverClose();
+    setThreadsPopoverOpen(true);
+  }, [cancelThreadsPopoverClose]);
+  const scheduleThreadsPopoverClose = useCallback(() => {
+    if (threadsPopoverPinned) return;
+    cancelThreadsPopoverClose();
+    threadsPopoverCloseTimerRef.current = window.setTimeout(() => {
+      threadsPopoverCloseTimerRef.current = undefined;
+      setThreadsPopoverOpen(false);
+    }, THREADS_POPOVER_CLOSE_DELAY_MS);
+  }, [cancelThreadsPopoverClose, threadsPopoverPinned]);
   const [panel, setPanel] = useState<Panel>("chat");
   const panelRef = useRef<Panel>("chat");
   const [forkNotice, setForkNotice] = useState<{ title: string; chatId: string } | null>(null);
@@ -1731,6 +1752,8 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [forkNotice]);
 
+  useEffect(() => cancelThreadsPopoverClose, [cancelThreadsPopoverClose]);
+
   useLayoutEffect(() => {
     if (!threadsPopoverOpen) {
       setThreadsPopoverPosition(null);
@@ -1771,12 +1794,14 @@ export function App() {
     const dismiss = (event: PointerEvent) => {
       const target = event.target as Element | null;
       if (!target?.closest(".threads-popover-root")) {
+        cancelThreadsPopoverClose();
         setThreadsPopoverOpen(false);
         setThreadsPopoverPinned(false);
       }
     };
     const dismissWithEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        cancelThreadsPopoverClose();
         setThreadsPopoverOpen(false);
         setThreadsPopoverPinned(false);
       }
@@ -1787,7 +1812,7 @@ export function App() {
       window.removeEventListener("pointerdown", dismiss);
       window.removeEventListener("keydown", dismissWithEscape);
     };
-  }, [threadsPopoverOpen]);
+  }, [cancelThreadsPopoverClose, threadsPopoverOpen]);
 
   useEffect(() => {
     // Returns true when an incoming streaming event belongs to a different
@@ -4504,17 +4529,15 @@ export function App() {
           {openConversationTabs.length ? (
             <div
               className="threads-popover-root"
-              onMouseEnter={() => setThreadsPopoverOpen(true)}
-              onMouseLeave={() => {
-                if (!threadsPopoverPinned) setThreadsPopoverOpen(false);
-              }}
-              onFocus={() => setThreadsPopoverOpen(true)}
+              onMouseEnter={openThreadsPopover}
+              onMouseLeave={scheduleThreadsPopoverClose}
+              onFocus={openThreadsPopover}
               onBlur={(event) => {
                 if (
                   !threadsPopoverPinned &&
                   !event.currentTarget.contains(event.relatedTarget as Node | null)
                 ) {
-                  setThreadsPopoverOpen(false);
+                  scheduleThreadsPopoverClose();
                 }
               }}
             >
@@ -4528,9 +4551,11 @@ export function App() {
                 title="Open threads"
                 onClick={() => {
                   if (threadsPopoverPinned) {
+                    cancelThreadsPopoverClose();
                     setThreadsPopoverOpen(false);
                     setThreadsPopoverPinned(false);
                   } else {
+                    cancelThreadsPopoverClose();
                     setThreadsPopoverOpen(true);
                     setThreadsPopoverPinned(true);
                   }
@@ -4555,6 +4580,8 @@ export function App() {
                       ? threadsPopoverPosition
                       : { visibility: "hidden" }
                   }
+                  onMouseEnter={openThreadsPopover}
+                  onMouseLeave={scheduleThreadsPopoverClose}
                 >
                   <div className="threads-popover-header">
                     <strong>Open threads</strong>
