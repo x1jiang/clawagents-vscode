@@ -296,6 +296,14 @@ export class GatewayClient {
     });
   }
 
+  getChatMeta(chatId: string) {
+    return requestJson<Record<string, unknown>>(
+      this.requireHandle(),
+      "GET",
+      `/chats/${encodeURIComponent(chatId)}/meta`,
+    );
+  }
+
   getChat(
     chatId: string,
     opts?: { tail?: number; before?: number; around?: number; all?: boolean },

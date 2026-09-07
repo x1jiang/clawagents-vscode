@@ -320,6 +320,35 @@ def get_chat(chat_id: str) -> dict[str, Any] | None:
     return _migrate_model_route(meta, path)
 
 
+def get_chat_meta(chat_id: str) -> dict[str, Any] | None:
+    """Return chat metadata plus an O(1) indication of persisted UI events.
+
+    This deliberately avoids ``read_ui_events_page``: callers that only need
+    to know whether a conversation is blank should not scan and parse its
+    entire JSONL transcript (twice) just to request ``tail=1``.
+    """
+    try:
+        meta_path = chat_meta_path(chat_id)
+    except ValueError:
+        return None
+    meta = read_json(meta_path, None)
+    if not isinstance(meta, dict):
+        return None
+    # Keep the lightweight path behaviourally aligned with ``get_chat``.
+    # Otherwise an empty legacy conversation can be reused without receiving
+    # the workspace's current model route.
+    meta = _migrate_model_route(meta, meta_path)
+    try:
+        has_ui_events = chat_ui_log_path(chat_id).stat().st_size > 0
+    except FileNotFoundError:
+        has_ui_events = False
+    except OSError:
+        # Be conservative: an unreadable log must never make an existing
+        # conversation look empty and therefore eligible for reuse.
+        has_ui_events = True
+    return {**meta, "has_ui_events": has_ui_events}
+
+
 def _ensure_session_cost(meta: dict[str, Any]) -> dict[str, Any]:
     """Backfill session_cost_usd from UI done-events when missing (pre-0.4.6 chats)."""
     if "session_cost_usd" in meta and meta.get("session_cost_usd") is not None:

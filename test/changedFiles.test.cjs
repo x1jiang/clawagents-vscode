@@ -15,7 +15,11 @@ buildSync({
   format: "cjs",
   logLevel: "silent",
 });
-const { collectTurnChangedFiles, isTurnTerminal } = require(outputFile);
+const {
+  collectPendingTurnChangedFiles,
+  collectTurnChangedFiles,
+  isTurnTerminal,
+} = require(outputFile);
 
 test.after(() => fs.rmSync(outputDir, { recursive: true, force: true }));
 
@@ -56,4 +60,41 @@ test("recognizes final status and error transcript entries", () => {
   assert.equal(isTurnTerminal("status", "Cancelled"), true);
   assert.equal(isTurnTerminal("error"), true);
   assert.equal(isTurnTerminal("status", "Running tool"), false);
+});
+
+test("collects one de-duplicated live summary until the turn finishes", () => {
+  const running = [
+    { kind: "user", text: "edit it" },
+    { kind: "file", path: "src/app.ts", snapshotId: "first" },
+    { kind: "tool" },
+    { kind: "file", path: "src/app.ts", snapshotId: "latest" },
+    { kind: "file", path: "src/test.ts" },
+  ];
+  assert.deepEqual(collectPendingTurnChangedFiles(running), [
+    { path: "src/app.ts", snapshotId: "latest", snapshotRel: undefined },
+    { path: "src/test.ts", snapshotId: undefined, snapshotRel: undefined },
+  ]);
+  assert.deepEqual(
+    collectPendingTurnChangedFiles([...running, { kind: "status", text: "Done" }]),
+    [],
+  );
+});
+
+test("a persisted turn summary appended after Done is included in the card", () => {
+  const items = [
+    { kind: "user", text: "edit it" },
+    { kind: "status", text: "Done" },
+    {
+      kind: "file",
+      path: "src/app.ts",
+      snapshotId: "snapshot-1",
+      snapshotRel: "src/app.ts",
+    },
+    { kind: "user", text: "next turn" },
+  ];
+  assert.deepEqual(collectTurnChangedFiles(items, 1), [{
+    path: "src/app.ts",
+    snapshotId: "snapshot-1",
+    snapshotRel: "src/app.ts",
+  }]);
 });

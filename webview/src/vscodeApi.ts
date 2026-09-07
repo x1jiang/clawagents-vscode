@@ -55,6 +55,23 @@ function previewApi(): VsCodeApi {
           chats: [{ id: "preview-main", title: "Implement side chat" }],
           settings: { provider: "openai", model: "gpt-5.6-terra" },
           providers: [],
+          diagnostics: {
+            ok: true,
+            checks: [
+              { name: "python", ok: true, detail: "3.13.14" },
+              { name: "workspace", ok: true, detail: "/preview/clawagents-vscode" },
+              { name: "clawagents", ok: true, detail: "6.20.1" },
+              { name: "api_key", ok: true, detail: "OpenAI configured" },
+              { name: "model", ok: true, detail: "gpt-5.6-terra" },
+              { name: "mcp_config", ok: false, detail: "none" },
+            ],
+          },
+          stats: {
+            turns: 4,
+            tokens: 1280,
+            errors: 0,
+            telemetry_enabled: false,
+          },
         });
       } else if (message.type === "open_side_chat") {
         emit({

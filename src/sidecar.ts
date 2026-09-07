@@ -10,7 +10,11 @@ import { ensureCompanions } from "./companionDeps";
 import { ensureSidecarDeps } from "./pythonDeps";
 import { pinPythonPathEnv } from "./pythonPathPin";
 import { StartGeneration } from "./startGeneration";
-import { clearManagedPythonFailures, ensureManagedPython } from "./managedPython";
+import {
+  clearManagedPythonFailures,
+  ensureManagedPython,
+  type NetworkBootstrapRequest,
+} from "./managedPython";
 
 export interface SidecarHandle {
   port: number;
@@ -112,28 +116,29 @@ export class SidecarManager {
       return basePython;
     }
     return ensureManagedPython(basePython, this.globalStoragePath, this.output, {
-      confirmNetworkBootstrap: (url) => this.confirmPipBootstrapDownload(url),
+      confirmNetworkBootstrap: (request) => this.confirmPipBootstrap(request),
     });
   }
 
-  /**
-   * Last-resort pip bootstrap runs a script fetched over the network, so it
-   * needs the same explicit consent as --break-system-packages.
-   */
-  private async confirmPipBootstrapDownload(url: string): Promise<boolean> {
+  /** Network-resolved Python bootstrap code always requires explicit consent. */
+  private async confirmPipBootstrap(request: NetworkBootstrapRequest): Promise<boolean> {
+    const viaPip = request.kind === "pip_install";
+    const action = viaPip ? "Install packages" : "Download get-pip.py";
+    const description = viaPip
+      ? `install pip, setuptools, and wheel into the isolated environment from ${request.url}`
+      : `download and run the official PyPA bootstrap script from ${request.url}`;
     const choice = await vscode.window.showWarningMessage(
       `This Python cannot create a virtual environment with pip, and no local fallback `
-      + `(uv, virtualenv, or pip) is available. Download and run the official PyPA `
-      + `bootstrap script from ${url}?`,
+      + `(uv or virtualenv) is available. ${description}?`,
       { modal: true, detail: "Alternative: install python3-venv, uv, or virtualenv, then retry." },
-      "Download get-pip.py",
+      action,
       "Cancel",
     );
-    const approved = choice === "Download get-pip.py";
+    const approved = choice === action;
     this.output.appendLine(
       approved
-        ? "User approved the network pip bootstrap."
-        : "User declined the network pip bootstrap.",
+        ? `User approved the ${viaPip ? "pip package" : "get-pip.py"} bootstrap.`
+        : `User declined the ${viaPip ? "pip package" : "get-pip.py"} bootstrap.`,
     );
     return approved;
   }

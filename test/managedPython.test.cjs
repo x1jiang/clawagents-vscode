@@ -99,6 +99,24 @@ test("pip --python support is gated on pip 22.3+", () => {
   assert.equal(managed.parsePipVersion("not pip output"), undefined);
 });
 
+test("pip bootstrap is isolated to the source shown in the consent prompt", () => {
+  assert.deepEqual(managed.pipBootstrapArgs("/state/env/bin/python"), [
+    "-m",
+    "pip",
+    "--isolated",
+    "--python",
+    "/state/env/bin/python",
+    "install",
+    "--index-url",
+    managed.PYPI_PIP_URL,
+    "--disable-pip-version-check",
+    "--upgrade",
+    "pip",
+    "setuptools",
+    "wheel",
+  ]);
+});
+
 test("creates and reuses an isolated virtual environment", { timeout: 30_000 }, async () => {
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "clawagents-managed-state-"));
   try {
@@ -154,6 +172,9 @@ function writeEnsurepiplessPython(dir, opts = {}) {
       "  echo 'The virtual environment was not created successfully because ensurepip is not available.' >&2",
       "  exit 1",
       "fi",
+      ...(opts.blockPip
+        ? ['if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi']
+        : []),
       'exec "$REAL" "$@"',
     ].join("\n"),
     { mode: 0o755 },
@@ -180,30 +201,34 @@ function withoutPathTools(state, fn) {
 }
 
 test(
-  "falls back to a pip-carrying builder when ensurepip is missing",
+  "pip --python fallback asks before resolving bootstrap packages",
   { timeout: 120_000, skip: posixOnly },
   async () => {
     const state = fs.mkdtempSync(path.join(os.tmpdir(), "clawagents-noensurepip-"));
     try {
       const shim = writeEnsurepiplessPython(state);
       if (!managed.pipCanTargetOtherInterpreter(REAL_PYTHON)) {
-        return; // Host has no pip 22.3+; the local-only fallback cannot apply.
+        return; // Host has no pip 22.3+; this fallback cannot apply.
       }
       const lines = [];
+      const requests = [];
       await withoutPathTools(state, async () => {
-        // No confirmNetworkBootstrap: this must succeed entirely offline.
-        const python = await managed.ensureManagedPython(shim, state, {
-          appendLine: (s) => lines.push(s),
-        });
-        assert.equal(fs.existsSync(python), true);
+        await assert.rejects(managed.ensureManagedPython(
+          shim,
+          state,
+          { appendLine: (s) => lines.push(s) },
+          {
+            confirmNetworkBootstrap: async (request) => {
+              requests.push(request);
+              return false;
+            },
+          },
+        ));
       });
       const log = lines.join("\n");
       assert.match(log, /ensurepip/);
-      // Must be the local pip --python builder, not a get-pip.py download.
-      assert.match(
-        log,
-        /Managed Python environment created via python -m venv --without-pip \+ pip --python/,
-      );
+      assert.deepEqual(requests, [{ kind: "pip_install", url: managed.PYPI_PIP_URL }]);
+      assert.match(log, /pip --python cancelled by user/);
       assert.doesNotMatch(log, /Downloading https/);
     } finally {
       fs.rmSync(state, { recursive: true, force: true });
@@ -254,22 +279,46 @@ test(
       await withoutPathTools(state, () =>
         assert.rejects(managed.ensureManagedPython(shim, state, record)),
       );
+      assert.match(lines.join("\n"), /Skipping python -m venv --without-pip \+ pip --python/);
       assert.match(lines.join("\n"), /Skipping python -m venv --without-pip \+ get-pip\.py/);
 
       // Callback supplied but declining: still no download.
-      let asked = 0;
+      const requests = [];
       await withoutPathTools(state, () =>
         assert.rejects(
           managed.ensureManagedPython(shim, state, record, {
-            confirmNetworkBootstrap: async () => {
-              asked += 1;
+            confirmNetworkBootstrap: async (request) => {
+              requests.push(request);
               return false;
             },
           }),
         ),
       );
-      assert.equal(asked, 1);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].kind, "pip_install");
       assert.doesNotMatch(lines.join("\n"), /Downloading https/);
+
+      // Without a capable host pip, consent applies to get-pip.py instead.
+      const noPipShim = writeEnsurepiplessPython(state, {
+        blockAllVenv: true,
+        blockVirtualenv: true,
+        blockPip: true,
+      });
+      const getPipRequests = [];
+      await withoutPathTools(state, () =>
+        assert.rejects(
+          managed.ensureManagedPython(noPipShim, state, record, {
+            confirmNetworkBootstrap: async (request) => {
+              getPipRequests.push(request);
+              return false;
+            },
+          }),
+        ),
+      );
+      assert.deepEqual(getPipRequests, [{
+        kind: "get_pip",
+        url: managed.GET_PIP_URL,
+      }]);
     } finally {
       fs.rmSync(state, { recursive: true, force: true });
     }

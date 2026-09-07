@@ -140,6 +140,19 @@ export function eventsToItems(
           completedAt,
         } satisfies RestoredToolItem);
       }
+    } else if (kind === "files_changed") {
+      const files = Array.isArray(event.files) ? event.files : [];
+      for (const candidate of files) {
+        const file = record(candidate);
+        const filePath = String(file?.path || "");
+        if (!filePath) continue;
+        items.push({
+          kind: "file",
+          path: filePath,
+          snapshotId: file?.snapshot_id ? String(file.snapshot_id) : undefined,
+          snapshotRel: file?.snapshot_rel ? String(file.snapshot_rel) : undefined,
+        });
+      }
     } else if (kind === "done") {
       const usage = record(event.usage);
       const runCost = usage?.run_cost_usd;

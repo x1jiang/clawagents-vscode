@@ -16,10 +16,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from chats import (
+    append_ui_event,
     create_chat,
     delete_chat,
     fork_chat,
     get_chat,
+    get_chat_meta,
     list_user_event_index,
     list_chats,
     patch_chat,
@@ -1252,6 +1254,16 @@ def create_app() -> FastAPI:
             title=body.title, mode=body.mode, model_route=body.model_route
         )
 
+    @app.get("/chats/{chat_id}/meta")
+    async def chats_get_meta(chat_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        meta = get_chat_meta(chat_id)
+        if not meta:
+            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+        return meta
+
     @app.get("/chats/{chat_id}")
     async def chats_get(chat_id: str, request: Request):
         denied = _auth_or_401(request)
@@ -1702,6 +1714,7 @@ def create_app() -> FastAPI:
         # tool_started args by call id, so tool_completed can resolve which
         # file changed even though the result event carries no args.
         pending_tool_args: dict[str, dict[str, Any]] = {}
+        changed_files: dict[str, dict[str, Any]] = {}
         try:
             from clawagents.permissions.mode import WRITE_CLASS_TOOLS
         except Exception:  # noqa: BLE001
@@ -1734,14 +1747,18 @@ def create_app() -> FastAPI:
                 fp = _extract_path(args)
                 if fp:
                     snap = latest_snapshot_for(fp)
+                    file_event = {
+                        "path": fp,
+                        "tool": name,
+                        "snapshot_id": snap.get("snapshot_id") if snap else None,
+                        "snapshot_rel": snap.get("rel") if snap else None,
+                    }
+                    # Assignment updates the latest snapshot without changing
+                    # first-seen order, matching the live summary in the UI.
+                    changed_files[fp] = file_event
                     sse(
                         "file_changed",
-                        {
-                            "path": fp,
-                            "tool": name,
-                            "snapshot_id": snap.get("snapshot_id") if snap else None,
-                            "snapshot_rel": snap.get("rel") if snap else None,
-                        },
+                        file_event,
                     )
 
         def before_tool_factory(*, mode: str, grants: GrantStore):
@@ -1881,6 +1898,13 @@ def create_app() -> FastAPI:
                 else:
                     sse("error", {"error": str(exc)})
             finally:
+                if changed_files:
+                    # One turn-level event survives thread switches
+                    # without filling the paginated UI log with every rewrite.
+                    append_ui_event(
+                        chat_id,
+                        {"kind": "files_changed", "files": list(changed_files.values())},
+                    )
                 stranded = _unregister_run(run_id)
                 if stranded:
                     sse(

@@ -117,7 +117,7 @@ test("late selection responses and old events cannot replace the current chat", 
 test("every run-scoped event, including the canonical final response, is stale-guarded", () => {
   const guarded = section(
     app,
-    'const runScopedEventTypes = new Set<HostToWebview["type"]>([',
+    'const RUN_SCOPED_EVENT_TYPES = new Set<HostToWebview["type"]>([',
     "]);",
   );
   for (const type of [
@@ -143,7 +143,7 @@ test("every run-scoped event, including the canonical final response, is stale-g
   }
   assert.match(
     app,
-    /runScopedEventTypes\.has\(msg\.type\) && isStaleEvent\(msg\)/,
+    /RUN_SCOPED_EVENT_TYPES\.has\(msg\.type\) && isStaleEvent\(msg\)/,
   );
 });
 

@@ -791,8 +791,29 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private async createOrReuseEmptyChat(): Promise<void> {
+    const operationStartedAt = Date.now();
+    const stageTimings: string[] = [];
+    const timed = async <T>(label: string, operation: () => Promise<T>): Promise<T> => {
+      const startedAt = Date.now();
+      try {
+        return await operation();
+      } finally {
+        stageTimings.push(`${label}=${Date.now() - startedAt}ms`);
+      }
+    };
+    const refreshChatsInBackground = (): void => {
+      const startedAt = Date.now();
+      void this.refreshChats().finally(() => {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed >= 250) {
+          this.sidecar.output.appendLine(
+            `[timing] New chat background refreshChats=${elapsed}ms`,
+          );
+        }
+      });
+    };
     try {
-      await this.sidecar.ensureStarted();
+      await timed("ensureStarted", () => this.sidecar.ensureStarted());
       const startedOn = this.chatId;
 
       // Once New has selected a genuinely blank conversation, keep using it
@@ -801,7 +822,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       // click must not silently discard text typed into the blank conversation.
       if (startedOn) {
         try {
-          const current = await this.gateway.getChat(startedOn, { tail: 1 });
+          const current = await timed("getChatMeta", () =>
+            this.gateway.getChatMeta(startedOn));
           if (this.chatId !== startedOn) {
             // User selected another conversation while getChat was in flight.
             await this.refreshChats();
@@ -809,17 +831,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           }
           if (
             Number(current.message_count) === 0 &&
-            Number(current.events_total) === 0
+            current.has_ui_events === false
           ) {
             const modelRoute =
               modelRouteFromChat(current) || this.modelRoutes.get(startedOn);
             if (modelRoute) this.modelRoutes.set(startedOn, modelRoute);
             this.eventsOffset = 0;
             this.eventsHasMore = false;
-            await this.refreshChats();
-            if (this.chatId !== startedOn) {
-              return;
-            }
             this.post({
               type: "restore",
               items: [],
@@ -834,7 +852,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               sessionCostUsd: 0,
               modelRoute,
             });
-            await this.persistLocal(this.persistState());
+            refreshChatsInBackground();
+            await timed("persistLocal", () => this.persistLocal(this.persistState()));
             return;
           }
         } catch {
@@ -847,7 +866,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
       }
 
-      const chat = await this.gateway.createChat(this.mode);
+      const chat = await timed("createChat", () => this.gateway.createChat(this.mode));
       if (this.chatId !== startedOn) {
         // User selected another conversation while createChat was in flight.
         await this.refreshChats();
@@ -858,10 +877,6 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (modelRoute) this.modelRoutes.set(this.chatId, modelRoute);
       this.eventsOffset = 0;
       this.eventsHasMore = false;
-      await this.refreshChats();
-      if (this.chatId !== String(chat.id)) {
-        return;
-      }
       this.post({
         type: "restore",
         items: [],
@@ -876,12 +891,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         sessionCostUsd: 0,
         modelRoute,
       });
-      await this.persistLocal(this.persistState());
+      refreshChatsInBackground();
+      await timed("persistLocal", () => this.persistLocal(this.persistState()));
     } catch (err) {
       this.post({
         type: "error",
         message: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      const elapsed = Date.now() - operationStartedAt;
+      if (elapsed >= 250) {
+        this.sidecar.output.appendLine(
+          `[timing] New chat total=${elapsed}ms (${stageTimings.join(", ")})`,
+        );
+      }
     }
   }
 

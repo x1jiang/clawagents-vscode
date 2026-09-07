@@ -15,6 +15,22 @@ test("History supports range and toggle selection with bulk actions", () => {
   assert.match(app, /type: "pin_chats"/);
   assert.match(app, /type: "archive_chats"/);
   assert.match(app, /Delete permanently\?/);
+  assert.match(app, /selectedChats\.length > 0 \? \(/);
+  assert.match(app, /historySelectionMode \|\| event\.metaKey \|\| event\.ctrlKey/);
+  assert.match(app, /historySelectionMode \? "Done" : "Select"/);
+  assert.match(app, /!historySelectionMode \? \(\s*<div className="chat-row-actions">/);
+  assert.match(app, />\s*Fork\s*<\/button>/);
+});
+
+test("History sections collapse, persist, and expand while searching", () => {
+  assert.match(app, /type HistorySectionKey = "pinned" \| "recent" \| "archived"/);
+  assert.match(app, /historySectionsExpanded/);
+  assert.match(app, /aria-expanded=\{expanded\}/);
+  assert.match(app, /hidden=\{!expanded\}/);
+  assert.match(app, /searching \|\| historySectionsExpanded\[key\]/);
+  assert.match(app, /renderHistorySection\("pinned", "Pinned", pinnedChats\)/);
+  assert.match(app, /renderHistorySection\("recent", "Recent", regularChats\)/);
+  assert.match(app, /renderHistorySection\("archived", "Archived", archivedChats\)/);
 });
 
 test("host batches mutations behind one refresh helper", () => {

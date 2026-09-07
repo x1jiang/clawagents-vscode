@@ -46,6 +46,10 @@ class TestSanitizePatch(unittest.TestCase):
         self.assertIn("allow_clinical_samples", RUNTIME_ONLY_KEYS)
         self.assertNotIn("allow_clinical_samples", PERSISTED_KEYS)
 
+    def test_context_observatory_defaults_off(self):
+        self.assertIs(DEFAULTS["context_observatory"], False)
+        self.assertIs(DEFAULTS["enable_context_observatory"], False)
+
 
 class TestSettingsRoundTrip(unittest.TestCase):
     def setUp(self):
