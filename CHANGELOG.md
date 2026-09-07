@@ -1,3 +1,7 @@
+# 1.0.188
+
+- Require clawagents 6.20.79, retaining the Glimmer improvements from 1.0.187 and correctly reporting worker deadlines on Python 3.10.
+
 # 1.0.187
 
 - Require clawagents 6.20.78 for Muse Glimmer reasoning-strength control, a smaller initial coding tool surface, and progress-aware recovery. Medium reasoning remains the default; explicit lower effort trades reasoning time for depth.
