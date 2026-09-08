@@ -1,7 +1,10 @@
-Publisher **`clawagents`** · version **1.0.188**
+Publisher **`clawagents`** · version **1.0.189**
 
-- Release target: clawagents **6.20.79** and extension **1.0.188**. Glimmer reasoning-strength control, lean initial tools, output-aware context budgeting and bounded recovery; Python floor **6.20.79**.
+- Release target: extension **1.0.189**. Conversation workflow and diagnostics updates, Threads hover-menu fix, and Settings Bedrock/duplicate-control fixes. Python floor remains **6.20.79**.
 - Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
+
+- [x] GitHub release `v1.0.189` + VSIX: conversation workflows, diagnostics, Threads hover, Settings Bedrock/duplicate-control fixes; Python floor **6.20.79**.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
 
 - [x] clawagents **6.20.77** on PyPI + GitHub: reasoning-channel capture, output-limit recovery, non-fatal read repeats, workspace profile trust gate.

@@ -19,6 +19,22 @@ test("thread model route is restored, patched, queued, and sent atomically", () 
   assert.match(app, /set_chat_model_route/);
   assert.match(app, /modelRoute: threadModelRouteRef\.current \?\? undefined/);
   assert.match(app, /Default model for new chats/);
+  assert.equal(
+    app.split("onChange={(e) => selectDefaultModel(e.target.value)}").length - 1,
+    1,
+    "Settings should render one default-model control, not a leftover duplicate",
+  );
+  assert.equal(
+    app.split("onChange={(e) => selectWireApi(e.target.value)}").length - 1,
+    1,
+    "Settings should render one Wire API control, not a leftover duplicate",
+  );
+  assert.match(app, /\{settingsProvider === "bedrock" && \(/);
+  assert.doesNotMatch(
+    app,
+    /selectedProvider === "bedrock" && \(/,
+    "Bedrock Settings UI must follow workspace settingsProvider, not the open thread",
+  );
   assert.match(app, /ModelRouteCapsule/);
   assert.match(capsule, /Reset to new-chat default/);
   assert.match(capsule, /onProviderChange/);

@@ -5207,50 +5207,6 @@ export function App() {
               </p>
             )}
             <label>
-              Model
-              <select
-                value={String(settings.model || "")}
-                title="Only models for providers with a saved key"
-                onChange={(e) => selectDefaultModel(e.target.value)}
-              >
-                <option value="">{providerModels.length ? "default" : "no key — Settings"}</option>
-                {Boolean(String(settings.model || "").trim()) &&
-                  !providerModels.some((m) => m.id === String(settings.model)) && (
-                    <option value={String(settings.model)}>
-                      {String(settings.model)} (unavailable)
-                    </option>
-                  )}
-                {providerModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label || m.id}
-                    {m.input_per_mtok != null
-                      ? ` · $${m.input_per_mtok}/$${m.output_per_mtok} per 1M`
-                      : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {modelSupportsEffort(String(settings.model || activeModelId || "")) && (
-              <label>
-                Effort
-                <select
-                  value={String(settings.reasoning_effort || "medium")}
-                  onChange={(e) => selectDefaultEffort(e.target.value)}
-                >
-                  {EFFORT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="settings-hint">
-                  Thinking depth for GPT-5.5/5.6 and o-series. Saved immediately.
-                  With Wire API = Responses (or Auto on GPT-5.5/5.6), Effort applies
-                  with tools.
-                </span>
-              </label>
-            )}
-            <label>
               {settingsProvider === "meta" ? "Base URL (required)" : "Base URL (optional — OpenAI-compatible / Ollama / BAG)"}
               <input
                 value={String(settings.base_url || "")}
@@ -5258,7 +5214,7 @@ export function App() {
                 placeholder={
                   settingsProvider === "meta"
                     ? "Enter your Meta server endpoint (https://host/v1)"
-                    : selectedProvider === "bedrock"
+                    : settingsProvider === "bedrock"
                     ? String(settings.bedrock_mode || "iam") === "mantle"
                       ? "https://bedrock-mantle.us-east-1.api.aws/v1"
                       : String(settings.bedrock_mode || "iam") === "bag"
@@ -5301,44 +5257,7 @@ export function App() {
                 Approve this endpoint when prompted before starting a chat.
               </p>
             )}
-            {(selectedProvider === "openai" ||
-              selectedProvider === "auto" ||
-              selectedProvider === "ollama" ||
-              selectedProvider === "bedrock") && (
-              <>
-                <label>
-                  Wire API
-                  <select
-                    value={String(settings.wire_api || "auto")}
-                    onChange={(e) => selectWireApi(e.target.value)}
-                  >
-                    <option value="auto">Auto (model decides)</option>
-                    <option value="responses">Responses (/v1/responses)</option>
-                    <option value="chat_completions">
-                      Chat Completions (/v1/chat/completions)
-                    </option>
-                  </select>
-                  <span className="settings-hint">
-                    {String(settings.bedrock_mode || "") === "mantle"
-                      ? "Mantle: model pick sets this (chat / responses). Claude Haiku/Sonnet ignore Wire API and use Mantle Messages."
-                      : "Use Responses for Codex / Responses-only gateways that 404 chat/completions. Auto picks Responses for GPT-5.5/5.6/Codex. Saved immediately."}
-                  </span>
-                </label>
-                <label className="row">
-                  <input
-                    type="checkbox"
-                    checked={settings.ssl_verify !== false}
-                    onChange={(e) => selectSslVerify(e.target.checked)}
-                  />
-                  Verify TLS certificates
-                  <span className="settings-hint">
-                    Uncheck for corporate proxies with a private CA (auto-off when
-                    you Trust a custom HTTPS base URL). Saved immediately.
-                  </span>
-                </label>
-              </>
-            )}
-            {selectedProvider === "bedrock" && (
+            {settingsProvider === "bedrock" && (
               <div className="provider-setup">
                 <h4 className="provider-setup-title">AWS Bedrock</h4>
                 <div className="access-mode">

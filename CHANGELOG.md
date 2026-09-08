@@ -1,6 +1,12 @@
-# Unreleased
+# 1.0.189
 
+- **Settings and diagnostics are easier to navigate.** Settings are grouped into anchored sections with autosave status, clearer provider connection state, compatibility controls, and a dedicated troubleshooting page. Diagnostic reports summarize core checks, keep raw details behind disclosure, and redact workspace plus macOS, Linux, and Windows user-home paths before copying.
+- **History and thread controls scale to larger workspaces.** Pinned, recent, and archived sections can collapse and remember their state; an explicit selection mode keeps batch actions out of the way until conversations are selected; the thread popover stays inside narrow viewports; and New restores immediately while the full history refreshes in the background.
+- **Edited files now stay compact and survive thread switches.** A turn shows one collapsed, de-duplicated file card instead of a row for every write. Expanding it exposes Open, Diff, and Restore per file; Restore asks before overwriting, and one file summary per turn is persisted with the local UI history.
+- **Managed Python bootstrap no longer reaches a package index silently.** Both the `pip --python` package fallback and `get-pip.py` require explicit confirmation; the package fallback is isolated to the displayed PyPI source, and the managed-environment tests no longer depend on network access or a warm pip cache.
 - Keep the Threads hover menu open briefly while the pointer moves from its trigger into the fixed-position menu, so its rows and actions are reliably clickable without first pinning it.
+- Fix Settings so AWS Bedrock access-mode and key controls follow the workspace provider, not the open thread's model route.
+- Remove duplicate Model, Effort, Wire API, and TLS controls left behind by the Settings provider refactor.
 
 # 1.0.188
 
@@ -50,10 +56,6 @@
 
 ## 1.0.180
 
-- **Settings and diagnostics are easier to navigate.** Settings are grouped into anchored sections with autosave status, clearer provider connection state, compatibility controls, and a dedicated troubleshooting page. Diagnostic reports summarize core checks, keep raw details behind disclosure, and redact workspace plus macOS, Linux, and Windows user-home paths before copying.
-- **History and thread controls scale to larger workspaces.** Pinned, recent, and archived sections can collapse and remember their state; an explicit selection mode keeps batch actions out of the way until conversations are selected; the thread popover stays inside narrow viewports; and New restores immediately while the full history refreshes in the background.
-- **Edited files now stay compact and survive thread switches.** A turn shows one collapsed, de-duplicated file card instead of a row for every write. Expanding it exposes Open, Diff, and Restore per file; Restore asks before overwriting, and one file summary per turn is persisted with the local UI history.
-- **Managed Python bootstrap no longer reaches a package index silently.** Both the `pip --python` package fallback and `get-pip.py` require explicit confirmation; the package fallback is isolated to the displayed PyPI source, and the managed-environment tests no longer depend on network access or a warm pip cache.
 - **Context meter now knows the real window for every model in the picker.** The meter assumed 200K for all Claude Opus/Sonnet 4.x and showed nothing for Claude 5-series, Grok, Bedrock/Mantle-prefixed ids or third-party Mantle models. It now normalizes ids the same way cost estimation does (`us.anthropic.…-v1:0`, `openai.…`, `zai.…`) and uses vendor-documented windows: Opus 4.6/4.7/4.8, Opus 5, Sonnet 4.6, Sonnet 5, Fable 5 → 1M; Sonnet 4.5 / Haiku 4.5 / Opus 4.5 → 200K; Grok 4.5 500K, Grok 4.3 / 4.20 1M, Grok Build 256K; DeepSeek V3.2 164K, Kimi K2.5 256K, GLM-5 200K, gpt-oss 128K, Nova Pro/Lite 300K.
 - **Sidecar floor bumped to clawagents 6.20.71.** The Python side received the same context-window corrections (Opus 4.6+ was compacting at a 200K budget; Sonnet 4.5 was budgeted at 1M; Gemini Pro at 2M instead of 1M), gains profiles for `gemini-3.8-flash` and the Mantle third-party ids, and fixes Bedrock `us.anthropic.…` ids never matching a profile. Python 3.14 is now in its CI matrix.
 
