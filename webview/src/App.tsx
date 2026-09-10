@@ -309,6 +309,7 @@ type ConversationTab = {
 };
 
 type SideChat = {
+  parentChatId: string;
   chatId: string;
   title: string;
   mode: AgentMode;
@@ -316,6 +317,11 @@ type SideChat = {
   items: ChatItem[];
   busy: boolean;
   minimized: boolean;
+  /** Composer and frame state stay with this side chat while its parent is hidden. */
+  draft: string;
+  width?: number;
+  height?: number;
+  maximized?: boolean;
   /** Vertical position of the minimized side-chat launcher, in viewport pixels. */
   peekY?: number;
 };
@@ -391,6 +397,24 @@ function persistedHistorySectionsExpanded(): HistorySectionsExpanded {
     };
   } catch {
     return DEFAULT_HISTORY_SECTIONS_EXPANDED;
+  }
+}
+
+const DISMISSED_JOB_IDS_STATE_KEY = "dismissedBackgroundJobIds";
+const MAX_PERSISTED_DISMISSED_JOBS = 200;
+
+function persistedDismissedJobIds(): Set<string> {
+  try {
+    const saved = getVsCodeApi().getState() as Record<string, unknown> | undefined;
+    const value = saved?.[DISMISSED_JOB_IDS_STATE_KEY];
+    if (!Array.isArray(value)) return new Set();
+    return new Set(
+      value
+        .filter((jobId): jobId is string => typeof jobId === "string" && Boolean(jobId.trim()))
+        .slice(-MAX_PERSISTED_DISMISSED_JOBS),
+    );
+  } catch {
+    return new Set();
   }
 }
 
@@ -548,19 +572,25 @@ function formatCompletionStatus(status?: string): string {
 type PinnedContextProps = {
   text: string;
   draft: string;
+  allConversations: boolean;
+  canSave: boolean;
   editing: boolean;
   onDraft: (value: string) => void;
+  onAllConversations: (value: boolean) => void;
   onEdit: () => void;
   onCancel: () => void;
   onSave: () => void;
 };
 
-/** Small composer affordance for instructions injected into every LLM round. */
+/** Composer affordance for conversation-scoped or opt-in global instructions. */
 const PinnedContext = memo(function PinnedContext({
   text,
   draft,
+  allConversations,
+  canSave,
   editing,
   onDraft,
+  onAllConversations,
   onEdit,
   onCancel,
   onSave,
@@ -578,15 +608,17 @@ const PinnedContext = memo(function PinnedContext({
         className="always-on-trigger"
         onClick={onEdit}
         aria-expanded={editing}
-        title={text.trim() ? "Edit always-on context" : "Add always-on context"}
+        title={text.trim() ? "Edit add-on context" : "Add context for this conversation"}
       >
         <IconPin size={13} />
-        <span>Always-on context</span>
+        <span>
+          Add-on context · {allConversations ? "All conversations" : "This conversation"}
+        </span>
       </button>
       {editing && (
         <div className="always-on-popover">
           <div className="always-on-head">
-            <strong>Always-on context</strong>
+            <strong>Add-on context</strong>
             <span className={remaining < 0 ? "pinned-count over" : "pinned-count"}>{remaining} left</span>
           </div>
           <textarea
@@ -595,15 +627,30 @@ const PinnedContext = memo(function PinnedContext({
             autoFocus
             rows={4}
             maxLength={PINNED_CONTEXT_MAX_CHARS}
-            placeholder={"Sent with every message. For example:\n• Use the .venv at repo root\n• Follow the project instructions"}
+            placeholder={`Sent with every message ${allConversations ? "in every conversation" : "in this conversation"}. For example:\n• Use the .venv at repo root\n• Follow the project instructions`}
             onChange={(e) => onDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") { e.preventDefault(); onCancel(); }
               else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onSave(); }
             }}
           />
+          <label className="always-on-global-toggle">
+            <input
+              type="checkbox"
+              checked={allConversations}
+              onChange={(event) => onAllConversations(event.target.checked)}
+            />
+            <span>
+              <strong>Use in every conversation</strong>
+              <small>
+                {canSave
+                  ? "Off by default. When enabled, this value is shared across the workspace."
+                  : "Start a conversation to save locally, or enable this to save workspace-wide."}
+              </small>
+            </span>
+          </label>
           <div className="pinned-actions">
-            <button type="button" className="primary tiny" onClick={onSave}>Save</button>
+            <button type="button" className="primary tiny" disabled={!canSave} onClick={onSave}>Save</button>
             <button type="button" className="ghost tiny" onClick={onCancel}>Close</button>
           </div>
         </div>
@@ -620,8 +667,13 @@ type BackgroundJobsProps = {
   onShow: (jobId: string) => void;
   onStop: (jobId: string) => void;
   onReport: (jobId: string) => void;
+  onDismiss: (jobId: string) => void;
+  onDismissFinished: () => void;
   onCloseDetail: () => void;
 };
+
+const JOB_DETAIL_REFRESH_MS = 3_000;
+const JOB_STOP_RETRY_MS = 12_000;
 
 function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -648,30 +700,108 @@ const BackgroundJobs = memo(function BackgroundJobs({
   onShow,
   onStop,
   onReport,
+  onDismiss,
+  onDismissFinished,
   onCloseDetail,
 }: BackgroundJobsProps) {
   const running = jobs.filter((j) => j.running);
   const finished = jobs.filter((j) => !j.running);
   const failed = finished.filter((j) => !j.cancelled && j.exit_code !== 0);
+  const [stopping, setStopping] = useState<Set<string>>(() => new Set());
+  const onShowRef = useRef(onShow);
+  const stopRetryTimersRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    onShowRef.current = onShow;
+  }, [onShow]);
+
+  useEffect(() => {
+    if (!detail?.running) return;
+    const timer = window.setInterval(
+      () => onShowRef.current(detail.job_id),
+      JOB_DETAIL_REFRESH_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [detail?.job_id, detail?.running]);
+
+  useEffect(() => {
+    setStopping((previous) => {
+      const stillRunning = new Set(running.map((job) => job.job_id));
+      for (const [jobId, timer] of stopRetryTimersRef.current) {
+        if (!stillRunning.has(jobId)) {
+          window.clearTimeout(timer);
+          stopRetryTimersRef.current.delete(jobId);
+        }
+      }
+      const next = new Set([...previous].filter((jobId) => stillRunning.has(jobId)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [jobs]);
+
+  useEffect(() => () => {
+    for (const timer of stopRetryTimersRef.current.values()) window.clearTimeout(timer);
+    stopRetryTimersRef.current.clear();
+  }, []);
+
+  const requestStop = (jobId: string) => {
+    setStopping((previous) => new Set(previous).add(jobId));
+    const priorTimer = stopRetryTimersRef.current.get(jobId);
+    if (priorTimer != null) window.clearTimeout(priorTimer);
+    const timer = window.setTimeout(() => {
+      stopRetryTimersRef.current.delete(jobId);
+      setStopping((previous) => {
+        if (!previous.has(jobId)) return previous;
+        const next = new Set(previous);
+        next.delete(jobId);
+        return next;
+      });
+    }, JOB_STOP_RETRY_MS);
+    stopRetryTimersRef.current.set(jobId, timer);
+    onStop(jobId);
+  };
+
+  const copyJobOutput = () => {
+    if (!detail) return;
+    const body = [
+      `Command: ${detail.command}`,
+      detail.stdout.trim() ? `stdout:\n${detail.stdout.trimEnd()}` : "",
+      detail.stderr.trim() ? `stderr:\n${detail.stderr.trimEnd()}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    void copyText(body);
+  };
 
   return (
     <div className="banner jobs-banner">
-      <button
-        type="button"
-        className="jobs-summary"
-        onClick={onToggle}
-        aria-expanded={open}
-        title="Background jobs started from this workspace"
-      >
-        {running.length > 0 ? <span className="dot running" /> : <span className="dot done" />}
-        <span>
-          {running.length > 0
-            ? `${running.length} background job${running.length > 1 ? "s" : ""} running`
-            : `${finished.length} background job${finished.length > 1 ? "s" : ""} finished`}
-        </span>
-        {failed.length > 0 && <span className="fail">{failed.length} failed</span>}
-        <span className="jobs-caret">{open ? "▾" : "▸"}</span>
-      </button>
+      <div className="jobs-summary-row">
+        <button
+          type="button"
+          className="jobs-summary"
+          onClick={onToggle}
+          aria-expanded={open}
+          title="Background jobs started from this workspace"
+        >
+          {running.length > 0 ? <span className="dot running" /> : <span className="dot done" />}
+          <span>
+            {running.length > 0
+              ? `${running.length} background job${running.length > 1 ? "s" : ""} running`
+              : `${finished.length} background job${finished.length > 1 ? "s" : ""} finished`}
+          </span>
+          {failed.length > 0 && <span className="fail">{failed.length} failed</span>}
+          <span className="jobs-caret">{open ? "▾" : "▸"}</span>
+        </button>
+        {finished.length > 0 && (
+          <button
+            type="button"
+            className="ghost tiny jobs-clear"
+            onClick={onDismissFinished}
+            title="Hide all finished jobs from this banner"
+          >
+            Clear finished
+          </button>
+        )}
+      </div>
 
       {open && (
         <ul className="jobs-list">
@@ -694,21 +824,37 @@ const BackgroundJobs = memo(function BackgroundJobs({
               </span>
               <span className="jobs-row-actions">
                 <button type="button" className="ghost tiny" onClick={() => onShow(job.job_id)}>
-                  Output
+                  Logs
                 </button>
                 {job.running ? (
-                  <button type="button" className="ghost tiny" onClick={() => onStop(job.job_id)}>
-                    Stop
-                  </button>
-                ) : (
                   <button
                     type="button"
                     className="ghost tiny"
-                    onClick={() => onReport(job.job_id)}
-                    title="Put this job's result back into the conversation"
+                    disabled={stopping.has(job.job_id)}
+                    onClick={() => requestStop(job.job_id)}
+                    title="Stop this process; it will be force-killed if it ignores the stop signal"
                   >
-                    Send to agent
+                    {stopping.has(job.job_id) ? "Stopping…" : "Stop"}
                   </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="ghost tiny"
+                      onClick={() => onReport(job.job_id)}
+                      title="Put this job's result back into the conversation"
+                    >
+                      Send to agent
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost tiny"
+                      onClick={() => onDismiss(job.job_id)}
+                      title="Hide this finished job from the banner"
+                    >
+                      Dismiss
+                    </button>
+                  </>
                 )}
               </span>
             </li>
@@ -720,16 +866,63 @@ const BackgroundJobs = memo(function BackgroundJobs({
         <div className="jobs-detail">
           <div className="jobs-detail-head">
             <code>{detail.command}</code>
-            <button type="button" className="ghost tiny" onClick={onCloseDetail}>
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={() => onShow(detail.job_id)}
+              title="Refresh status and captured output"
+            >
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={copyJobOutput}
+              disabled={!detail.stdout.trim() && !detail.stderr.trim()}
+              title="Copy captured stdout and stderr"
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={onCloseDetail}
+              title="Close logs"
+              aria-label="Close logs"
+            >
               ✕
             </button>
           </div>
-          {detail.stdout.trim() && <pre className="jobs-output">{detail.stdout.trimEnd()}</pre>}
+          <div className="jobs-detail-meta">
+            <span>
+              {detail.running
+                ? "Running"
+                : detail.cancelled
+                  ? "Stopped"
+                  : `Exit ${detail.exit_code}`}
+            </span>
+            <span>{formatElapsed(detail.elapsed_ms)}</span>
+            {detail.pid != null && <span>PID {detail.pid}</span>}
+            {detail.cwd && <code title={detail.cwd}>{detail.cwd}</code>}
+          </div>
+          {detail.stdout.trim() && (
+            <div className="jobs-log-stream">
+              <div className="jobs-log-label">stdout</div>
+              <pre className="jobs-output">{detail.stdout.trimEnd()}</pre>
+            </div>
+          )}
           {detail.stderr.trim() && (
-            <pre className="jobs-output jobs-stderr">{detail.stderr.trimEnd()}</pre>
+            <div className="jobs-log-stream">
+              <div className="jobs-log-label">stderr</div>
+              <pre className="jobs-output jobs-stderr">{detail.stderr.trimEnd()}</pre>
+            </div>
           )}
           {!detail.stdout.trim() && !detail.stderr.trim() && (
-            <div className="jobs-hint">No output captured yet.</div>
+            <div className="jobs-hint">
+              {detail.running
+                ? "No output captured yet. This view refreshes automatically while the job runs."
+                : "This job produced no captured output."}
+            </div>
           )}
         </div>
       )}
@@ -1089,6 +1282,9 @@ function SideChatOverlay({
   onClose,
   onMinimize,
   onPeekYChange,
+  onDraftChange,
+  onResize,
+  onToggleMaximized,
 }: {
   sideChat: SideChat;
   hasApiKey: boolean;
@@ -1097,8 +1293,10 @@ function SideChatOverlay({
   onClose: () => void;
   onMinimize: () => void;
   onPeekYChange: (y: number) => void;
+  onDraftChange: (draft: string) => void;
+  onResize: (width: number, height: number) => void;
+  onToggleMaximized: () => void;
 }) {
-  const [draft, setDraft] = useState("");
   const sideChatBottomRef = useRef<HTMLDivElement>(null);
   const peekDragRef = useRef<{
     pointerId: number;
@@ -1107,6 +1305,55 @@ function SideChatOverlay({
     moved: boolean;
   } | null>(null);
   const suppressPeekClickRef = useRef(false);
+  const resizeDragRef = useRef<{
+    pointerId: number;
+    startPointerX: number;
+    startPointerY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+
+  const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || sideChat.maximized) return;
+    const frame = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!frame) return;
+    event.preventDefault();
+    resizeDragRef.current = {
+      pointerId: event.pointerId,
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
+      startWidth: frame.width,
+      startHeight: frame.height,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const maxWidth = Math.max(1, window.innerWidth - 24);
+    const maxHeight = Math.max(1, window.innerHeight - 24);
+    const minWidth = Math.min(280, maxWidth);
+    const minHeight = Math.min(260, maxHeight);
+    const width = Math.max(
+      minWidth,
+      Math.min(maxWidth, drag.startWidth - (event.clientX - drag.startPointerX)),
+    );
+    const height = Math.max(
+      minHeight,
+      Math.min(maxHeight, drag.startHeight - (event.clientY - drag.startPointerY)),
+    );
+    onResize(Math.round(width), Math.round(height));
+  };
+
+  const endResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    resizeDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
 
   const beginPeekDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
@@ -1182,17 +1429,40 @@ function SideChatOverlay({
     );
   }
   const submit = () => {
-    const text = draft.trim();
+    const text = sideChat.draft.trim();
     if (!text || sideChat.busy || !hasApiKey) return;
-    setDraft("");
+    onDraftChange("");
     onSend(text);
   };
   const pendingChangedFiles = collectPendingTurnChangedFiles(sideChat.items);
   return (
-    <aside className="side-chat" aria-label="Temporary side chat">
+    <aside
+      className={`side-chat${sideChat.maximized ? " maximized" : ""}`}
+      style={sideChat.maximized ? undefined : { width: sideChat.width, height: sideChat.height }}
+      aria-label={`Side chat for ${sideChat.title}`}
+    >
+      <div
+        className="side-chat-resize-handle"
+        role="separator"
+        aria-label="Resize side chat"
+        title="Drag to resize side chat"
+        onPointerDown={beginResize}
+        onPointerMove={moveResize}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+      />
       <header className="side-chat-head">
         <span title={sideChat.title}><IconFork size={14} /> Side chat</span>
         <div>
+          <button
+            type="button"
+            className="ghost tiny"
+            onClick={onToggleMaximized}
+            title={sideChat.maximized ? "Restore side chat size" : "Maximize side chat"}
+            aria-label={sideChat.maximized ? "Restore side chat size" : "Maximize side chat"}
+          >
+            {sideChat.maximized ? "❐" : "□"}
+          </button>
           <button type="button" className="ghost tiny" onClick={onMinimize} title="Minimize side chat">—</button>
           <button type="button" className="ghost tiny" onClick={onClose} title="Close and delete side chat">✕</button>
         </div>
@@ -1246,10 +1516,10 @@ function SideChatOverlay({
         <div className="side-chat-compose-shell">
           <textarea
             rows={2}
-            value={draft}
+            value={sideChat.draft}
             disabled={sideChat.busy || !hasApiKey}
             placeholder={hasApiKey ? "Ask the fork…" : "Add a provider API key first"}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
@@ -1263,7 +1533,7 @@ function SideChatOverlay({
               className="icon-btn primary send"
               title={sideChat.busy ? "Working…" : "Send (Enter)"}
               aria-label={sideChat.busy ? "Working" : "Send"}
-              disabled={!draft.trim() || sideChat.busy || !hasApiKey}
+              disabled={!sideChat.draft.trim() || sideChat.busy || !hasApiKey}
               onClick={submit}
             >
               {sideChat.busy ? <IconSpinner /> : <IconSend />}
@@ -1336,8 +1606,9 @@ export function App() {
   /** Owner stashed by beginDraftHandoff so a failed fork/new/select can resume persist. */
   const draftOwnerBeforeNavRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
-  const [sideChat, setSideChat] = useState<SideChat | null>(null);
-  const sideChatRef = useRef<SideChat | null>(null);
+  const [sideChats, setSideChats] = useState<Record<string, SideChat>>({});
+  const sideChatsRef = useRef<Record<string, SideChat>>({});
+  const sideChat = chatId ? sideChats[chatId] ?? null : null;
   const [historyQuery, setHistoryQuery] = useState("");
   const [historySearching, setHistorySearching] = useState(false);
   const [historySectionsExpanded, setHistorySectionsExpanded] =
@@ -1417,14 +1688,18 @@ export function App() {
     runCostUsd?: number;
   }>({});
   const [compactPhase, setCompactPhase] = useState<string | undefined>();
-  // Always-on context the user pinned above the chat. `pinnedText` is what the
-  // host has stored; `pinnedDraft` is the in-progress edit, kept separate so a
-  // host echo cannot overwrite what is being typed.
+  // Add-on context shown above the chat. The stored text/scope are kept apart
+  // from the in-progress edit so a host echo cannot overwrite what is typed.
   const [pinnedText, setPinnedText] = useState("");
   const [pinnedDraft, setPinnedDraft] = useState("");
+  const [pinnedAllConversations, setPinnedAllConversations] = useState(false);
+  const [pinnedDraftAllConversations, setPinnedDraftAllConversations] = useState(false);
   const [pinnedEditing, setPinnedEditing] = useState(false);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [jobsOpen, setJobsOpen] = useState(false);
+  const [dismissedJobIds, setDismissedJobIds] = useState<Set<string>>(
+    persistedDismissedJobIds,
+  );
   const [jobDetail, setJobDetail] = useState<
     (JobSummary & { stdout: string; stderr: string }) | null
   >(null);
@@ -1721,9 +1996,27 @@ export function App() {
     chatIdRef.current = chatId;
   }, [chatId]);
 
+  const replaceSideChat = useCallback((
+    parentChatId: string,
+    replacement: SideChat | null | ((current: SideChat) => SideChat | null),
+  ) => {
+    const current = sideChatsRef.current;
+    const existing = current[parentChatId];
+    const nextSideChat = typeof replacement === "function"
+      ? existing ? replacement(existing) : null
+      : replacement;
+    if (nextSideChat === existing) return;
+    const next = { ...current };
+    if (nextSideChat) next[parentChatId] = nextSideChat;
+    else delete next[parentChatId];
+    // Make routing changes visible synchronously between closely spaced events.
+    sideChatsRef.current = next;
+    setSideChats(next);
+  }, []);
+
   useEffect(() => {
-    sideChatRef.current = sideChat;
-  }, [sideChat]);
+    sideChatsRef.current = sideChats;
+  }, [sideChats]);
 
   useEffect(() => {
     const api = getVsCodeApi();
@@ -1733,8 +2026,11 @@ export function App() {
       conversationTabs: openConversationTabs,
       [THREAD_UNREAD_STATE_KEY]: serializeUnreadThreads(unreadChatIds),
       historySectionsExpanded,
+      [DISMISSED_JOB_IDS_STATE_KEY]: [...dismissedJobIds].slice(
+        -MAX_PERSISTED_DISMISSED_JOBS,
+      ),
     });
-  }, [historySectionsExpanded, openConversationTabs, unreadChatIds]);
+  }, [dismissedJobIds, historySectionsExpanded, openConversationTabs, unreadChatIds]);
 
   useEffect(() => {
     const acknowledgeVisibleThread = () => {
@@ -1826,9 +2122,13 @@ export function App() {
 
     const applySideChatEvent = (msg: HostToWebview): boolean => {
       const owner = (msg as { chatId?: string }).chatId;
-      if (!owner || sideChatRef.current?.chatId !== owner) return false;
-      setSideChat((current) => {
-        if (!current || current.chatId !== owner) return current;
+      if (!owner) return false;
+      const parentChatId = Object.keys(sideChatsRef.current).find(
+        (candidate) => sideChatsRef.current[candidate]?.chatId === owner,
+      );
+      if (!parentChatId) return false;
+      replaceSideChat(parentChatId, (current) => {
+        if (current.chatId !== owner) return current;
         const append = (item: ChatItem) => ({ ...current, items: [...current.items, item] });
         switch (msg.type) {
           case "thread_run_state": return { ...current, busy: msg.running };
@@ -1957,6 +2257,7 @@ export function App() {
         case "side_chat_open":
           {
             const nextSideChat: SideChat = {
+            parentChatId: msg.parentChatId,
             chatId: msg.chatId,
             title: msg.title || "Forked conversation",
             mode: msg.mode,
@@ -1964,11 +2265,11 @@ export function App() {
             items: (msg.items as ChatItem[]) || [],
             busy: false,
             minimized: false,
+            draft: "",
             };
             // A user can submit immediately after the overlay is painted;
-            // make the event owner visible before the state effect runs.
-            sideChatRef.current = nextSideChat;
-            setSideChat(nextSideChat);
+            // make the event owner visible before React's state effect runs.
+            replaceSideChat(msg.parentChatId, nextSideChat);
           }
           break;
         case "ready":
@@ -2365,6 +2666,7 @@ export function App() {
           }
           const restoredChatId =
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
+          setPinnedEditing(false);
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
           setQueryIndex([]);
@@ -2691,11 +2993,16 @@ export function App() {
           break;
         }
         case "pinned": {
+          if (msg.chatId && msg.chatId !== chatIdRef.current) break;
           setPinnedText(msg.text || "");
+          setPinnedAllConversations(Boolean(msg.allConversations));
           // Do not clobber an edit in flight — the host echoes on every save,
           // and the user may already be typing the next revision.
           setPinnedEditing((editing) => {
-            if (!editing) setPinnedDraft(msg.text || "");
+            if (!editing) {
+              setPinnedDraft(msg.text || "");
+              setPinnedDraftAllConversations(Boolean(msg.allConversations));
+            }
             return editing;
           });
           break;
@@ -2927,7 +3234,7 @@ export function App() {
     window.addEventListener("message", onMessage);
     post({ type: "ready" });
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [replaceSideChat]);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -3103,9 +3410,13 @@ export function App() {
     return () => window.clearTimeout(historySearchTimer.current);
   }, [historyQuery, panel]);
 
+  const hiddenSideChatIds = useMemo(
+    () => new Set(Object.values(sideChats).map((entry) => entry.chatId)),
+    [sideChats],
+  );
   const visibleChats = useMemo(
-    () => chats.filter((c) => !c.archived && c.id !== sideChat?.chatId),
-    [chats, sideChat?.chatId],
+    () => chats.filter((c) => !c.archived && !hiddenSideChatIds.has(c.id)),
+    [chats, hiddenSideChatIds],
   );
   const pinnedChats = useMemo(
     () => visibleChats.filter((c) => c.pinned),
@@ -3116,8 +3427,8 @@ export function App() {
     [visibleChats],
   );
   const archivedChats = useMemo(
-    () => chats.filter((c) => c.archived),
-    [chats],
+    () => chats.filter((c) => c.archived && !hiddenSideChatIds.has(c.id)),
+    [chats, hiddenSideChatIds],
   );
   const orderedHistoryChats = useMemo(
     () => [...pinnedChats, ...regularChats, ...archivedChats],
@@ -4202,10 +4513,7 @@ export function App() {
                     <button
                       type="button"
                       role="menuitem"
-                      disabled={busy}
-                      title={busy ? "Stop the current run before forking" : undefined}
                       onClick={() => {
-                        if (busy) return;
                         setOpenChatMenuId(undefined);
                         setPendingDeleteChatId(undefined);
                         pendingForkRef.current = true;
@@ -4646,9 +4954,9 @@ export function App() {
             </div>
           ) : null}
         </nav>
-        {panel === "chat" && jobs.length > 0 && (
+        {panel === "chat" && jobs.some((job) => !dismissedJobIds.has(job.job_id)) && (
           <BackgroundJobs
-            jobs={jobs}
+            jobs={jobs.filter((job) => !dismissedJobIds.has(job.job_id))}
             open={jobsOpen}
             detail={jobDetail}
             onToggle={() => {
@@ -4658,6 +4966,15 @@ export function App() {
             onShow={(jobId) => post({ type: "job_output", jobId })}
             onStop={(jobId) => post({ type: "stop_job", jobId })}
             onReport={(jobId) => post({ type: "report_job", jobId })}
+            onDismiss={(jobId) => {
+              setDismissedJobIds((previous) => new Set(previous).add(jobId));
+              if (jobDetail?.job_id === jobId) setJobDetail(null);
+            }}
+            onDismissFinished={() => {
+              const finishedIds = jobs.filter((job) => !job.running).map((job) => job.job_id);
+              setDismissedJobIds((previous) => new Set([...previous, ...finishedIds]));
+              if (jobDetail && finishedIds.includes(jobDetail.job_id)) setJobDetail(null);
+            }}
             onCloseDetail={() => setJobDetail(null)}
           />
         )}
@@ -7141,10 +7458,10 @@ export function App() {
                   Conversation ▾
                 </button>
                 {conversationMenuOpen && <div className="composer-menu conversation-menu">
-                  <button type="button" disabled={busy} onClick={() => { beginDraftHandoff(); pendingNewChatRef.current = true; post({ type: "new_chat" }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
+                  <button type="button" onClick={() => { beginDraftHandoff(); pendingNewChatRef.current = true; post({ type: "new_chat" }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
                     <IconMessageCirclePlus size={14} /><span>New chat</span>
                   </button>
-                  <button type="button" disabled={busy || !items.length} onClick={() => { pendingForkRef.current = true; beginDraftHandoff(); post({ type: "fork_chat" }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
+                  <button type="button" disabled={!items.length} onClick={() => { pendingForkRef.current = true; beginDraftHandoff(); post({ type: "fork_chat" }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
                     <IconFork size={14} /><span>Fork to new chat</span>
                   </button>
                   <button type="button" disabled={!chatId || Boolean(sideChat)} onClick={() => { post({ type: "open_side_chat", chatId }); setConversationMenuPinned(false); setConversationMenuOpen(false); }}>
@@ -7272,18 +7589,28 @@ export function App() {
                 <PinnedContext
                   text={pinnedText}
                   draft={pinnedDraft}
+                  allConversations={pinnedDraftAllConversations}
+                  canSave={Boolean(chatId) || pinnedDraftAllConversations}
                   editing={pinnedEditing}
                   onDraft={setPinnedDraft}
+                  onAllConversations={setPinnedDraftAllConversations}
                   onEdit={() => {
                     setPinnedDraft(pinnedText);
+                    setPinnedDraftAllConversations(pinnedAllConversations);
                     setPinnedEditing(true);
                   }}
                   onCancel={() => {
                     setPinnedDraft(pinnedText);
+                    setPinnedDraftAllConversations(pinnedAllConversations);
                     setPinnedEditing(false);
                   }}
                   onSave={() => {
-                    post({ type: "save_pinned", text: pinnedDraft.slice(0, PINNED_CONTEXT_MAX_CHARS) });
+                    post({
+                      type: "save_pinned",
+                      text: pinnedDraft.slice(0, PINNED_CONTEXT_MAX_CHARS),
+                      allConversations: pinnedDraftAllConversations,
+                      chatId,
+                    });
                     setPinnedEditing(false);
                   }}
                 />
@@ -7550,8 +7877,7 @@ export function App() {
         <SideChatOverlay
           sideChat={sideChat}
           hasApiKey={hasApiKey}
-          setItems={(update) => setSideChat((current) => {
-            if (!current) return current;
+          setItems={(update) => replaceSideChat(sideChat.parentChatId, (current) => {
             const items = typeof update === "function" ? update(current.items) : update;
             return { ...current, items };
           })}
@@ -7570,12 +7896,29 @@ export function App() {
               goal: goalMode,
             });
           }}
-          onMinimize={() => setSideChat((current) => current ? { ...current, minimized: !current.minimized } : null)}
-          onPeekYChange={(peekY) => setSideChat((current) => current ? { ...current, peekY } : null)}
+          onDraftChange={(draft) => replaceSideChat(
+            sideChat.parentChatId,
+            (current) => ({ ...current, draft }),
+          )}
+          onMinimize={() => replaceSideChat(
+            sideChat.parentChatId,
+            (current) => ({ ...current, minimized: !current.minimized }),
+          )}
+          onPeekYChange={(peekY) => replaceSideChat(
+            sideChat.parentChatId,
+            (current) => ({ ...current, peekY }),
+          )}
+          onResize={(width, height) => replaceSideChat(
+            sideChat.parentChatId,
+            (current) => ({ ...current, width, height, maximized: false }),
+          )}
+          onToggleMaximized={() => replaceSideChat(
+            sideChat.parentChatId,
+            (current) => ({ ...current, maximized: !current.maximized }),
+          )}
           onClose={() => {
             post({ type: "close_side_chat", chatId: sideChat.chatId });
-            sideChatRef.current = null;
-            setSideChat(null);
+            replaceSideChat(sideChat.parentChatId, null);
           }}
         />
       ) : null}

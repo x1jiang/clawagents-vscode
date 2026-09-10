@@ -76,6 +76,7 @@ function previewApi(): VsCodeApi {
       } else if (message.type === "open_side_chat") {
         emit({
           type: "side_chat_open",
+          parentChatId: message.chatId || "preview-main",
           chatId: "preview-side",
           title: "Implement side chat (fork)",
           mode: "auto",

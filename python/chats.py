@@ -31,6 +31,8 @@ from pricing import estimate_usd, long_context_multipliers
 
 OnEvent = Callable[[str, dict[str, Any]], None]
 
+PINNED_CONTEXT_MAX_CHARS = 4_000
+
 # Providers that map 1:1 to a clawagents builtin profile. Selecting one in
 # settings (without an explicit model) routes model+key resolution through
 # that profile instead of the ambient PROVIDER/env defaults.
@@ -427,6 +429,7 @@ def create_chat(
         "session_prompt_tokens": 0,
         "session_completion_tokens": 0,
         "session_total_tokens": 0,
+        "pinned_context": "",
         "model_route": normalize_model_route(model_route)
         or model_route_from_settings(load_settings()),
     }
@@ -447,6 +450,8 @@ def patch_chat(chat_id: str, **fields: Any) -> dict[str, Any]:
             clean[k] = re.sub(r"\s+", " ", v).strip()[:120] or "New chat"
         elif k in {"pinned", "archived"}:
             clean[k] = bool(v)
+        elif k == "pinned_context" and isinstance(v, str):
+            clean[k] = v.strip()[:PINNED_CONTEXT_MAX_CHARS].rstrip()
         elif k == "model_route":
             route = normalize_model_route(v)
             if route:
@@ -471,6 +476,71 @@ def patch_chat(chat_id: str, **fields: Any) -> dict[str, Any]:
             },
         )
     return meta
+
+
+def read_conversation_pinned_context(chat_id: str) -> str:
+    """Return the bounded add-on context owned by one conversation."""
+    meta = get_chat(chat_id)
+    if not meta:
+        return ""
+    value = meta.get("pinned_context")
+    return str(value or "").strip()[:PINNED_CONTEXT_MAX_CHARS].rstrip()
+
+
+def write_conversation_pinned_context(chat_id: str, text: str) -> str:
+    """Persist add-on context in chat metadata and return the stored value."""
+    stored = str(text or "").strip()[:PINNED_CONTEXT_MAX_CHARS].rstrip()
+    patch_chat(chat_id, pinned_context=stored)
+    return stored
+
+
+def read_pinned_context_scope() -> dict[str, bool]:
+    """Read dedicated scope state without coupling it to Settings autosave."""
+    value = read_json(WORKSPACE / ".clawagents" / "pinned-context-scope.json", {})
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "all_conversations": bool(value.get("all_conversations", False)),
+        "initialized": bool(value.get("initialized", False)),
+    }
+
+
+def write_pinned_context_scope(*, all_conversations: bool) -> dict[str, bool]:
+    """Persist the explicit scope choice; local is the safe default."""
+    value = {
+        "all_conversations": bool(all_conversations),
+        "initialized": True,
+    }
+    atomic_write_json(
+        WORKSPACE / ".clawagents" / "pinned-context-scope.json",
+        value,
+    )
+    return value
+
+
+def effective_pinned_context(chat_id: str) -> str:
+    """Resolve the context injected for a turn under the selected scope."""
+    if read_pinned_context_scope()["all_conversations"]:
+        try:
+            from clawagents.memory.rules import read_pinned_context
+
+            return read_pinned_context(str(WORKSPACE))
+        except Exception:  # noqa: BLE001 - context is optional
+            return ""
+    return read_conversation_pinned_context(chat_id)
+
+
+def apply_scoped_pinned_context(agent: Any, chat_id: str) -> None:
+    """Make the selected conversation/global value override the legacy hook."""
+    from clawagents.prompts import append_pinned_context
+
+    existing_before_llm = getattr(agent, "before_llm", None)
+
+    def _with_scoped_pinned_context(messages: list) -> list:
+        current = existing_before_llm(messages) if existing_before_llm else messages
+        return append_pinned_context(current, effective_pinned_context(chat_id))
+
+    agent.before_llm = _with_scoped_pinned_context
 
 
 def delete_chat(chat_id: str) -> None:
@@ -2166,6 +2236,11 @@ async def run_chat_turn(
         agent = create_claw_agent(
             **{k: v for k, v in kwargs.items() if k in allowed}
         )
+        # The engine's built-in hook still understands the legacy workspace
+        # file. Wrap it so this conversation's selected scope wins on every
+        # LLM round (including after compaction). append_pinned_context also
+        # removes a legacy global block when the local value is empty.
+        apply_scoped_pinned_context(agent, chat_id)
         is_observatory = bool(
             enable_context_observatory
             or settings.get("context_observatory")

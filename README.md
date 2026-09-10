@@ -29,7 +29,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 ## Features
 
 - Multi-turn chats with history, regenerate, live token usage, and independent concurrent conversation tabs
-- Forked side chat overlay for a temporary parallel thread without leaving the main conversation
+- Per-conversation side chat overlays that keep running across thread switches and support minimize, maximize, and drag resizing
 - Permission modes: ask · read-only · auto · full access
 - Opt-in auto-approve for edits, shell, and web
 - Clickable assistant file references and end-of-turn **Edited N files** summaries; click a file to open it
