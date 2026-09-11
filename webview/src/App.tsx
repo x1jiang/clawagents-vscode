@@ -1270,24 +1270,48 @@ const TranscriptItem = memo(function TranscriptItem({
         </div>
       )}
       {item.kind === "plan_approval" && (
-        <div className="permission plan-approval">
-          <div className="label">Plan approval required</div>
-          <div className="perm-body">
-            <pre className="tool-body plan-text">
-              {(item.planText || "").trim() || "(empty plan)"}
-            </pre>
+        <div className={`permission plan-approval${item.resolved ? " is-resolved" : item.stale ? " is-stale" : " is-pending"}`}>
+          <div className="plan-approval-header">
+            <div className="plan-heading">
+              <div className="label">Plan review</div>
+              <div className="plan-title">Proposed implementation plan</div>
+            </div>
+            <div className="plan-header-actions">
+              <span className={`plan-status ${item.resolved || (item.stale ? "stale" : "pending")}`}>
+                {item.resolved === "approve"
+                  ? "Approved"
+                  : item.resolved === "request_changes"
+                    ? "Changes requested"
+                    : item.resolved === "reject"
+                      ? "Rejected"
+                      : item.stale
+                        ? "No longer active"
+                        : "Awaiting decision"}
+              </span>
+              <CopyMessageButton text={(item.planText || "").trim()} />
+            </div>
+          </div>
+          <div className="perm-body plan-document-shell">
+            {(item.planText || "").trim() ? (
+              <div className="md plan-document">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+                  {item.planText.trim()}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div className="plan-empty">No plan content was provided.</div>
+            )}
           </div>
           {item.resolved ? (
-            <div className="muted">
-              Plan exit:{" "}
+            <div className="plan-resolution" role="status">
               {item.resolved === "approve"
-                ? "Approved"
+                ? "This plan was approved and the run may continue in Act."
                 : item.resolved === "request_changes"
-                  ? "Changes requested"
-                  : "Rejected"}
+                  ? "Feedback was sent. The run remains in Plan while the proposal is revised."
+                  : "This plan was rejected and will not be implemented."}
             </div>
           ) : item.stale ? (
-            <div className="muted">
+            <div className="plan-resolution" role="status">
               This request is no longer waiting for an answer — the run ended
               first. Send a message to pick the plan back up.
             </div>

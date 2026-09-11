@@ -1,6 +1,7 @@
 # Unreleased
 
 - Add a theme-aware rich Markdown composer with directly editable lists and tables, structured clipboard conversion, compact handling for long pastes, and a `/help` shortcut guide. Preserve Markdown source when clipboard HTML would otherwise break GFM tables, and isolate editable DOM so Backspace/Delete cannot crash the webview.
+- Present Plan approvals as theme-aware, read-only Markdown review documents with persistent approval actions, status badges, copying, and scrollable long-form content instead of raw source text.
 - Make UI Plan the only entry into the plan lifecycle. Act, Goal, and Full access no longer expose `write_plan`, `enter_plan_mode`, or `exit_plan_mode`, so the agent cannot surface an unsolicited plan-approval prompt outside Plan.
 - Give every conversation its own independent side chat. Switching threads now hides and restores the matching overlay without interrupting hidden side-chat runs or drafts, and the frame can be dragged to resize or toggled between maximized and restored sizes.
 - Make add-on context conversation-scoped by default so instructions do not leak into unrelated chats. The composer shows the active scope and only shares the value workspace-wide when **Use in every conversation** is checked; existing global text is migrated into the first opened conversation, and forks inherit their source conversation's local context.
