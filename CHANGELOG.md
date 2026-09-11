@@ -1,5 +1,7 @@
 # Unreleased
 
+# 1.0.190
+
 - Add a theme-aware rich Markdown composer with directly editable lists and tables, structured clipboard conversion, compact handling for long pastes, and a `/help` shortcut guide. Preserve Markdown source when clipboard HTML would otherwise break GFM tables, and isolate editable DOM so Backspace/Delete cannot crash the webview.
 - Present Plan approvals as theme-aware, read-only Markdown review documents with persistent approval actions, status badges, copying, and scrollable long-form content instead of raw source text.
 - Make UI Plan the only entry into the plan lifecycle. Act, Goal, and Full access no longer expose `write_plan`, `enter_plan_mode`, or `exit_plan_mode`, so the agent cannot surface an unsolicited plan-approval prompt outside Plan.
