@@ -46,21 +46,52 @@ test("job ids that could escape the sidecar URL path are rejected", () => {
   assert.equal(parseWebviewToHost({ type: "stop_job" }), undefined);
 });
 
-test("pinned context is accepted up to its cap and refused beyond it", () => {
+test("scoped pinned context is accepted up to its cap and refused beyond it", () => {
   assert.ok(PINNED_CONTEXT_MAX_CHARS > 0);
-  const atCap = { type: "save_pinned", text: "x".repeat(PINNED_CONTEXT_MAX_CHARS) };
+  const atCap = {
+    type: "save_pinned",
+    text: "x".repeat(PINNED_CONTEXT_MAX_CHARS),
+    allConversations: false,
+    chatId: "chat-one",
+  };
   assert.deepEqual(parseWebviewToHost(atCap), atCap);
 
   // This text rides every request, so an oversized paste must not get through.
   assert.equal(
-    parseWebviewToHost({ type: "save_pinned", text: "x".repeat(PINNED_CONTEXT_MAX_CHARS + 1) }),
+    parseWebviewToHost({
+      type: "save_pinned",
+      text: "x".repeat(PINNED_CONTEXT_MAX_CHARS + 1),
+      allConversations: false,
+      chatId: "chat-one",
+    }),
     undefined,
   );
-  assert.equal(parseWebviewToHost({ type: "save_pinned", text: 42 }), undefined);
-  assert.equal(parseWebviewToHost({ type: "save_pinned" }), undefined);
+  assert.equal(
+    parseWebviewToHost({ type: "save_pinned", text: 42, allConversations: false }),
+    undefined,
+  );
+  assert.equal(parseWebviewToHost({ type: "save_pinned", text: "note" }), undefined);
+  assert.equal(
+    parseWebviewToHost({ type: "save_pinned", text: "note", allConversations: false }),
+    undefined,
+  );
+  assert.equal(
+    parseWebviewToHost({
+      type: "save_pinned",
+      text: "note",
+      allConversations: false,
+      chatId: "../../outside",
+    }),
+    undefined,
+  );
 });
 
 test("clearing pinned context is a valid save", () => {
-  const message = { type: "save_pinned", text: "" };
+  const message = {
+    type: "save_pinned",
+    text: "",
+    allConversations: true,
+    chatId: "chat-one",
+  };
   assert.deepEqual(parseWebviewToHost(message), message);
 });

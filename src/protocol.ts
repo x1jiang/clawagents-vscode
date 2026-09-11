@@ -235,6 +235,8 @@ export type HostToWebview =
   /** A temporary fork rendered in the webview's side-chat overlay. */
   | {
       type: "side_chat_open";
+      /** Conversation whose overlay owns this temporary fork. */
+      parentChatId: string;
       chatId: string;
       title?: string;
       items: unknown[];
@@ -365,7 +367,14 @@ export type HostToWebview =
       running: number;
     }
   | { type: "job_output"; job: JobSummary & { stdout: string; stderr: string } }
-  | { type: "pinned"; text: string };
+  | {
+      type: "pinned";
+      text: string;
+      /** Scope selected for add-on context in this workspace. */
+      allConversations: boolean;
+      /** Owner used to ignore a late response after conversation navigation. */
+      chatId?: string;
+    };
 
 /** A detached long-running command, as surfaced to the chat header. */
 export type JobSummary = {
@@ -530,7 +539,12 @@ export type WebviewToHost =
   | { type: "stop_job"; jobId: string }
   | { type: "report_job"; jobId: string }
   | { type: "load_pinned" }
-  | { type: "save_pinned"; text: string };
+  | {
+      type: "save_pinned";
+      text: string;
+      allConversations: boolean;
+      chatId?: string;
+    };
 
 const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
@@ -763,7 +777,12 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
     case "job_output": case "stop_job": case "report_job":
       return opaqueId(value.jobId) ? value as WebviewToHost : undefined;
     case "save_pinned":
-      return text(value.text, PINNED_CONTEXT_MAX_CHARS) ? value as WebviewToHost : undefined;
+      return text(value.text, PINNED_CONTEXT_MAX_CHARS)
+        && typeof value.allConversations === "boolean"
+        && optionalOpaqueId(value.chatId)
+        && (value.allConversations || opaqueId(value.chatId))
+        ? value as WebviewToHost
+        : undefined;
     case "save_settings":
       return record(value.settings)
         && typeof value.revision === "number"

@@ -38,7 +38,7 @@ from grants import GrantStore
 from mcp_loader import GRAPHIFY_READ_TOOLS, list_mcp_config
 from paths import GATEWAY_API_KEY, MODEL, WORKSPACE, ensure_dirs, safe_id
 from providers import build_provider_catalog, verify_api_key
-from settings_store import load_settings, save_settings
+from settings_store import load_settings
 from skills_catalog import preview_skills
 from snapshots import (
     latest_snapshot_for,
@@ -740,6 +740,8 @@ class InterjectBody(BaseModel):
 
 class PinnedBody(BaseModel):
     text: str = ""
+    chat_id: str | None = None
+    all_conversations: bool = False
 
 
 class HunkActionBody(BaseModel):
@@ -1516,27 +1518,92 @@ def create_app() -> FastAPI:
             return {"ok": False, "error": str(exc)}
 
     @app.get("/pinned")
-    async def pinned_get(request: Request):
-        """Always-on context the user pinned to the top of the chat."""
+    async def pinned_get(request: Request, chat_id: str | None = None):
+        """Add-on context for one chat, or the explicitly enabled global value."""
         denied = _auth_or_401(request)
         if denied:
             return denied
+        if chat_id:
+            bad = _validate_chat_id(chat_id)
+            if bad:
+                return bad
+            if not get_chat(chat_id):
+                return Response(
+                    status_code=404,
+                    content=json.dumps({"error": "chat not found"}),
+                    media_type="application/json",
+                )
+        from chats import (
+            read_conversation_pinned_context,
+            read_pinned_context_scope,
+            write_conversation_pinned_context,
+            write_pinned_context_scope,
+        )
         from clawagents.memory.rules import read_pinned_context
 
-        return {"ok": True, "text": read_pinned_context(str(WORKSPACE))}
+        scope = read_pinned_context_scope()
+        global_scope = scope["all_conversations"]
+        initialized = scope["initialized"]
+        # Legacy builds had no scope and injected the workspace file everywhere.
+        # Adopt it into only the first active conversation on upgrade.
+        if not initialized and chat_id:
+            legacy = read_pinned_context(str(WORKSPACE))
+            if legacy and not read_conversation_pinned_context(chat_id):
+                write_conversation_pinned_context(chat_id, legacy)
+            write_pinned_context_scope(all_conversations=False)
+            global_scope = False
+        text = (
+            read_pinned_context(str(WORKSPACE))
+            if global_scope
+            else (read_conversation_pinned_context(chat_id) if chat_id else "")
+        )
+        return {
+            "ok": True,
+            "text": text,
+            "all_conversations": global_scope,
+            "chat_id": chat_id,
+        }
 
     @app.put("/pinned")
     async def pinned_put(body: PinnedBody, request: Request):
         denied = _auth_or_401(request)
         if denied:
             return denied
+        if body.chat_id:
+            bad = _validate_chat_id(body.chat_id)
+            if bad:
+                return bad
+            if not get_chat(body.chat_id):
+                return Response(
+                    status_code=404,
+                    content=json.dumps({"error": "chat not found"}),
+                    media_type="application/json",
+                )
+        if not body.all_conversations and not body.chat_id:
+            return _bad_request("chat_id is required for conversation context")
+        from chats import (
+            write_conversation_pinned_context,
+            write_pinned_context_scope,
+        )
         from clawagents.memory.rules import write_pinned_context
 
         try:
-            stored = write_pinned_context(body.text or "", str(WORKSPACE))
-        except OSError as exc:
+            if body.all_conversations:
+                stored = write_pinned_context(body.text or "", str(WORKSPACE))
+            else:
+                stored = write_conversation_pinned_context(
+                    body.chat_id or "",
+                    body.text,
+                )
+            write_pinned_context_scope(all_conversations=body.all_conversations)
+        except (KeyError, OSError) as exc:
             return {"ok": False, "error": str(exc), "text": ""}
-        return {"ok": True, "text": stored}
+        return {
+            "ok": True,
+            "text": stored,
+            "all_conversations": body.all_conversations,
+            "chat_id": body.chat_id,
+        }
 
     @app.get("/hunks")
     async def hunks_list(request: Request, path: str | None = None):

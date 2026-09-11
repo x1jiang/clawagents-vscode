@@ -1,3 +1,12 @@
+# Unreleased
+
+- Add a theme-aware rich Markdown composer with directly editable lists and tables, structured clipboard conversion, compact handling for long pastes, and a `/help` shortcut guide. Preserve Markdown source when clipboard HTML would otherwise break GFM tables, and isolate editable DOM so Backspace/Delete cannot crash the webview.
+- Make UI Plan the only entry into the plan lifecycle. Act, Goal, and Full access no longer expose `write_plan`, `enter_plan_mode`, or `exit_plan_mode`, so the agent cannot surface an unsolicited plan-approval prompt outside Plan.
+- Give every conversation its own independent side chat. Switching threads now hides and restores the matching overlay without interrupting hidden side-chat runs or drafts, and the frame can be dragged to resize or toggled between maximized and restored sizes.
+- Make add-on context conversation-scoped by default so instructions do not leak into unrelated chats. The composer shows the active scope and only shares the value workspace-wide when **Use in every conversation** is checked; existing global text is migrated into the first opened conversation, and forks inherit their source conversation's local context.
+- Allow New chat and Fork while a response is generating. A fork captures the persisted conversation snapshot at the click; the original run continues on its own thread.
+- Make background jobs controllable from the chat banner: running jobs show an explicit stopping state and surface backend stop failures instead of silently ignoring them; completed jobs can be dismissed individually or cleared together; and the log viewer refreshes automatically while open with manual refresh, copy, close, process metadata, and separate stdout/stderr sections. Dismissed job rows stay hidden across webview reloads.
+
 # 1.0.189
 
 - **Settings and diagnostics are easier to navigate.** Settings are grouped into anchored sections with autosave status, clearer provider connection state, compatibility controls, and a dedicated troubleshooting page. Diagnostic reports summarize core checks, keep raw details behind disclosure, and redact workspace plus macOS, Linux, and Windows user-home paths before copying.

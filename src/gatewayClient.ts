@@ -129,7 +129,13 @@ function extractFilePath(data: Record<string, unknown>): string | undefined {
   return typeof raw === "string" ? raw : undefined;
 }
 
-function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebview | null {
+const INTERNAL_TOOL_ARTIFACT_STATUS =
+  /^tool output crushed\/stored id=[A-Za-z0-9._-]+$/;
+
+export function mapAgentEvent(
+  kind: string,
+  data: Record<string, unknown>,
+): HostToWebview | null {
   switch (kind) {
     case "assistant_delta":
       return { type: "assistant_delta", delta: String(data.delta ?? data.text ?? "") };
@@ -230,11 +236,19 @@ function mapAgentEvent(kind: string, data: Record<string, unknown>): HostToWebvi
         phase: String(data.phase ?? ""),
         message: data.message ? String(data.message) : undefined,
       };
-    case "context":
+    case "context": {
+      const message = String(data.message ?? "context");
+      // Artifact offloading is an internal bookkeeping detail. The matching
+      // tool card still follows normally, and the model can still hydrate the
+      // stored output with retrieve_tool_result when it needs the full text.
+      if (INTERNAL_TOOL_ARTIFACT_STATUS.test(message)) {
+        return null;
+      }
       return {
         type: "status",
-        message: String(data.message ?? "context"),
+        message,
       };
+    }
     case "checkpoint":
       return {
         type: "checkpoint",
@@ -839,16 +853,28 @@ export class GatewayClient {
     );
   }
 
-  getPinnedContext() {
-    return requestJson<{ ok: boolean; text?: string }>(this.requireHandle(), "GET", "/pinned");
+  getPinnedContext(chatId?: string) {
+    const query = chatId ? `?chat_id=${encodeURIComponent(chatId)}` : "";
+    return requestJson<{
+      ok: boolean;
+      text?: string;
+      all_conversations?: boolean;
+      chat_id?: string;
+    }>(this.requireHandle(), "GET", `/pinned${query}`);
   }
 
-  setPinnedContext(text: string) {
-    return requestJson<{ ok: boolean; text?: string; error?: string }>(
+  setPinnedContext(text: string, chatId: string | undefined, allConversations: boolean) {
+    return requestJson<{
+      ok: boolean;
+      text?: string;
+      error?: string;
+      all_conversations?: boolean;
+      chat_id?: string;
+    }>(
       this.requireHandle(),
       "PUT",
       "/pinned",
-      { text },
+      { text, chat_id: chatId, all_conversations: allConversations },
     );
   }
 

@@ -230,9 +230,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   private view?: vscode.WebviewView;
   private chatId: string | undefined;
-  /** Temporary fork currently owned by the side-chat overlay. */
-  private sideChatId: string | undefined;
-  private sideChatOpening = false;
+  /** One temporary fork per parent conversation. Hidden overlays keep running. */
+  private readonly sideChats = new Map<string, string>();
+  private readonly sideChatIds = new Set<string>();
+  private readonly sideChatOpenings = new Set<string>();
   /** Composer drafts are workspace-local because chat IDs are workspace-local. */
   private readonly drafts: Record<string, string> = Object.create(null) as Record<
     string,
@@ -542,6 +543,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     chatTitle?: string,
     restoreReason?: "fork",
   ): Promise<void> {
+    let pinned: Awaited<ReturnType<GatewayClient["getPinnedContext"]>> | undefined;
+    try {
+      pinned = await this.gateway.getPinnedContext(chatId);
+    } catch {
+      /* older or temporarily unavailable sidecar: show an empty local value */
+    }
+    // Resolving add-on context adds an async boundary. Preserve the existing
+    // navigation guarantee: an older selection must not restore over a newer one.
+    if (this.chatId !== chatId) return;
     const modelRoute = modelRouteFromChat(chat);
     if (modelRoute) this.modelRoutes.set(chatId, modelRoute);
     const events = (chat.events as Array<Record<string, unknown>>) || [];
@@ -568,6 +578,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       eventsTotal: Number(chat.events_total ?? events.length) || events.length,
       eventsHasMore: this.eventsHasMore,
       modelRoute,
+    });
+    this.post({
+      type: "pinned",
+      text: pinned?.text ?? "",
+      allConversations: Boolean(pinned?.all_conversations),
+      chatId,
     });
     // Navigation previews are much smaller than the transcript, so load them
     // separately rather than defeating the transcript's pagination cap.
@@ -852,6 +868,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               sessionCostUsd: 0,
               modelRoute,
             });
+            const pinned = await this.gateway.getPinnedContext(startedOn).catch(() => undefined);
+            this.post({
+              type: "pinned",
+              text: pinned?.text ?? "",
+              allConversations: Boolean(pinned?.all_conversations),
+              chatId: startedOn,
+            });
             refreshChatsInBackground();
             await timed("persistLocal", () => this.persistLocal(this.persistState()));
             return;
@@ -890,6 +913,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         busy: false,
         sessionCostUsd: 0,
         modelRoute,
+      });
+      const pinned = await this.gateway.getPinnedContext(this.chatId).catch(() => undefined);
+      this.post({
+        type: "pinned",
+        text: pinned?.text ?? "",
+        allConversations: Boolean(pinned?.all_conversations),
+        chatId: this.chatId,
       });
       refreshChatsInBackground();
       await timed("persistLocal", () => this.persistLocal(this.persistState()));
@@ -1054,6 +1084,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       busy: false,
       sessionCostUsd: 0,
     });
+    this.post({ type: "pinned", text: "", allConversations: false });
+    void this.gateway.getPinnedContext().then((pinned) => {
+      if (this.chatId) return;
+      this.post({
+        type: "pinned",
+        text: pinned.text ?? "",
+        allConversations: Boolean(pinned.all_conversations),
+      });
+    }).catch(() => undefined);
   }
 
   /** Run a multi-chat mutation with one list refresh and report partial failure. */
@@ -1117,14 +1156,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     // reload while the attachments stay staged host-side (and would still send).
     this.postImagesPending();
     this.postFilesPending();
-    // A reload must not hide a job that is still running, and pinned context
-    // lives on disk rather than in webview state.
-    try {
-      const pinned = await this.gateway.getPinnedContext();
-      this.post({ type: "pinned", text: pinned.text ?? "" });
-    } catch {
-      /* sidecar may still be starting */
-    }
+    // A reload must not hide a job that is still running. Conversation-scoped
+    // add-on context is sent alongside the restore below.
     await this.refreshJobs();
     if (!this.chatId) {
       return;
@@ -1357,7 +1390,19 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "stop_job":
         try {
-          await this.gateway.stopJob(msg.jobId);
+          const res = await this.gateway.stopJob(msg.jobId);
+          if (!res.ok) {
+            throw new Error(res.error ?? "The background job could not be stopped.");
+          }
+          if (res.job?.running) {
+            throw new Error("The stop request returned, but the background job is still running.");
+          }
+          this.post({
+            type: "status",
+            message: res.job?.cancelled
+              ? `Background job stopped: ${res.job.command}`
+              : "Background job had already finished",
+          });
         } catch (err) {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
         }
@@ -1368,17 +1413,43 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "load_pinned":
         try {
-          const res = await this.gateway.getPinnedContext();
-          this.post({ type: "pinned", text: res.text ?? "" });
+          const res = await this.gateway.getPinnedContext(this.chatId);
+          this.post({
+            type: "pinned",
+            text: res.text ?? "",
+            allConversations: Boolean(res.all_conversations),
+            chatId: this.chatId,
+          });
         } catch {
           /* sidecar not up yet; the webview keeps its local copy */
         }
         break;
       case "save_pinned":
         try {
-          const res = await this.gateway.setPinnedContext(msg.text);
+          const targetChatId = msg.chatId || this.chatId;
+          const res = await this.gateway.setPinnedContext(
+            msg.text,
+            targetChatId,
+            msg.allConversations,
+          );
           // Echo the stored value: the sidecar trims and may truncate it.
-          this.post({ type: "pinned", text: res.text ?? "" });
+          this.post({
+            type: "pinned",
+            text: res.text ?? "",
+            allConversations: Boolean(res.all_conversations),
+            chatId: targetChatId,
+          });
+          // Scope changes affect the currently visible conversation even when
+          // the save originated just before navigation completed.
+          if (this.chatId && this.chatId !== targetChatId) {
+            const current = await this.gateway.getPinnedContext(this.chatId);
+            this.post({
+              type: "pinned",
+              text: current.text ?? "",
+              allConversations: Boolean(current.all_conversations),
+              chatId: this.chatId,
+            });
+          }
           if (!res.ok && res.error) this.post({ type: "error", message: res.error });
         } catch (err) {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
@@ -1435,15 +1506,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.newChat();
           break;
         }
-        if (this.runs.isActive(targetId)) {
-          // Use error so the webview clears pendingForkRef (status would leave it set).
-          this.post({
-            type: "error",
-            message: "Stop the current run before forking.",
-          });
-          break;
-        }
         try {
+          // A fork is a snapshot of the persisted conversation at this point.
+          // Active runs retain their own chat id, so continuing to stream cannot
+          // send events into the new branch.
           const res = await this.gateway.forkChat(targetId);
           this.chatId = res.chat_id;
           await this.persistLocal(this.persistState());
@@ -1467,11 +1533,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           this.post({ type: "error", message: "Start a conversation before opening a side chat." });
           break;
         }
-        if (this.sideChatOpening || this.sideChatId) {
-          this.post({ type: "error", message: "A side chat is already open." });
+        if (this.sideChatOpenings.has(targetId) || this.sideChats.has(targetId)) {
+          this.post({ type: "error", message: "This conversation already has a side chat." });
           break;
         }
-        this.sideChatOpening = true;
+        this.sideChatOpenings.add(targetId);
         try {
           const res = await this.gateway.forkChat(targetId);
           const chat = await this.gateway.getChat(res.chat_id, { tail: 400 });
@@ -1480,28 +1546,34 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           const title =
             (typeof res.chat?.title === "string" && res.chat.title) ||
             (typeof chat.title === "string" ? chat.title : undefined);
+          this.sideChats.set(targetId, res.chat_id);
+          this.sideChatIds.add(res.chat_id);
           this.post({
             type: "side_chat_open",
+            parentChatId: targetId,
             chatId: res.chat_id,
             title,
             items: eventsToItems((chat.events as Array<Record<string, unknown>>) || []),
             mode: (chat.mode as AgentMode) || this.mode,
             modelRoute: sideModelRoute,
           });
-          this.sideChatId = res.chat_id;
           await this.refreshChats();
         } catch (err) {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
         } finally {
-          this.sideChatOpening = false;
+          this.sideChatOpenings.delete(targetId);
         }
         break;
       }
       case "close_side_chat":
         // Release the overlay slot before cancel/delete so a new side chat
         // can open immediately. The webview already cleared its overlay.
-        if (this.sideChatId === msg.chatId) {
-          this.sideChatId = undefined;
+        this.sideChatIds.delete(msg.chatId);
+        for (const [parentChatId, sideChatId] of this.sideChats) {
+          if (sideChatId === msg.chatId) {
+            this.sideChats.delete(parentChatId);
+            break;
+          }
         }
         try {
           if (this.runs.isActive(msg.chatId) || this.runs.isCancelling(msg.chatId)) {
@@ -3544,7 +3616,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 ev.type === "permission_required" ? "permission" as const
                 : ev.type === "ask_user_required" ? "ask" as const
                 : "plan_approval" as const;
-              if (runChatId !== this.chatId && runChatId !== this.sideChatId) {
+              if (runChatId !== this.chatId && !this.sideChatIds.has(runChatId)) {
                 this.post({ type: "chat_attention", chatId: runChatId, reason });
                 return;
               }

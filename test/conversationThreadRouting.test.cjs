@@ -155,7 +155,7 @@ test("stale interactive prompts badge the owner instead of disappearing", () => 
   assert.match(runTask, /this\.pendingInteractions\.set\(runChatId, buf\)/);
   assert.match(
     runTask,
-    /if \(runChatId !== this\.chatId && runChatId !== this\.sideChatId\)/,
+    /if \(runChatId !== this\.chatId && !this\.sideChatIds\.has\(runChatId\)\)/,
   );
   assert.doesNotMatch(
     runTask,
