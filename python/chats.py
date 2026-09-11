@@ -33,6 +33,67 @@ OnEvent = Callable[[str, dict[str, Any]], None]
 
 PINNED_CONTEXT_MAX_CHARS = 4_000
 
+# UI Plan is the sole owner of the plan lifecycle. The core library exposes
+# these tools by default so headless agents can opt into planning, but exposing
+# them in Act/Goal lets the model silently enter PLAN and later surprise the
+# user with a plan-approval prompt even though the Plan tab was never selected.
+_PLAN_ONLY_TOOL_NAMES = frozenset({
+    "write_plan",
+    "enter_plan_mode",
+    "exit_plan_mode",
+})
+
+
+def _plan_approval_for_ui_mode(mode: str, callback: Any) -> Any:
+    """Bind human plan approval only to an explicitly selected UI Plan run."""
+    return callback if mode == "read_only" else None
+
+
+def _restrict_plan_tools_to_ui_mode(agent: Any, mode: str) -> None:
+    """Expose the plan lifecycle only when the host selected UI Plan.
+
+    Remove the registrations, rather than merely denying calls, so native tool
+    schemas and tool discovery cannot encourage the model to enter Plan from
+    Act, Goal, or Full access. ``set_active_tools`` is also updated as a
+    compatibility fallback for registry implementations without a mutable
+    ``tools`` mapping.
+    """
+    if mode == "read_only":
+        return
+
+    registry = getattr(agent, "tools", None)
+    if registry is None:
+        return
+
+    # A custom Architect/Ask persona may independently request the core PLAN
+    # permission mode. UI mode remains authoritative in this host; otherwise
+    # removing exit_plan_mode would strand the run behind a gate it cannot exit.
+    default_permission = getattr(agent, "_default_permission_mode", None)
+    default_permission_value = getattr(default_permission, "value", default_permission)
+    if default_permission_value == "plan":
+        agent._default_permission_mode = None  # type: ignore[attr-defined]  # noqa: SLF001
+
+    registered = getattr(registry, "tools", None)
+    if isinstance(registered, dict):
+        for name in _PLAN_ONLY_TOOL_NAMES:
+            registered.pop(name, None)
+        if hasattr(registry, "_description_cache"):
+            registry._description_cache = None  # noqa: SLF001
+
+    active_names_fn = getattr(registry, "active_tool_names", None)
+    set_active_tools = getattr(registry, "set_active_tools", None)
+    list_registered = getattr(registry, "list_registered", None)
+    if callable(set_active_tools):
+        active = active_names_fn() if callable(active_names_fn) else None
+        if active is None and callable(list_registered):
+            active = {
+                str(getattr(tool, "name", ""))
+                for tool in list_registered()
+                if getattr(tool, "name", None)
+            }
+        if active is not None:
+            set_active_tools(set(active) - _PLAN_ONLY_TOOL_NAMES)
+
 # Providers that map 1:1 to a clawagents builtin profile. Selecting one in
 # settings (without an explicit model) routes model+key resolution through
 # that profile instead of the ambient PROVIDER/env defaults.
@@ -1998,8 +2059,9 @@ async def run_chat_turn(
     ):
         # Older wheels without chat_mode — keep explicit off.
         kwargs["sandbox_profile"] = "off"
-    if on_exit_plan_mode is not None and "on_exit_plan_mode" in _agent_params:
-        kwargs["on_exit_plan_mode"] = on_exit_plan_mode
+    plan_approval = _plan_approval_for_ui_mode(mode, on_exit_plan_mode)
+    if plan_approval is not None and "on_exit_plan_mode" in _agent_params:
+        kwargs["on_exit_plan_mode"] = plan_approval
 
     # Browser tools (Playwright). Opt-in via Settings → Enable browser tools.
     if settings.get("browser_tools"):
@@ -2300,6 +2362,8 @@ async def run_chat_turn(
             _jobs.attach_registry(agent.tools, chat_id)
         except Exception:  # noqa: BLE001 - never fail a turn over job bookkeeping
             pass
+
+        _restrict_plan_tools_to_ui_mode(agent, mode)
 
         invoke_kwargs: dict[str, Any] = {
             "on_event": _on_legacy_event,

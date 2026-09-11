@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -964,6 +965,169 @@ const assistantMarkdownComponents: Components = {
   },
 };
 
+/** Keep the composer lightweight: only add a rendered preview when there is
+ * actual Markdown syntax to show. */
+function hasMarkdownFormatting(text: string): boolean {
+  return /(^|\n)\s*(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>|```|\|.*\|)|\*\*[^*]+\*\*|`[^`]+`/.test(text);
+}
+
+function shouldCollapsePastedText(text: string): boolean {
+  return text.length >= 900 || text.split("\n").length >= 14;
+}
+
+/** Preserve all structured clipboard content, including text surrounding tables. */
+function clipboardHtmlToMarkdown(html: string): string | undefined {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  if (!document.body.querySelector("p, div, h1, h2, h3, h4, h5, h6, ul, ol, table, pre, blockquote")) {
+    return undefined;
+  }
+  return editableMarkdown(document.body) || undefined;
+}
+
+/** Convert the small, rendered Markdown subset used by the composer back into
+ * Markdown after a direct edit. This keeps tables editable in-place. */
+function editableMarkdown(element: HTMLElement): string {
+  const inline = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (!(node instanceof HTMLElement)) return "";
+    const text = [...node.childNodes].map(inline).join("");
+    switch (node.tagName) {
+      case "STRONG": case "B": return `**${text}**`;
+      case "EM": case "I": return `*${text}*`;
+      case "CODE": return `\`${text}\``;
+      case "BR": return "  \n";
+      case "A": return `[${text}](${node.getAttribute("href") ?? ""})`;
+      default: return text;
+    }
+  };
+  const block = (node: Node): string => {
+    if (!(node instanceof HTMLElement)) return node.textContent?.trim() ?? "";
+    if (node.tagName === "TABLE") {
+      const rows = [...node.querySelectorAll("tr")].map((row) =>
+        [...row.querySelectorAll(":scope > th, :scope > td")].map((cell) => inline(cell).trim().replaceAll("|", "\\|")),
+      );
+      if (rows.length === 0) return "";
+      const width = Math.max(...rows.map((row) => row.length));
+      const asRow = (row: string[]) => `| ${[...row, ...Array(width - row.length).fill("")].join(" | ")} |`;
+      return [asRow(rows[0]), asRow(Array(width).fill("---")), ...rows.slice(1).map(asRow)].join("\n");
+    }
+    if (/^H[1-6]$/.test(node.tagName)) return `${"#".repeat(Number(node.tagName[1]))} ${inline(node).trim()}`;
+    if (node.tagName === "PRE") return `\`\`\`\n${node.textContent?.trim() ?? ""}\n\`\`\``;
+    if (node.tagName === "BLOCKQUOTE") return `> ${inline(node).trim()}`;
+    if (node.tagName === "UL" || node.tagName === "OL") {
+      return [...node.children].map((item, index) => `${node.tagName === "OL" ? `${index + 1}.` : "-"} ${inline(item).trim()}`).join("\n");
+    }
+    if (["BODY", "DIV", "SECTION", "ARTICLE", "MAIN"].includes(node.tagName)) {
+      return [...node.childNodes]
+        .filter((child) => child.nodeType !== Node.TEXT_NODE || child.textContent?.trim())
+        .map(block)
+        .filter(Boolean)
+        .join("\n\n");
+    }
+    return inline(node).trim();
+  };
+  return [...element.childNodes]
+    .filter((node) => node.nodeType !== Node.TEXT_NODE || node.textContent?.trim())
+    .map(block)
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function renderedMarkdown(markdown: string): string {
+  return renderToStaticMarkup(
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>,
+  );
+}
+
+function insertRenderedMarkdown(editor: HTMLElement, html: string): boolean {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return false;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return false;
+  range.deleteContents();
+  const fragment = range.createContextualFragment(html);
+  const last = fragment.lastChild;
+  range.insertNode(fragment);
+  if (last) {
+    range.setStartAfter(last);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  return true;
+}
+
+type RichMarkdownEditorProps = {
+  markdown: string;
+  onChange: (markdown: string) => void;
+  onSend: () => void;
+  onPasteFiles: (files: File[]) => void;
+};
+
+/** Keep browser-edited DOM outside React reconciliation. React owning the
+ * children of a contentEditable node makes Backspace/Delete capable of
+ * crashing the entire webview when both try to remove the same node. */
+const RichMarkdownEditor = memo(function RichMarkdownEditor({
+  markdown,
+  onChange,
+  onSend,
+  onPasteFiles,
+}: RichMarkdownEditorProps) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const focusedRef = useRef(false);
+  const [html, setHtml] = useState(() => renderedMarkdown(markdown));
+
+  useEffect(() => {
+    if (!focusedRef.current) setHtml(renderedMarkdown(markdown));
+  }, [markdown]);
+
+  return (
+    <div
+      ref={editorRef}
+      className="composer-rich-editor md"
+      contentEditable
+      suppressContentEditableWarning
+      dangerouslySetInnerHTML={{ __html: html }}
+      onFocus={() => { focusedRef.current = true; }}
+      onBlur={(e) => {
+        focusedRef.current = false;
+        const next = editableMarkdown(e.currentTarget);
+        onChange(next);
+        setHtml(renderedMarkdown(next));
+      }}
+      onInput={(e) => onChange(editableMarkdown(e.currentTarget))}
+      onKeyDown={(e) => {
+        if (
+          e.key === "Enter" &&
+          (e.metaKey || e.ctrlKey) &&
+          !e.shiftKey &&
+          !e.nativeEvent.isComposing
+        ) {
+          e.preventDefault();
+          onSend();
+        }
+      }}
+      onPaste={(e) => {
+        const files = collectTransferFiles(e.clipboardData);
+        if (files.length > 0) {
+          e.preventDefault();
+          onPasteFiles(files);
+          return;
+        }
+        const plainText = e.clipboardData.getData("text/plain");
+        const richText = clipboardHtmlToMarkdown(e.clipboardData.getData("text/html"));
+        const pastedText = hasMarkdownFormatting(plainText) ? plainText : richText ?? plainText;
+        if (!pastedText) return;
+        e.preventDefault();
+        if (insertRenderedMarkdown(e.currentTarget, renderedMarkdown(pastedText))) {
+          onChange(editableMarkdown(e.currentTarget));
+        }
+      }}
+      aria-label="Rich Markdown editor"
+    />
+  );
+});
+
 function CopyMessageButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -1027,7 +1191,13 @@ const TranscriptItem = memo(function TranscriptItem({
             {time && <time className="message-time" dateTime={item.timestamp}>{time}</time>}
           </div>
           <div className="user-message">
-            <pre className="user-text">{item.text}</pre>
+            <div className="user-text">
+              <div className="md">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+                  {item.text}
+                </ReactMarkdown>
+              </div>
+            </div>
             <CopyMessageButton text={item.text} />
           </div>
         </>
@@ -1555,6 +1725,7 @@ export function App() {
   const [renderWindow, setRenderWindow] = useState(TRANSCRIPT_RENDER_CHUNK);
   const [eventsHasMore, setEventsHasMore] = useState(false);
   const [draft, setDraft] = useState("");
+  const [composerPreviewCollapsed, setComposerPreviewCollapsed] = useState(false);
   const [pendingImages, setPendingImages] = useState<Array<{ id: string; name: string }>>([]);
   const [pendingFiles, setPendingFiles] = useState<Array<{ id: string; name: string }>>([]);
   const [workspace, setWorkspace] = useState<string | undefined>();
@@ -3500,6 +3671,7 @@ export function App() {
   const clearDraft = () => {
     setDraft("");
     persistDraftNow("");
+    setComposerPreviewCollapsed(false);
   };
 
   const handleHistoryChatClick = (event: ReactMouseEvent<HTMLButtonElement>, c: ChatSummary) => {
@@ -4284,6 +4456,7 @@ export function App() {
     }
     // Slash commands work without a provider key; chat turns do not.
     const isSlash =
+      value === "/help" ||
       value === "/compact" ||
       value === "/checkpoints" ||
       value === "/hunks" ||
@@ -4298,6 +4471,17 @@ export function App() {
         },
       ]);
       showPanel("settings");
+      return;
+    }
+    if (value === "/help") {
+      clearDraft();
+      setItems((previous) => [
+        ...previous,
+        {
+          kind: "status",
+          text: "Keyboard shortcuts\nPlain text: Enter — send\nRich Markdown: Enter — new paragraph\nRich Markdown: Ctrl/⌘ + Enter — send\nCtrl/⌘ + Space or F8 — dictate\nPaste or Shift-drop — attach files\nEsc — stop",
+        },
+      ]);
       return;
     }
     if (value === "/compact") {
@@ -7614,33 +7798,86 @@ export function App() {
                     setPinnedEditing(false);
                   }}
                 />
-                <textarea
-                  ref={textareaRef}
-                  value={draft}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                  }}
-                  onPaste={(e) => {
-                    const files = collectTransferFiles(e.clipboardData);
-                    if (files.length === 0) {
-                      return;
-                    }
-                    e.preventDefault();
-                    void attachLocalBrowserFiles(
-                      files,
-                      setItems,
-                      beginAttachmentRequest,
-                      finishAttachmentRequest,
-                    );
-                  }}
-                  onDrop={(e) => {
-                    // Prevent the browser's default path-insertion behavior inside textarea,
-                    // but allow it to bubble up to .compose-row for custom attachment logic.
-                    e.preventDefault();
-                  }}
-                  placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} · ${effectiveInteraction === "auto" ? "Auto" : "Ask"} · mic / ⌃␣ / F8 dictate · paste / ⇧-drop / +Attach · ↵ send · ⇧↵ newline · Esc stop`}
-                  rows={3}
-                  onKeyDown={(e) => {
+                {composerPreviewCollapsed ? (
+                  <button
+                    type="button"
+                    className="composer-paste-card"
+                    onClick={() => {
+                      setComposerPreviewCollapsed(false);
+                      requestAnimationFrame(() => textareaRef.current?.focus());
+                    }}
+                    title="Edit pasted content"
+                  >
+                    <span>Pasted content · {draft.length.toLocaleString()} characters</span>
+                    <span className="composer-paste-card-action">Click to edit</span>
+                    <span className="composer-paste-card-preview">{draft}</span>
+                  </button>
+                ) : hasMarkdownFormatting(draft) ? (
+                  <RichMarkdownEditor
+                    markdown={draft}
+                    onChange={setDraft}
+                    onSend={send}
+                    onPasteFiles={(files) => {
+                      void attachLocalBrowserFiles(
+                        files,
+                        setItems,
+                        beginAttachmentRequest,
+                        finishAttachmentRequest,
+                      );
+                    }}
+                  />
+                ) : (
+                  <textarea
+                    ref={textareaRef}
+                    value={draft}
+                    onChange={(e) => {
+                      setDraft(e.target.value);
+                    }}
+                    onPaste={(e) => {
+                      const files = collectTransferFiles(e.clipboardData);
+                      if (files.length === 0) {
+                        const plainText = e.clipboardData.getData("text/plain");
+                        const pastedRichText = clipboardHtmlToMarkdown(e.clipboardData.getData("text/html"));
+                        // Markdown copied from an editor may also carry HTML in
+                        // which every source line is a separate div. Prefer the
+                        // intact Markdown source so GFM table rows stay adjacent.
+                        const pastedText = hasMarkdownFormatting(plainText)
+                          ? plainText
+                          : pastedRichText ?? plainText;
+                        if (pastedRichText || shouldCollapsePastedText(pastedText)) {
+                          // Insert it ourselves before unmounting the textarea for the
+                          // collapsed card; otherwise the browser's deferred paste can
+                          // be lost when React commits this state update. Structured HTML
+                          // is converted as a whole so text around tables is preserved.
+                          e.preventDefault();
+                          const target = e.currentTarget;
+                          setDraft((current) =>
+                            current.slice(0, target.selectionStart) +
+                            pastedText +
+                            current.slice(target.selectionEnd),
+                          );
+                          setComposerPreviewCollapsed(
+                            !hasMarkdownFormatting(pastedText) && shouldCollapsePastedText(pastedText),
+                          );
+                        }
+                        return;
+                      }
+                      e.preventDefault();
+                      void attachLocalBrowserFiles(
+                        files,
+                        setItems,
+                        beginAttachmentRequest,
+                        finishAttachmentRequest,
+                      );
+                    }}
+                    onDrop={(e) => {
+                      // Prevent the browser's default path-insertion behavior inside textarea,
+                      // but allow it to bubble up to .compose-row for custom attachment logic.
+                      e.preventDefault();
+                    }}
+                    placeholder={`${workMode === "goal" ? "Goal" : workMode === "plan" ? "Plan" : "Act"} — ${effectiveInteraction === "auto" ? "Auto" : "Ask"}\nEnter sends · Shift + Enter adds a line\nType /help for shortcuts`}
+                    rows={3}
+                    onKeyDown={(e) => {
                     // Enter sends; Shift+Enter (or ⌘/Ctrl+Enter) inserts a newline.
                     // Ignore Enter while an IME composition is active.
                     if (
@@ -7663,8 +7900,9 @@ export function App() {
                       e.preventDefault();
                       post({ type: "cancel", chatId: chatIdRef.current });
                     }
-                  }}
-                />
+                    }}
+                  />
+                )}
                 <div className="compose-actions">
                   <button
                     type="button"

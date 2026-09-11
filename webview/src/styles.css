@@ -1024,7 +1024,7 @@ body,
   overflow-wrap: anywhere;
   font-family: inherit;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  padding: 8px 10px;
+  padding: 8px 38px 8px 10px;
   border-radius: 6px;
 }
 
@@ -1133,6 +1133,53 @@ body,
   color: inherit;
   font-size: inherit;
   line-height: inherit;
+}
+
+.md table {
+  width: max-content;
+  min-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--fg));
+  border-spacing: 0;
+  border-collapse: separate;
+  border-radius: 6px;
+  margin: 0.65em 0;
+  overflow: hidden;
+  color: inherit;
+  background: transparent;
+  font-size: 0.92em;
+}
+
+.md th,
+.md td {
+  min-width: 8rem;
+  max-width: 26rem;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  padding: 7px 9px;
+  text-align: left;
+  vertical-align: top;
+  color: inherit !important;
+  background: transparent !important;
+  overflow-wrap: anywhere;
+}
+
+.md th {
+  background: color-mix(in srgb, var(--fg) 7%, var(--input-bg)) !important;
+  font-weight: 600;
+}
+
+.md tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--fg) 3%, transparent) !important;
+}
+
+.md tr:last-child > td,
+.md tr:last-child > th {
+  border-bottom: 0;
+}
+
+.md tr > :last-child {
+  border-right: 0;
 }
 
 button.inline-path-link {
@@ -1608,6 +1655,8 @@ button.inline-path-link code {
 .status {
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-line;
 }
 
 .model-change {
@@ -2181,6 +2230,73 @@ button.side-chat-peek:active {
 
 .compose-shell > textarea:focus {
   outline: none;
+}
+
+.composer-rich-editor {
+  min-height: 52px;
+  max-height: 320px;
+  overflow: auto;
+  margin: 0 0 36px;
+  padding: 8px 42px 8px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--input-fg);
+  cursor: text;
+  outline: none;
+}
+
+.composer-rich-editor:focus-visible {
+  outline: none;
+}
+
+.composer-preview-label {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.composer-rich-editor.md p:last-child {
+  margin-bottom: 0;
+}
+
+.composer-paste-card {
+  display: grid;
+  width: calc(100% - 20px);
+  gap: 5px;
+  margin: 8px 10px 42px;
+  padding: 9px 10px;
+  overflow: hidden;
+  color: var(--input-fg);
+  text-align: left;
+  font: inherit;
+  background: color-mix(in srgb, var(--accent) 8%, var(--input-bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: 6px;
+  cursor: text;
+  box-sizing: border-box;
+}
+
+.composer-paste-card:hover {
+  border-color: var(--accent);
+}
+
+.composer-paste-card-action {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.composer-paste-card-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .compose-shell:focus-within {
