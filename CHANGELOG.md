@@ -7,6 +7,9 @@
 - Make add-on context conversation-scoped by default so instructions do not leak into unrelated chats. The composer shows the active scope and only shares the value workspace-wide when **Use in every conversation** is checked; existing global text is migrated into the first opened conversation, and forks inherit their source conversation's local context.
 - Allow New chat and Fork while a response is generating. A fork captures the persisted conversation snapshot at the click; the original run continues on its own thread.
 - Make background jobs controllable from the chat banner: running jobs show an explicit stopping state and surface backend stop failures instead of silently ignoring them; completed jobs can be dismissed individually or cleared together; and the log viewer refreshes automatically while open with manual refresh, copy, close, process metadata, and separate stdout/stderr sections. Dismissed job rows stay hidden across webview reloads.
+- Badge the parent conversation when a hidden side chat needs permission, a question, or plan approval, and deliver that prompt when the parent tab is selected. Expand a minimized overlay so the blocking card is visible.
+- Keep the rich Markdown composer in sync when switching threads, even if the editor still has focus, so the previous chat's HTML cannot overwrite the newly restored draft.
+- Clear the collapsed long-paste card when switching conversations so it cannot hide the restored composer.
 
 # 1.0.189
 
