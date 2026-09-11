@@ -1,7 +1,10 @@
-Publisher **`clawagents`** · version **1.0.189**
+Publisher **`clawagents`** · version **1.0.190**
 
-- Release target: extension **1.0.189**. Conversation workflow and diagnostics updates, Threads hover-menu fix, and Settings Bedrock/duplicate-control fixes. Python floor remains **6.20.79**.
+- Release target: extension **1.0.190**. Yuning plan/composer/side-chat/context/job updates plus hidden side-chat prompt badges and composer restore fixes. Python floor remains **6.20.79**.
 - Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
+
+- [x] GitHub release `v1.0.190` + VSIX: rich composer, Plan-only plan tools, per-conversation side chat and add-on context, background job controls, hidden side-chat prompt badges, composer restore fixes; Python floor **6.20.79**.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
 - [x] GitHub release `v1.0.189` + VSIX: conversation workflows, diagnostics, Threads hover, Settings Bedrock/duplicate-control fixes; Python floor **6.20.79**.
       · Marketplace/OpenVSX unavailable: no publishing credentials configured.

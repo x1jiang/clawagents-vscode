@@ -627,6 +627,25 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     events.push(event);
   }
 
+  private parentChatIdForSideChat(sideChatId: string): string | undefined {
+    for (const [parentChatId, id] of this.sideChats) {
+      if (id === sideChatId) return parentChatId;
+    }
+    return undefined;
+  }
+
+  private flushPendingInteractions(...chatIds: Array<string | undefined>): void {
+    const seen = new Set<string>();
+    for (const chatId of chatIds) {
+      if (!chatId || seen.has(chatId)) continue;
+      seen.add(chatId);
+      const pending = this.pendingInteractions.get(chatId);
+      if (!pending?.length) continue;
+      for (const ev of pending) this.post(ev);
+      this.pendingInteractions.delete(chatId);
+    }
+  }
+
   /** Replay the active turn after persisted history has replaced the webview.
    *  User/final messages already present on disk are not emitted twice. */
   private replayLiveRun(chatId: string, chat: Record<string, unknown>): void {
@@ -1606,16 +1625,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           if (this.runs.isActive(msg.chatId)) {
             this.replayLiveRun(msg.chatId, chat);
           }
-          // Flush any buffered interactive events (permission / ask / plan
-          // approval) that arrived while this chat was in the background.
-          const pending = this.pendingInteractions.get(msg.chatId);
-          if (pending?.length) {
-            for (const ev of pending) {
-              this.post(ev);
-            }
-            this.pendingInteractions.delete(msg.chatId);
-            this.post({ type: "chat_attention", chatId: msg.chatId, clear: true });
-          }
+          // Flush prompts that arrived while this chat — or its side chat —
+          // was in the background. Side-chat runs are keyed by the fork id,
+          // but the badge lives on the parent tab the user can actually open.
+          this.flushPendingInteractions(msg.chatId, this.sideChats.get(msg.chatId));
+          this.post({ type: "chat_attention", chatId: msg.chatId, clear: true });
         } catch (err) {
           this.post({
             type: "error",
@@ -3616,8 +3630,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
                 ev.type === "permission_required" ? "permission" as const
                 : ev.type === "ask_user_required" ? "ask" as const
                 : "plan_approval" as const;
-              if (runChatId !== this.chatId && !this.sideChatIds.has(runChatId)) {
-                this.post({ type: "chat_attention", chatId: runChatId, reason });
+              // A side-chat run is never the selected tab. Badge its parent
+              // so the user can switch back and see the overlay prompt.
+              const visibleChatId =
+                this.parentChatIdForSideChat(runChatId) ?? runChatId;
+              if (visibleChatId !== this.chatId) {
+                this.post({ type: "chat_attention", chatId: visibleChatId, reason });
                 return;
               }
             }

@@ -67,6 +67,21 @@ test("failed navigation restores draft ownership so the composer keeps persistin
   );
 });
 
+test("switching conversations remounts the rich editor and drops collapsed paste state", () => {
+  const restore = section(app, 'case "restore": {', 'case "query_index":');
+  assert.match(restore, /setDraft\(msg\.draft \|\| ""\)/);
+  assert.match(restore, /setComposerPreviewCollapsed\(false\)/);
+  assert.match(
+    app,
+    /draftOwnerRef\.current = undefined;\s*setComposerPreviewCollapsed\(false\)/,
+  );
+  assert.match(app, /syncKey: string/);
+  assert.match(app, /key=\{chatId \?\? "new"\}/);
+  assert.match(app, /syncKey=\{chatId \?\? "new"\}/);
+  assert.match(app, /if \(conversationChanged\) focusedRef\.current = false/);
+  assert.match(app, /editorRef\.current\.innerHTML = next/);
+});
+
 test("closing the last tab or all tabs flushes the composer before deselect", () => {
   assert.match(
     app,

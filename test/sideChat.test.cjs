@@ -27,10 +27,14 @@ test("side chats are stored per parent and route hidden-thread events locally", 
   assert.match(app, /sideChatsRef\.current\[candidate\]\?\.chatId === owner/);
   assert.match(app, /replaceSideChat\(parentChatId/);
   assert.match(app, /const applySideChatEvent = \(msg: HostToWebview\)/);
-  assert.match(app, /case "permission_required": return append/);
-  assert.match(app, /case "ask_user_required": return append/);
-  assert.match(app, /case "plan_approval_required": return append/);
-  assert.match(provider, /runChatId !== this\.chatId && !this\.sideChatIds\.has\(runChatId\)/);
+  assert.match(app, /case "permission_required":/);
+  assert.match(app, /case "ask_user_required":/);
+  assert.match(app, /case "plan_approval_required":/);
+  assert.match(app, /kind: "permission"/);
+  assert.match(app, /kind: "ask"/);
+  assert.match(app, /kind: "plan_approval"/);
+  assert.match(provider, /parentChatIdForSideChat\(runChatId\) \?\? runChatId/);
+  assert.match(provider, /visibleChatId !== this\.chatId/);
   assert.match(app, /type: "close_side_chat", chatId: sideChat\.chatId/);
   assert.match(provider, /case "close_side_chat":/);
   assert.match(provider, /this\.cancelTask\(msg\.chatId\)/);
@@ -80,6 +84,21 @@ test("side chat frame supports drag resize and maximize or restore", () => {
   assert.match(app, /onToggleMaximized/);
   assert.match(styles, /\.side-chat\.maximized\s*\{/);
   assert.match(styles, /\.side-chat-resize-handle\s*\{/);
+});
+
+test("hidden side-chat prompts badge the parent and flush when that parent is selected", () => {
+  assert.match(provider, /private parentChatIdForSideChat\(/);
+  assert.match(provider, /private flushPendingInteractions\(/);
+  const selectChat = provider.slice(
+    provider.indexOf('case "select_chat":'),
+    provider.indexOf('case "set_chat_model_route":'),
+  );
+  assert.match(selectChat, /flushPendingInteractions\(msg\.chatId, this\.sideChats\.get\(msg\.chatId\)\)/);
+  assert.match(selectChat, /type: "chat_attention", chatId: msg\.chatId, clear: true/);
+  assert.match(app, /parentChatId !== chatIdRef\.current/);
+  assert.match(app, /next\.set\(parentChatId, reason\)/);
+  assert.match(app, /minimized: reveal \? false : current\.minimized/);
+  assert.match(app, /if \(hasRequest\(msg\.requestId\)\) return current/);
 });
 
 test("side chat launcher attaches to the right edge and conversations open at the latest message", () => {

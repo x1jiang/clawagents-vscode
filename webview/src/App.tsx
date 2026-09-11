@@ -1059,6 +1059,9 @@ function insertRenderedMarkdown(editor: HTMLElement, html: string): boolean {
 
 type RichMarkdownEditorProps = {
   markdown: string;
+  /** Conversation (or other owner) identity. Changing this forces a DOM
+   *  resync even if the editor still thinks it is focused. */
+  syncKey: string;
   onChange: (markdown: string) => void;
   onSend: () => void;
   onPasteFiles: (files: File[]) => void;
@@ -1069,17 +1072,25 @@ type RichMarkdownEditorProps = {
  * crashing the entire webview when both try to remove the same node. */
 const RichMarkdownEditor = memo(function RichMarkdownEditor({
   markdown,
+  syncKey,
   onChange,
   onSend,
   onPasteFiles,
 }: RichMarkdownEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const focusedRef = useRef(false);
+  const syncKeyRef = useRef(syncKey);
   const [html, setHtml] = useState(() => renderedMarkdown(markdown));
 
   useEffect(() => {
-    if (!focusedRef.current) setHtml(renderedMarkdown(markdown));
-  }, [markdown]);
+    const conversationChanged = syncKeyRef.current !== syncKey;
+    syncKeyRef.current = syncKey;
+    if (conversationChanged) focusedRef.current = false;
+    if (focusedRef.current && !conversationChanged) return;
+    const next = renderedMarkdown(markdown);
+    setHtml(next);
+    if (editorRef.current) editorRef.current.innerHTML = next;
+  }, [markdown, syncKey]);
 
   return (
     <div
@@ -2322,9 +2333,20 @@ export function App() {
         (candidate) => sideChatsRef.current[candidate]?.chatId === owner,
       );
       if (!parentChatId) return false;
+      const isInteractivePrompt = INTERACTIVE_EVENT_TYPES.has(msg.type);
       replaceSideChat(parentChatId, (current) => {
         if (current.chatId !== owner) return current;
-        const append = (item: ChatItem) => ({ ...current, items: [...current.items, item] });
+        const append = (item: ChatItem, reveal = false) => ({
+          ...current,
+          items: [...current.items, item],
+          minimized: reveal ? false : current.minimized,
+        });
+        const hasRequest = (requestId: string) =>
+          current.items.some(
+            (item) =>
+              (item.kind === "permission" || item.kind === "ask" || item.kind === "plan_approval") &&
+              item.requestId === requestId,
+          );
         switch (msg.type) {
           case "thread_run_state": return { ...current, busy: msg.running };
           case "model_changed": return append({ kind: "model_change", text: msg.text });
@@ -2400,9 +2422,15 @@ export function App() {
             }
             return { ...current, items };
           }
-          case "permission_required": return append({ kind: "permission", requestId: msg.requestId, tool: msg.tool, filePath: msg.filePath, command: msg.command, reason: msg.reason });
-          case "ask_user_required": return append({ kind: "ask", requestId: msg.requestId, question: msg.question });
-          case "plan_approval_required": return append({ kind: "plan_approval", requestId: msg.requestId, planText: msg.planText });
+          case "permission_required":
+            if (hasRequest(msg.requestId)) return current;
+            return append({ kind: "permission", requestId: msg.requestId, tool: msg.tool, filePath: msg.filePath, command: msg.command, reason: msg.reason }, true);
+          case "ask_user_required":
+            if (hasRequest(msg.requestId)) return current;
+            return append({ kind: "ask", requestId: msg.requestId, question: msg.question }, true);
+          case "plan_approval_required":
+            if (hasRequest(msg.requestId)) return current;
+            return append({ kind: "plan_approval", requestId: msg.requestId, planText: msg.planText }, true);
           case "plan_approved": return { ...current, items: current.items.map((item) => item.kind === "plan_approval" && !item.resolved ? { ...item, resolved: "approve" as const } : item) };
           case "file_changed": return append({ kind: "file", path: msg.path });
           case "done": return { ...append({ kind: "status", text: formatCompletionStatus(msg.status) }), busy: false };
@@ -2411,6 +2439,17 @@ export function App() {
           default: return current;
         }
       });
+      if (isInteractivePrompt && parentChatId !== chatIdRef.current) {
+        const reason =
+          msg.type === "permission_required" ? "permission"
+          : msg.type === "ask_user_required" ? "ask"
+          : "plan_approval";
+        setChatAttention((prev) => {
+          const next = new Map(prev);
+          next.set(parentChatId, reason);
+          return next;
+        });
+      }
       return true;
     };
 
@@ -2875,6 +2914,7 @@ export function App() {
           setRenderWindow(TRANSCRIPT_RENDER_CHUNK);
           setEventsHasMore(Boolean(msg.eventsHasMore));
           setDraft(msg.draft || "");
+          setComposerPreviewCollapsed(false);
           setMode(msg.mode);
           if (msg.interaction === "interactive" || msg.interaction === "auto") {
             setInteraction(msg.mode === "read_only" ? "interactive" : msg.interaction);
@@ -3690,6 +3730,7 @@ export function App() {
     persistDraftNow();
     draftOwnerBeforeNavRef.current = draftOwnerRef.current;
     draftOwnerRef.current = undefined;
+    setComposerPreviewCollapsed(false);
   };
 
   const clearDraft = () => {
@@ -7838,6 +7879,8 @@ export function App() {
                   </button>
                 ) : hasMarkdownFormatting(draft) ? (
                   <RichMarkdownEditor
+                    key={chatId ?? "new"}
+                    syncKey={chatId ?? "new"}
                     markdown={draft}
                     onChange={setDraft}
                     onSend={send}
