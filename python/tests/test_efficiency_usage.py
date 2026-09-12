@@ -1,5 +1,6 @@
 """Sidecar transport totals stay consistent with provider cache and run counters."""
 
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,9 +35,8 @@ def test_usage_aliases_do_not_lose_cached_prompt_tokens():
     )
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("legacy", [False, True])
-async def test_turn_stream_final_and_persisted_usage_agree(
+def test_turn_stream_final_and_persisted_usage_agree(
     monkeypatch, tmp_path, legacy
 ):
     meta = {
@@ -110,7 +110,7 @@ async def test_turn_stream_final_and_persisted_usage_agree(
         return Agent()
 
     monkeypatch.setattr("clawagents.agent.create_claw_agent", factory)
-    result = await chats.run_chat_turn(
+    result = asyncio.run(chats.run_chat_turn(
         chat_id="usage-test",
         content="task",
         mode="auto",
@@ -119,7 +119,7 @@ async def test_turn_stream_final_and_persisted_usage_agree(
         before_tool_factory=lambda **kwargs: lambda *args: None,
         cancel_check=lambda: False,
         caveman=False,
-    )
+    ))
     usage = result["usage"]
     assert usage["prompt_tokens"] == 2000
     assert usage["cached_input_tokens"] == 1600

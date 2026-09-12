@@ -3,6 +3,10 @@ Publisher **`clawagents`** · version **1.0.191**
 - Release target: extension **1.0.191**. Efficiency telemetry, accurate prompt/cache usage, and edited-file tracking after failed follow-up commands. Python floor is **6.20.80**.
 - Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
 
+- [x] clawagents **6.20.80** on PyPI + GitHub: edit follow-ups, paged artifact recall, run-scoped todos, diagnostic receipts, efficiency counters. Published download hashes verified.
+- [x] GitHub release `v1.0.191` + VSIX: efficiency telemetry, corrected prompt/cache usage, changed-file tracking after failed verification; Python floor **6.20.80**. Published VSIX hash verified.
+      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+
 - [x] GitHub release `v1.0.190` + VSIX: rich composer, Plan-only plan tools, per-conversation side chat and add-on context, background job controls, hidden side-chat prompt badges, composer restore fixes; Python floor **6.20.79**.
       · Marketplace/OpenVSX unavailable: no publishing credentials configured.
 
