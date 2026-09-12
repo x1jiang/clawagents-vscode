@@ -28,6 +28,7 @@ PriceTuple = tuple[float, float, float, float]
 
 # Direct API list prices (Anthropic / OpenAI / Gemini / xAI)
 PRICES: dict[str, PriceTuple] = {
+    "gpt-6-astra": (10.0, 50.0, 1.0, 12.5),
     # OpenAI GPT-5.6 family (Sol / Terra / Luna) — cached read = 10%, write = 1.25×
     "gpt-5.6": (5.0, 30.0, 0.5, 6.25),
     "gpt-5.6-sol": (5.0, 30.0, 0.5, 6.25),
@@ -85,6 +86,9 @@ PRICES: dict[str, PriceTuple] = {
 # OpenAI GPT-5.x-on-Bedrock ~+10% vs OpenAI API (including cache tiers).
 # 2-tuple entries derive cache read/write as 0.1× / 1.25× input at lookup.
 BEDROCK_PRICES: dict[str, PriceTuple] = {
+    # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html
+    # Mantle / in-region / US geo; global inference uses direct rates below.
+    "gpt-6-astra": (11.0, 55.0, 1.1, 13.75),
     "claude-opus-4": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-5": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-6": (5.0, 25.0, 0.5, 6.25),
@@ -252,6 +256,8 @@ def price_for_full(
     prov = (provider or "").strip().lower()
     force_bedrock = prov in ("bedrock", "mantle", "amazon", "aws")
     use_bedrock = force_bedrock or _looks_bedrock(raw)
+    if key.startswith("gpt-6-astra") and raw.lower().removeprefix("bedrock/").startswith("global."):
+        return _lookup_table(PRICES, key)
     table = BEDROCK_PRICES if use_bedrock else PRICES
     hit = _lookup_table(table, key)
     if hit is not None:
@@ -272,7 +278,7 @@ _LONG_CONTEXT_OUTPUT_MULT_GROK = 2.0
 
 def _is_gpt56_family(model_id: str) -> bool:
     key = normalize_model_id(model_id)
-    return key.startswith("gpt-5.6") or "gpt-5.6" in key
+    return key.startswith(("gpt-5.6", "gpt-6-astra"))
 
 
 def _is_grok_family(model_id: str) -> bool:

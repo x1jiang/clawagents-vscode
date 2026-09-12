@@ -1,5 +1,11 @@
 # Unreleased
 
+# 1.0.192
+
+- Add GPT-6 Astra to OpenAI and Mantle pickers, including offline catalogs and newly discovered remote models. Keep Terra as the existing default.
+- Route Mantle Astra through Responses, show its us-west-2 requirement, expose valid low-through-max reasoning choices, and report correct context/pricing estimates.
+- Require clawagents 6.20.81, which includes the opt-in delayed-observation experiment and paired benchmark infrastructure.
+
 # 1.0.191
 
 - Require Python 6.20.80 for explicit edit-and-run fusion, bounded artifact recall, diagnostic receipts, and run-scoped todo preservation.

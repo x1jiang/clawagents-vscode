@@ -38,6 +38,7 @@ _MANTLE_MODELS: list[dict[str, Any]] = [
     {"id": "anthropic.claude-opus-4-7", "label": "Claude Opus 4.7 (Mantle · messages)"},
     {"id": "anthropic.claude-fable-5", "label": "Claude Fable 5 (Mantle · needs provider_data_share)"},
     # OpenAI Responses path (…/openai/v1/responses)
+    {"id": "openai.gpt-6-astra", "label": "GPT-6 Astra (Mantle · responses · us-west-2 only)"},
     {"id": "openai.gpt-5.6-sol", "label": "GPT-5.6 Sol (Mantle · responses · us-east-1/2)"},
     {"id": "openai.gpt-5.6-luna", "label": "GPT-5.6 Luna (Mantle · responses)"},
     {"id": "openai.gpt-5.6-terra", "label": "GPT-5.6 Terra (Mantle · responses)"},
@@ -94,6 +95,7 @@ _CATALOG: list[dict[str, Any]] = [
             # GPT-5.6 family (current flagship ladder). Terra leads: it is the
             # default for OpenAI, and the picker reads top-down.
             {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra"},
+            {"id": "gpt-6-astra", "label": "GPT-6 Astra"},
             {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna"},
             {"id": "gpt-5.6-sol", "label": "GPT-5.6 Sol"},
             {"id": "gpt-5.6", "label": "GPT-5.6 (alias → Sol)"},
@@ -411,6 +413,15 @@ def _merge_curated_with_remote(
         if str(model.get("id") or "").strip() in remote_ids
     ]
     if merged:
+        # New models must survive a partial overlap with our static catalog.
+        seen = {str(model.get("id") or "").strip() for model in merged}
+        for model in remote:
+            if not isinstance(model, dict):
+                continue
+            model_id = str(model.get("id") or "").strip()
+            if model_id and model_id not in seen:
+                merged.append(model)
+                seen.add(model_id)
         return merged
     if remote:
         return list(remote)

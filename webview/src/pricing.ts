@@ -26,6 +26,7 @@ function withCache(input: number, output: number, cached?: number, write?: numbe
 }
 
 const PRICES: Record<string, Rates> = {
+  "gpt-6-astra": withCache(10, 50, 1, 12.5),
   "gpt-5.6": withCache(5, 30, 0.5, 6.25),
   "gpt-5.6-sol": withCache(5, 30, 0.5, 6.25),
   "gpt-5.6-terra": withCache(2, 12, 0.2, 2.5),
@@ -82,6 +83,8 @@ const BEDROCK_PRICES: Record<string, Rates> = {
   "claude-sonnet-4-6": withCache(3, 15, 0.3, 3.75),
   "claude-sonnet-5": withCache(2, 10, 0.2, 2.5),
   "claude-haiku-4-5": withCache(1, 5, 0.1, 1.25),
+  // AWS Astra model card: in-region / US geo; Mantle only in us-west-2.
+  "gpt-6-astra": withCache(11, 55, 1.1, 13.75),
   "gpt-5.6": withCache(5.5, 33, 0.55, 6.875),
   "gpt-5.6-sol": withCache(5.5, 33, 0.55, 6.875),
   "gpt-5.6-terra": withCache(2.2, 13.2, 0.22, 2.75),
@@ -211,6 +214,9 @@ function lookup(
   if (!key || key === "default") return null;
   const prov = (provider || "").trim().toLowerCase();
   const forceBedrock = ["bedrock", "mantle", "amazon", "aws"].includes(prov);
+  if (key.startsWith("gpt-6-astra") && raw.toLowerCase().replace(/^bedrock\//, "").startsWith("global.")) {
+    return lookupTable(PRICES, key);
+  }
   const primary = forceBedrock || looksBedrock(raw) ? BEDROCK_PRICES : PRICES;
   const hit = lookupTable(primary, key);
   if (hit) return hit;
@@ -227,7 +233,7 @@ const LONG_CONTEXT_OUTPUT_MULT_GROK = 2;
 
 function isGpt56Family(modelId: string): boolean {
   const key = normalizeModelId(modelId);
-  return key.startsWith("gpt-5.6") || key.includes("gpt-5.6");
+  return key.startsWith("gpt-5.6") || key.startsWith("gpt-6-astra");
 }
 
 function isGrokFamily(modelId: string): boolean {

@@ -46,6 +46,7 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     name: "OpenAI",
     models: [
       { id: PREFERRED_OPENAI_MODEL, label: "GPT-5.6 Terra" },
+      { id: "gpt-6-astra", label: "GPT-6 Astra" },
       { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
       { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
       { id: "gpt-4o", label: "GPT-4o" },
@@ -127,6 +128,7 @@ export const MANTLE_FALLBACK_MODELS: Array<{ id: string; label: string }> = [
   { id: "anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (Mantle · messages)" },
   { id: "anthropic.claude-opus-4-8", label: "Claude Opus 4.8 (Mantle · messages)" },
   { id: "anthropic.claude-fable-5", label: "Claude Fable 5 (Mantle · needs provider_data_share)" },
+  { id: "openai.gpt-6-astra", label: "GPT-6 Astra (Mantle · responses · us-west-2 only)" },
   { id: "openai.gpt-5.6-sol", label: "GPT-5.6 Sol (Mantle · responses · us-east-1/2)" },
   { id: "openai.gpt-5.6-luna", label: "GPT-5.6 Luna (Mantle · responses)" },
   { id: "openai.gpt-5.6-terra", label: "GPT-5.6 Terra (Mantle · responses)" },
@@ -162,7 +164,7 @@ export function isMantleOpenAIResponsesModel(id: string): boolean {
     .toLowerCase();
   if (m.startsWith("openai.")) m = m.slice("openai.".length);
   if (!m || m.includes("gpt-oss")) return false;
-  return /gpt-5\.[3456]/.test(m);
+  return /gpt-5\.[3456]|gpt-6-astra/.test(m);
 }
 
 /** xAI Grok on Mantle — must use ``…/openai/v1``, not plain ``…/v1``. */
@@ -350,7 +352,11 @@ export function expandBedrockProviderChoices(
     }
     const catalog = p.models || [];
     const iamModels = catalog.filter((m) => isNativeBedrockModelId(m.id));
-    const mantleModels = catalog.filter((m) => isMantleCatalogModelId(m.id));
+    // Native GPT-OSS IDs also look like Mantle IDs. They must not suppress
+    // the Mantle fallback catalog when discovery is for the IAM endpoint.
+    const mantleEndpoint = (p.base_url || "").includes("bedrock-mantle.");
+    const mantleModels = catalog.filter((m) => isMantleCatalogModelId(m.id)
+      && (mantleEndpoint || !isNativeBedrockModelId(m.id)));
     const mark = (
       models: Array<{
         id: string;

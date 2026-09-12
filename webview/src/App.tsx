@@ -1,3 +1,4 @@
+import { modelSupportsEffort, effortOptionsForModel } from "./modelSelection";
 import { normalizeEfficiency, efficiencyLabel, type Efficiency } from "../../src/efficiency";
 import {
   memo,
@@ -67,15 +68,6 @@ import {
   type ToolCallItem,
 } from "./toolPresentation";
 
-/** OpenAI reasoning effort — labels match Cursor / ChatGPT Effort UI. */
-const EFFORT_OPTIONS = [
-  { value: "low", label: "Light" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "Extra High" },
-  { value: "none", label: "None" },
-] as const;
-
 const MODE_HELP = {
   goal:
     "Goal autopilot runs planner → verify → strategist. It prefers start_goal / update_goal for multi-step work.",
@@ -117,16 +109,6 @@ const RUN_SCOPED_EVENT_TYPES = new Set<HostToWebview["type"]>([
 
 const THREADS_POPOVER_CLOSE_DELAY_MS = 180;
 
-function modelSupportsEffort(model: string): boolean {
-  let m = model.trim().toLowerCase();
-  if (!m) return false;
-  // Mantle catalog prefixes the OpenAI id (openai.gpt-5.6-…).
-  if (m.startsWith("openai.")) m = m.slice("openai.".length);
-  if (m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4")) return true;
-  if (m.startsWith("gpt-5.5") || m.startsWith("gpt-5.6")) return true;
-  if (m === "gpt-5" || m.startsWith("gpt-5-")) return true;
-  return false;
-}
 
 type ChatItem =
   | { kind: "user"; text: string; timestamp?: string; eventIndex?: number }
@@ -4916,7 +4898,7 @@ export function App() {
             activeModelId={activeModelId}
             effort={String(threadSettings.reasoning_effort || "")}
             showEffort={modelSupportsEffort(activeModelId || model)}
-            efforts={EFFORT_OPTIONS}
+            efforts={effortOptionsForModel(activeModelId || model)}
             onProviderChange={selectThreadProvider}
             onModelChange={selectModel}
             onEffortChange={selectEffort}
@@ -6531,7 +6513,7 @@ export function App() {
                       value={String(settings.reasoning_effort || "medium")}
                       onChange={(e) => selectDefaultEffort(e.target.value)}
                     >
-                      {EFFORT_OPTIONS.map((o) => (
+                      {effortOptionsForModel(String(settings.model || "")).map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
                         </option>

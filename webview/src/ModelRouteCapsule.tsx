@@ -12,7 +12,7 @@ type EffortOption = {
   label: string;
 };
 
-const COMMON_OPENAI_MODELS = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
+const COMMON_OPENAI_MODELS = ["gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
 
 type Props = {
   disabled: boolean;
