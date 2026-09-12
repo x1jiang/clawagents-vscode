@@ -1,3 +1,4 @@
+import { normalizeEfficiency } from "./efficiency";
 import * as http from "http";
 import * as vscode from "vscode";
 import type { SidecarHandle } from "./sidecar";
@@ -200,9 +201,12 @@ export function mapAgentEvent(
         requestId: String(data.request_id ?? data.requestId ?? ""),
         planText: String(data.plan_text ?? data.planText ?? ""),
       };
+    case "efficiency":
+      return { type: "efficiency", efficiency: normalizeEfficiency(data.efficiency) };
     case "usage":
       return {
         type: "usage",
+        efficiency: normalizeEfficiency(data.efficiency),
         promptTokens: num(data.prompt_tokens ?? data.promptTokens ?? data.input_tokens),
         completionTokens: num(
           data.completion_tokens ?? data.completionTokens ?? data.output_tokens,
@@ -662,10 +666,13 @@ export class GatewayClient {
                   snapshotId: data.snapshot_id ? String(data.snapshot_id) : undefined,
                   snapshotRel: data.snapshot_rel ? String(data.snapshot_rel) : undefined,
                 });
+              } else if (ev.event === "efficiency") {
+                emit({ type: "efficiency", efficiency: normalizeEfficiency(data.efficiency) });
               } else if (ev.event === "usage") {
                 const usageObj = data as Record<string, unknown>;
                 emit({
                   type: "usage",
+                  efficiency: normalizeEfficiency(data.efficiency),
                   promptTokens: num(data.prompt_tokens),
                   completionTokens: num(data.completion_tokens),
                   totalTokens: num(data.total_tokens),

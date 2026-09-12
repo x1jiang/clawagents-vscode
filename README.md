@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.79** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
+- **clawagents ≥ 6.20.80** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -15,7 +15,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into `clawagents.pythonPath`:
 
 ```text
-clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.79,<7  fastapi  uvicorn  pydantic  python-dotenv
+clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.80,<7  fastapi  uvicorn  pydantic  python-dotenv
 ```
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
@@ -29,6 +29,7 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 ## Features
 
 - Multi-turn chats with history, regenerate, live token usage, and independent concurrent conversation tabs
+- Cache read/write accounting and an **efficiency** tooltip for fused follow-ups, artifact token estimates, diagnostic reduction, and compaction counts when reported by the Python core; completed-run usage survives chat reloads
 - Per-conversation side chat overlays that keep running across thread switches and support minimize, maximize, and drag resizing
 - Permission modes: ask · read-only · auto · full access
 - Opt-in auto-approve for edits, shell, and web

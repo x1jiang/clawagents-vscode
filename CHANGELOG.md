@@ -1,5 +1,12 @@
 # Unreleased
 
+# 1.0.191
+
+- Require Python 6.20.80 for explicit edit-and-run fusion, bounded artifact recall, diagnostic receipts, and run-scoped todo preservation.
+- Show per-run efficiency counters in live and restored usage; retain cache-read and cache-write counts and correct cached-prompt undercounting.
+- Keep successfully edited files visible when a fused follow-up command fails.
+- Preserve compatibility with older usage payloads. Token reductions are estimates, not measured billing savings.
+
 # 1.0.190
 
 - Add a theme-aware rich Markdown composer with directly editable lists and tables, structured clipboard conversion, compact handling for long pastes, and a `/help` shortcut guide. Preserve Markdown source when clipboard HTML would otherwise break GFM tables, and isolate editable DOM so Backspace/Delete cannot crash the webview.

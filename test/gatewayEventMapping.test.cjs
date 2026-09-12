@@ -73,3 +73,16 @@ test("tool completion cards are not affected by artifact notice filtering", () =
     },
   );
 });
+
+test("usage keeps efficiency snapshots and both cache directions", () => {
+  const mapped = mapAgentEvent("usage", {
+    prompt_tokens: 1000, cached_input_tokens: 700, cache_creation_tokens: 100,
+    efficiency: {round_trips_avoided: 2, compactions: {micro: 1}},
+  });
+  assert.equal(mapped.promptTokens, 1000);
+  assert.equal(mapped.cachedInputTokens, 700);
+  assert.equal(mapped.cacheCreationTokens, 100);
+  assert.equal(mapped.efficiency.round_trips_avoided, 2);
+  assert.deepEqual(mapped.efficiency.compactions, {micro: 1});
+  assert.equal(mapAgentEvent("usage", {prompt_tokens: 100}).efficiency, undefined);
+});

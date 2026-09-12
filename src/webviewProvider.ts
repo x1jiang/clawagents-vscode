@@ -1,3 +1,4 @@
+import { mapAgentEvent } from "./gatewayClient";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
@@ -560,8 +561,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     const title =
       (typeof chatTitle === "string" && chatTitle.trim()) ||
       (typeof chat.title === "string" ? chat.title : undefined);
+    const lastDone = [...events].reverse().find((event) => event.kind === "done");
+    const savedUsage = lastDone?.usage;
+    const mappedUsage = savedUsage && typeof savedUsage === "object"
+      ? mapAgentEvent("usage", savedUsage as Record<string, unknown>)
+      : null;
     this.post({
       type: "restore",
+      usage: !this.runs.isActive(chatId) && mappedUsage?.type === "usage" ? mappedUsage : undefined,
       items: eventsToItems(events, this.eventsOffset),
       draft: draft ?? this.draftForChat(chatId),
       mode: (chat.mode as AgentMode) || this.mode,

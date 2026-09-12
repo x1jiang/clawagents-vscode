@@ -1,3 +1,4 @@
+import type { Efficiency } from "./efficiency";
 /** Typed messages between the extension host and the webview. */
 
 /**
@@ -139,6 +140,7 @@ export type HostToWebview =
     }
   | {
       type: "usage";
+      efficiency?: Efficiency;
       promptTokens?: number;
       completionTokens?: number;
       totalTokens?: number;
@@ -151,6 +153,11 @@ export type HostToWebview =
       maxInputTokens?: number;
       longContextRequestCount?: number;
       nextPromptEstTokens?: number;
+      chatId?: string;
+    }
+  | {
+      type: "efficiency";
+      efficiency?: Efficiency;
       chatId?: string;
     }
   | {
@@ -190,6 +197,7 @@ export type HostToWebview =
   | { type: "prepend"; text: string }
   | {
       type: "restore";
+      usage?: Extract<HostToWebview, { type: "usage" }>;
       items: unknown[];
       draft?: string;
       mode: AgentMode;

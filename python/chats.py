@@ -24,7 +24,6 @@ from paths import (
     ensure_dirs,
     now_ts,
     read_json,
-    read_project_instructions,
 )
 from settings_store import load_settings
 from pricing import estimate_usd, long_context_multipliers
@@ -737,6 +736,7 @@ def append_tool_ui_event(
         event.update(
             {
                 "success": bool(payload.get("success", True)),
+                "mutation_success": payload.get("mutation_success"),
                 "output": str(output or "")[:TOOL_UI_OUTPUT_MAX_CHARS],
             }
         )
@@ -1738,6 +1738,26 @@ def _normalize_files(files: list[dict[str, Any]] | None) -> list[dict[str, Any]]
     return out
 
 
+def tool_mutation_succeeded(payload: dict[str, Any]) -> bool:
+    """A fused edit can be saved even when its subsequent validation failed."""
+    mutation = payload.get("mutation_success")
+    return mutation if isinstance(mutation, bool) else bool(payload.get("success", True))
+
+
+def _ev_usage_int(ev: Any, *names: str) -> int:
+    """Prefer a populated canonical count; tolerate legacy zero-valued fields."""
+    data = getattr(ev, "data", None)
+    for name in names:
+        for raw in (getattr(ev, name, None), data.get(name) if isinstance(data, dict) else None):
+            try:
+                value = int(raw or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if value > 0:
+                return value
+    return 0
+
+
 async def run_chat_turn(
     *,
     chat_id: str,
@@ -2110,25 +2130,6 @@ async def run_chat_turn(
         kwargs.get("provider") or settings.get("provider") or ""
     )
 
-    def _ev_usage_int(ev: Any, *names: str) -> int:
-        """Read a usage int from typed StreamEvent fields or ``ev.data``."""
-        for name in names:
-            raw = getattr(ev, name, None)
-            if raw is not None:
-                try:
-                    return int(raw or 0)
-                except (TypeError, ValueError):
-                    pass
-        data = getattr(ev, "data", None)
-        if isinstance(data, dict):
-            for name in names:
-                if name in data:
-                    try:
-                        return int(data.get(name) or 0)
-                    except (TypeError, ValueError):
-                        pass
-        return 0
-
     def _session_message_count() -> int:
         mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
         if not mem.exists():
@@ -2213,6 +2214,7 @@ async def run_chat_turn(
                 "name": getattr(ev, "tool_name", "") or "tool",
                 "call_id": getattr(ev, "call_id", "") or "",
                 "success": bool(getattr(ev, "success", True)),
+                "mutation_success": getattr(ev, "mutation_success", None),
                 # Empty output + non-empty error is common for blocked
                 # commands; surface the error so the webview isn't blank.
                 "output": out if str(out).strip() else (err or ""),
@@ -2224,17 +2226,29 @@ async def run_chat_turn(
                 payload,
             )
             on_event("tool_completed", payload)
+        elif kind == "efficiency":
+            efficiency = getattr(ev, "efficiency", None)
+            if not efficiency and isinstance(getattr(ev, "data", None), dict):
+                efficiency = ev.data.get("efficiency")
+            if isinstance(efficiency, dict):
+                usage_totals["efficiency"] = efficiency
+                on_event("efficiency", {"efficiency": efficiency})
         elif kind == "usage":
             # Cumulative across LLM calls this run (for totals / cache %).
             # Cost is summed per-request so the >272K long-context multiplier
             # applies only to requests that actually exceed the cliff.
-            inp = _ev_usage_int(ev, "input_tokens")
+            inp = _ev_usage_int(ev, "prompt_tokens", "input_tokens")
             out = _ev_usage_int(ev, "output_tokens")
             tot = _ev_usage_int(ev, "total_tokens")
             cached = _ev_usage_int(
                 ev, "cached_input_tokens", "cache_read_tokens"
             )
-            created = _ev_usage_int(ev, "cache_creation_tokens")
+            created = _ev_usage_int(ev, "cache_creation_tokens", "cache_write_tokens")
+            efficiency = getattr(ev, "efficiency", None)
+            if not efficiency and isinstance(getattr(ev, "data", None), dict):
+                efficiency = ev.data.get("efficiency")
+            if isinstance(efficiency, dict) and efficiency:
+                usage_totals["efficiency"] = efficiency
             usage_totals["prompt_tokens"] += inp
             usage_totals["completion_tokens"] += out
             usage_totals["total_tokens"] += tot
@@ -2444,6 +2458,9 @@ async def run_chat_turn(
 
     usage = getattr(result, "usage", None)
     result_usage: dict[str, Any] = {}
+    run_efficiency = getattr(result, "efficiency", None)
+    if not isinstance(run_efficiency, dict):
+        run_efficiency = usage_totals.get("efficiency")
     if usage is not None:
         # Do NOT emit a usage event here — result.usage is often a single-call
         # blob without last_input_tokens, and the webview used to treat missing
@@ -2521,6 +2538,9 @@ async def run_chat_turn(
         "provider": provider_for_cost,
         "reasoning_effort": str(settings.get("reasoning_effort") or ""),
     }
+
+    if isinstance(run_efficiency, dict):
+        usage_payload["efficiency"] = run_efficiency
 
     latest = get_chat(chat_id) or meta
     prev_session = float(latest.get("session_cost_usd") or 0.0)

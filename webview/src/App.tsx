@@ -1,3 +1,4 @@
+import { normalizeEfficiency, efficiencyLabel, type Efficiency } from "../../src/efficiency";
 import {
   memo,
   useCallback,
@@ -1884,6 +1885,7 @@ export function App() {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    efficiency?: Efficiency;
     cachedInputTokens?: number;
     cacheCreationTokens?: number;
     lastInputTokens?: number;
@@ -1933,6 +1935,7 @@ export function App() {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
+    efficiency?: Efficiency;
     cachedInputTokens?: number;
     cacheCreationTokens?: number;
     lastInputTokens?: number;
@@ -2099,6 +2102,7 @@ export function App() {
   const commitRunCost = (u: {
     promptTokens?: number;
     completionTokens?: number;
+    efficiency?: Efficiency;
     cachedInputTokens?: number;
     cacheCreationTokens?: number;
   }, serverSession?: number) => {
@@ -2951,6 +2955,8 @@ export function App() {
           resetSessionCost(
             typeof msg.sessionCostUsd === "number" ? msg.sessionCostUsd : 0,
           );
+          setUsage(msg.usage ?? {});
+          runUsageRef.current = msg.usage ?? {};
           setBusy(Boolean(msg.busy));
           streamingRef.current = false;
           if (pendingForkRef.current) {
@@ -3194,6 +3200,12 @@ export function App() {
             ]);
           }
           break;
+        case "efficiency": {
+          if (isStaleEvent(msg) || !msg.efficiency) break;
+          runUsageRef.current = { ...runUsageRef.current, efficiency: msg.efficiency };
+          setUsage((previous) => ({ ...previous, efficiency: msg.efficiency }));
+          break;
+        }
         case "usage": {
           if (isStaleEvent(msg)) break;
           // Never treat missing lastInputTokens as promptTokens — the latter is
@@ -3202,6 +3214,7 @@ export function App() {
             promptTokens: msg.promptTokens,
             completionTokens: msg.completionTokens,
             totalTokens: msg.totalTokens,
+            efficiency: msg.efficiency ?? runUsageRef.current?.efficiency,
             cachedInputTokens: msg.cachedInputTokens,
             cacheCreationTokens: msg.cacheCreationTokens,
             lastInputTokens:
@@ -3310,8 +3323,9 @@ export function App() {
               promptTokens: u.prompt_tokens,
               completionTokens: u.completion_tokens,
               totalTokens: u.total_tokens,
+              efficiency: normalizeEfficiency((msg.usage as Record<string, unknown>).efficiency) ?? runUsageRef.current?.efficiency,
               cachedInputTokens: u.cached_input_tokens ?? u.cache_read_tokens,
-              cacheCreationTokens: u.cache_creation_tokens,
+              cacheCreationTokens: u.cache_creation_tokens ?? u.cache_write_tokens,
               lastInputTokens: lastIn,
               requestCount: u.request_count,
               maxInputTokens: u.max_input_tokens,
@@ -4949,7 +4963,7 @@ export function App() {
                 : ""}
             </span>
           )}
-          {cacheHitPct != null && (
+          {(cacheHitPct != null || cacheCreateTok > 0) && (
             <span
               className="meta-stat cache-hit"
               title={`${cachedTok.toLocaleString()} of ${promptTok.toLocaleString()} run-cumulative prompt tokens hit the provider cache${
@@ -4958,7 +4972,12 @@ export function App() {
                   : ""
               }`}
             >
-              cache {cacheHitPct}%
+              {cacheHitPct != null ? `cache ${cacheHitPct}%` : `cache write ${cacheCreateTok.toLocaleString()}`}
+            </span>
+          )}
+          {efficiencyLabel(usage.efficiency) && (
+            <span className="meta-stat" title={efficiencyLabel(usage.efficiency)}>
+              efficiency
             </span>
           )}
           {runCost != null && totalTok > 0 && (

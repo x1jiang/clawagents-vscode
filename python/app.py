@@ -16,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from chats import (
+    tool_mutation_succeeded,
     append_ui_event,
     create_chat,
     delete_chat,
@@ -1809,7 +1810,7 @@ def create_app() -> FastAPI:
                 name = str(payload.get("name") or "")
                 call_id = str(payload.get("call_id") or "")
                 args = pending_tool_args.pop(call_id, {})
-                if name not in WRITE_CLASS_TOOLS or not payload.get("success", True):
+                if name not in WRITE_CLASS_TOOLS or not tool_mutation_succeeded(payload):
                     return
                 fp = _extract_path(args)
                 if fp:

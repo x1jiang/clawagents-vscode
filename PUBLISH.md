@@ -1,6 +1,6 @@
-Publisher **`clawagents`** · version **1.0.190**
+Publisher **`clawagents`** · version **1.0.191**
 
-- Release target: extension **1.0.190**. Yuning plan/composer/side-chat/context/job updates plus hidden side-chat prompt badges and composer restore fixes. Python floor remains **6.20.79**.
+- Release target: extension **1.0.191**. Efficiency telemetry, accurate prompt/cache usage, and edited-file tracking after failed follow-up commands. Python floor is **6.20.80**.
 - Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
 
 - [x] GitHub release `v1.0.190` + VSIX: rich composer, Plan-only plan tools, per-conversation side chat and add-on context, background job controls, hidden side-chat prompt badges, composer restore fixes; Python floor **6.20.79**.
