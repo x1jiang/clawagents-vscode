@@ -39,6 +39,8 @@ const PRICES: Record<string, Rates> = {
   "gpt-5.4-pro": withCache(30, 180, 3, 37.5),
   "gpt-4o": withCache(2.5, 10, 1.25, 3.125),
   "gpt-4o-mini": withCache(0.15, 0.6, 0.075, 0.1875),
+  "claude-fable-5-1": withCache(10, 50, 0.25, 12.5),
+  "claude-opus-5": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-5": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-6": withCache(5, 25, 0.5, 6.25),
@@ -52,7 +54,7 @@ const PRICES: Record<string, Rates> = {
   "claude-haiku-4-5-20251001": withCache(1, 5, 0.1, 1.25),
   "gemini-3.8-flash": withCache(0.75, 3.75),
   "gemini-3.7-flash": withCache(0.75, 3.75),
-  "gemini-3.6-flash": withCache(1.5, 7.5),
+  "gemini-3.6-flash": withCache(0.75, 3.75),
   "gemini-3.5-flash": withCache(1.5, 9),
   "gemini-3.5-flash-lite": withCache(0.3, 2.5),
   "gemini-3.1-pro-preview": withCache(2, 12),
@@ -61,6 +63,7 @@ const PRICES: Record<string, Rates> = {
   "gemini-2.5-pro": withCache(1.25, 10),
   "gemini-2.5-flash": withCache(0.3, 2.5),
   // xAI Grok — short-context (<200K) from https://docs.x.ai/developers/pricing
+  "grok-4.6": withCache(2, 6, 0.5, 2),
   "grok-4.5": withCache(2, 6, 0.3, 2.5),
   "grok-4.3": withCache(1.25, 2.5, 0.2, 1.5625),
   "grok-4.20-0309-reasoning": withCache(1.25, 2.5, 0.2, 1.5625),
@@ -73,6 +76,13 @@ const PRICES: Record<string, Rates> = {
 
 /** Bedrock / Mantle US Standard on-demand (aws.amazon.com/bedrock/pricing/). */
 const BEDROCK_PRICES: Record<string, Rates> = {
+  "grok-4.6": withCache(2.2, 6.6, 0.55, 2.2),
+  // Cache tiers unverified for these AWS cards; estimate at full input rate.
+  "minimax-m2.5": withCache(0.3, 1.2, 0.3, 0.3),
+  "devstral-2-123b": withCache(0.4, 2, 0.4, 0.4),
+  "qwen3-coder-next": withCache(0.5, 1.2, 0.5, 0.5),
+  "nemotron-super-3-120b": withCache(0.15, 0.65, 0.15, 0.15),
+  "mistral-large-3-675b-instruct": withCache(0.5, 1.5, 0.5, 0.5),
   "claude-opus-4": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-5": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-6": withCache(5, 25, 0.5, 6.25),
@@ -81,7 +91,6 @@ const BEDROCK_PRICES: Record<string, Rates> = {
   "claude-sonnet-4": withCache(3, 15, 0.3, 3.75),
   "claude-sonnet-4-5": withCache(3, 15, 0.3, 3.75),
   "claude-sonnet-4-6": withCache(3, 15, 0.3, 3.75),
-  "claude-sonnet-5": withCache(2, 10, 0.2, 2.5),
   "claude-haiku-4-5": withCache(1, 5, 0.1, 1.25),
   // AWS Astra model card: in-region / US geo; Mantle only in us-west-2.
   "gpt-6-astra": withCache(11, 55, 1.1, 13.75),
@@ -119,6 +128,9 @@ const PROVIDER_DOT_PREFIXES = [
   "openai.",
   "amazon.",
   "meta.",
+  "minimax.",
+  "qwen.",
+  "nvidia.",
   "mistral.",
   "cohere.",
   "ai21.",
@@ -214,9 +226,10 @@ function lookup(
   if (!key || key === "default") return null;
   const prov = (provider || "").trim().toLowerCase();
   const forceBedrock = ["bedrock", "mantle", "amazon", "aws"].includes(prov);
-  if (key.startsWith("gpt-6-astra") && raw.toLowerCase().replace(/^bedrock\//, "").startsWith("global.")) {
+  if ((key.startsWith("gpt-6-astra") || key.startsWith("grok-4.6")) && raw.toLowerCase().replace(/^bedrock\//, "").startsWith("global.")) {
     return lookupTable(PRICES, key);
   }
+  if ((forceBedrock || looksBedrock(raw)) && /^(claude-fable-5-1|claude-opus-5|claude-sonnet-5)/.test(key)) return null;
   const primary = forceBedrock || looksBedrock(raw) ? BEDROCK_PRICES : PRICES;
   const hit = lookupTable(primary, key);
   if (hit) return hit;
@@ -233,7 +246,8 @@ const LONG_CONTEXT_OUTPUT_MULT_GROK = 2;
 
 function isGpt56Family(modelId: string): boolean {
   const key = normalizeModelId(modelId);
-  return key.startsWith("gpt-5.6") || key.startsWith("gpt-6-astra");
+  return key.startsWith("gpt-5.6") || key.startsWith("gpt-6-astra") || key.startsWith("gpt-5.5")
+    || (key.startsWith("gpt-5.4") && !/^gpt-5\.4-(mini|nano)/.test(key));
 }
 
 function isGrokFamily(modelId: string): boolean {

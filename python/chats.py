@@ -1617,6 +1617,8 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
                 model_l = str(kwargs.get("model") or effective_model or "").lower()
                 if model_l.startswith("anthropic.") or model_l.startswith("claude"):
                     pass  # Messages API; wire_api unused
+                elif model_l.startswith(("xai.grok", "grok-")):
+                    kwargs["wire_api"] = "responses"
                 elif "gpt-oss" not in model_l and any(
                     t in model_l for t in ("gpt-5.3", "gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-6-astra")
                 ):

@@ -17,13 +17,19 @@ from url_trust import is_trusted_base_url
 # Curated AWS Bedrock Mantle (OneHUB) models — us-east-1 has the fullest list.
 # Live GET {base}/models still merges/extends when a Mantle key is present.
 _MANTLE_MODELS: list[dict[str, Any]] = [
-    # Chat-completions path (…/v1/chat/completions)
     {"id": "openai.gpt-oss-20b", "label": "GPT-OSS 20B (Mantle · chat)"},
+    {"id": "minimax.minimax-m2.5", "label": "MiniMax M2.5 (Mantle · chat)"},
+    {"id": "mistral.devstral-2-123b", "label": "Devstral 2 123B (Mantle · chat)"},
+    {"id": "qwen.qwen3-coder-next", "label": "Qwen3 Coder Next (Mantle · chat)"},
+    {"id": "nvidia.nemotron-super-3-120b", "label": "Nemotron Super 3 120B (Mantle · chat)"},
+    {"id": "mistral.mistral-large-3-675b-instruct", "label": "Mistral Large 3 (Mantle · chat)"},
+    # Chat-completions path (…/v1/chat/completions)
     {"id": "openai.gpt-oss-120b", "label": "GPT-OSS 120B (Mantle · chat)"},
     {"id": "openai.gpt-oss-safeguard-20b", "label": "GPT-OSS Safeguard 20B"},
     {"id": "openai.gpt-oss-safeguard-120b", "label": "GPT-OSS Safeguard 120B"},
     {"id": "deepseek.v3.2", "label": "DeepSeek V3.2 (Mantle · chat)"},
     {"id": "deepseek.v3.1", "label": "DeepSeek V3.1 (Mantle · chat)"},
+    {"id": "xai.grok-4.6", "label": "Grok 4.6 (Mantle · responses · us-west-2 only)"},
     {"id": "xai.grok-4.3", "label": "xAI Grok 4.3 (Mantle · openai/v1)"},
     {"id": "moonshotai.kimi-k2.5", "label": "Kimi K2.5 (Mantle · chat)"},
     {"id": "moonshotai.kimi-k2-thinking", "label": "Kimi K2 Thinking (Mantle · chat)"},
@@ -33,10 +39,11 @@ _MANTLE_MODELS: list[dict[str, Any]] = [
     {"id": "zai.glm-4.6", "label": "Z.ai GLM-4.6 (Mantle · chat)"},
     # Anthropic Messages path (…/anthropic/v1/messages, Bearer via Mantle client)
     {"id": "anthropic.claude-haiku-4-5", "label": "Claude Haiku 4.5 (Mantle · messages)"},
-    {"id": "anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (Mantle · messages)"},
+    {"id": "anthropic.claude-opus-5", "label": "Claude Opus 5 (Mantle · messages · us-east-1 / EU / Melbourne)"},
+    {"id": "anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (Mantle · messages · us-east-1 / EU / Melbourne)"},
     {"id": "anthropic.claude-opus-4-8", "label": "Claude Opus 4.8 (Mantle · messages)"},
     {"id": "anthropic.claude-opus-4-7", "label": "Claude Opus 4.7 (Mantle · messages)"},
-    {"id": "anthropic.claude-fable-5", "label": "Claude Fable 5 (Mantle · needs provider_data_share)"},
+    {"id": "anthropic.claude-fable-5", "label": "Claude Fable 5 (Mantle · requires AWS review opt-in)"},
     # OpenAI Responses path (…/openai/v1/responses)
     {"id": "openai.gpt-6-astra", "label": "GPT-6 Astra (Mantle · responses · us-west-2 only)"},
     {"id": "openai.gpt-5.6-sol", "label": "GPT-5.6 Sol (Mantle · responses · us-east-1/2)"},
@@ -116,6 +123,11 @@ _CATALOG: list[dict[str, Any]] = [
         "env_key": "ANTHROPIC_API_KEY",
         "models": [
             {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"},
+            {"id": "claude-fable-5-1", "label": "Claude Fable 5.1"},
+            {"id": "claude-opus-5", "label": "Claude Opus 5"},
+            {"id": "claude-sonnet-5", "label": "Claude Sonnet 5"},
+            {"id": "claude-opus-4-8", "label": "Claude Opus 4.8"},
+            {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
             {"id": "claude-opus-4-6", "label": "Claude Opus 4.6"},
             {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"},
         ],
@@ -147,6 +159,7 @@ _CATALOG: list[dict[str, Any]] = [
         # List prices: https://docs.x.ai/developers/pricing (attached via pricing.py)
         "models": [
             {"id": "grok-4.5", "label": "Grok 4.5"},
+            {"id": "grok-4.6", "label": "Grok 4.6"},
             {"id": "grok-4.3", "label": "Grok 4.3"},
             {"id": "grok-4.20-0309-reasoning", "label": "Grok 4.20 Reasoning"},
             {"id": "grok-4.20-0309-non-reasoning", "label": "Grok 4.20 Non-reasoning"},
@@ -176,7 +189,7 @@ _CATALOG: list[dict[str, Any]] = [
                 "label": "Claude Sonnet 4.5 (US)",
             },
             {
-                "id": "us.anthropic.claude-opus-4-6-20251101-v1:0",
+                "id": "us.anthropic.claude-opus-4-6-v1",
                 "label": "Claude Opus 4.6 (US)",
             },
             {
@@ -187,6 +200,11 @@ _CATALOG: list[dict[str, Any]] = [
                 "id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
                 "label": "Claude 3.5 Sonnet v2",
             },
+            {"id": "us.anthropic.claude-opus-5", "label": "Claude Opus 5 (US)"},
+            {"id": "us.anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (US)"},
+            {"id": "us.anthropic.claude-fable-5-1", "label": "Claude Fable 5.1 · requires AWS review opt-in (US)"},
+            {"id": "us.amazon.nova-2-lite-v1:0", "label": "Amazon Nova 2 Lite (US)"},
+            {"id": "us.meta.llama4-maverick-17b-instruct-v1:0", "label": "Llama 4 Maverick (US)"},
             {"id": "amazon.nova-pro-v1:0", "label": "Amazon Nova Pro"},
             {"id": "amazon.nova-lite-v1:0", "label": "Amazon Nova Lite"},
             {"id": "amazon.nova-micro-v1:0", "label": "Amazon Nova Micro"},

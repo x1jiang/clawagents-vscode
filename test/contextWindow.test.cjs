@@ -31,7 +31,7 @@ test("Claude 1M generation resolves to 1M regardless of id spelling", () => {
     "us.anthropic.claude-opus-4-7-20250514-v1:0",
     "bedrock/global.anthropic.claude-sonnet-5-v1:0",
   ]) {
-    assert.equal(contextWindowFor(id), 1_000_000, id);
+    assert.equal(contextWindowFor(id), id.startsWith("gemini-3.8") ? 1_048_576 : 1_000_000, id);
   }
 });
 
@@ -58,7 +58,7 @@ test("Gemini flash and pro are 1M (pro is 1,048,576, not 2M)", () => {
     "gemini-2.5-pro",
     "gemini-2.5-flash",
   ]) {
-    assert.equal(contextWindowFor(id), 1_000_000, id);
+    assert.equal(contextWindowFor(id), id.startsWith("gemini-3.8") ? 1_048_576 : 1_000_000, id);
   }
 });
 
@@ -86,7 +86,7 @@ test("Bedrock Mantle third-party ids resolve", () => {
 test("gpt-oss does not collapse into the GPT-5 family", () => {
   assert.equal(contextWindowFor("gpt-oss-20b"), 128_000);
   assert.equal(contextWindowFor("openai.gpt-5.6-luna"), 1_050_000);
-  assert.equal(contextWindowFor("gpt-5.5"), 400_000);
+  assert.equal(contextWindowFor("gpt-5.5"), 1_050_000);
 });
 
 test("unknown or empty ids yield null and no meter", () => {

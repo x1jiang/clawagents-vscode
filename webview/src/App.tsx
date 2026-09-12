@@ -1,4 +1,4 @@
-import { modelSupportsEffort, effortOptionsForModel } from "./modelSelection";
+import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel } from "./modelSelection";
 import { normalizeEfficiency, efficiencyLabel, type Efficiency } from "../../src/efficiency";
 import {
   memo,
@@ -4277,9 +4277,7 @@ export function App() {
       next.bedrock_mode = "iam";
       next.wire_api = "auto";
     }
-    if (!modelSupportsEffort(String(next.model || ""))) {
-      next.reasoning_effort = "";
-    }
+    next.reasoning_effort = compatibleEffortForModel(String(next.model || ""), String(next.reasoning_effort || ""));
     const route = modelRouteForSettings(next);
     persistThreadModelRoute(route);
     setModel(route.model || "default");
@@ -4291,7 +4289,7 @@ export function App() {
     if (isMantleSettings(nextThreadSettings) && next) {
       nextThreadSettings.wire_api = mantleWireApiForModel(next);
     }
-    if (!modelSupportsEffort(next)) nextThreadSettings.reasoning_effort = "";
+    nextThreadSettings.reasoning_effort = compatibleEffortForModel(next, String(nextThreadSettings.reasoning_effort || ""));
     if (persistThreadModelRoute(modelRouteForSettings(nextThreadSettings))) {
       setModel(next || "default");
       return;
@@ -4301,7 +4299,7 @@ export function App() {
 
   const selectDefaultModel = (next: string) => {
     setModel(next || "default");
-    const nextSettings: Record<string, unknown> = { ...settings, model: next };
+    const nextSettings: Record<string, unknown> = { ...settings, model: next, reasoning_effort: compatibleEffortForModel(next, String(settings.reasoning_effort || "")) };
     if (isMantleSettings(nextSettings) && next) {
       nextSettings.wire_api = mantleWireApiForModel(next);
     }
@@ -4896,7 +4894,7 @@ export function App() {
             providers={providerCatalog}
             models={allModels}
             activeModelId={activeModelId}
-            effort={String(threadSettings.reasoning_effort || "")}
+            effort={compatibleEffortForModel(activeModelId || model, String(threadSettings.reasoning_effort || ""))}
             showEffort={modelSupportsEffort(activeModelId || model)}
             efforts={effortOptionsForModel(activeModelId || model)}
             onProviderChange={selectThreadProvider}
@@ -6510,7 +6508,7 @@ export function App() {
                   <label>
                     Thinking effort
                     <select
-                      value={String(settings.reasoning_effort || "medium")}
+                      value={compatibleEffortForModel(String(settings.model || activeModelId || ""), String(settings.reasoning_effort || "medium"))}
                       onChange={(e) => selectDefaultEffort(e.target.value)}
                     >
                       {effortOptionsForModel(String(settings.model || "")).map((o) => (

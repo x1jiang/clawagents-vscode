@@ -46,6 +46,8 @@ PRICES: dict[str, PriceTuple] = {
     "gpt-4o": (2.5, 10.0, 1.25, 3.125),
     "gpt-4o-mini": (0.15, 0.6, 0.075, 0.1875),
     # Anthropic direct API (cache read ~10%, write ~1.25×)
+    "claude-fable-5-1": (10.0, 50.0, 0.25, 12.5),
+    "claude-opus-5": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-5": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-6": (5.0, 25.0, 0.5, 6.25),
@@ -58,10 +60,10 @@ PRICES: dict[str, PriceTuple] = {
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
     "claude-haiku-4-5-20251001": (1.0, 5.0, 0.1, 1.25),
     # Gemini (approx; standard paid tier — cache rates when reported)
-    # 3.8 / 3.7 Flash intro $0.75/$3.75 through 2026-12-31, then $1.50/$7.50.
+    # 3.8 / 3.7 / 3.6 Flash intro $0.75/$3.75 through 2026-12-31, then $1.50/$7.50.
     "gemini-3.8-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.7-flash": (0.75, 3.75, 0.075, 0.9375),
-    "gemini-3.6-flash": (1.5, 7.5, 0.15, 1.875),
+    "gemini-3.6-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.5-flash": (1.5, 9.0, 0.15, 1.875),
     "gemini-3.5-flash-lite": (0.3, 2.5, 0.03, 0.375),
     "gemini-3.1-pro-preview": (2.0, 12.0, 0.2, 2.5),
@@ -71,6 +73,7 @@ PRICES: dict[str, PriceTuple] = {
     "gemini-2.5-flash": (0.3, 2.5, 0.03, 0.375),
     # xAI Grok — short-context (<200K prompt) list prices
     # https://docs.x.ai/developers/pricing
+    "grok-4.6": (2.0, 6.0, 0.50, 2.0),
     "grok-4.5": (2.0, 6.0, 0.30, 2.5),
     "grok-4.3": (1.25, 2.50, 0.20, 1.5625),
     "grok-4.20-0309-reasoning": (1.25, 2.50, 0.20, 1.5625),
@@ -86,6 +89,13 @@ PRICES: dict[str, PriceTuple] = {
 # OpenAI GPT-5.x-on-Bedrock ~+10% vs OpenAI API (including cache tiers).
 # 2-tuple entries derive cache read/write as 0.1× / 1.25× input at lookup.
 BEDROCK_PRICES: dict[str, PriceTuple] = {
+    "grok-4.6": (2.2, 6.6, 0.55, 2.2),
+    # Cache tiers unverified for these AWS cards; estimate at full input rate.
+    "minimax-m2.5": (0.3, 1.2, 0.3, 0.3),
+    "devstral-2-123b": (0.4, 2, 0.4, 0.4),
+    "qwen3-coder-next": (0.5, 1.2, 0.5, 0.5),
+    "nemotron-super-3-120b": (0.15, 0.65, 0.15, 0.15),
+    "mistral-large-3-675b-instruct": (0.5, 1.5, 0.5, 0.5),
     # https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html
     # Mantle / in-region / US geo; global inference uses direct rates below.
     "gpt-6-astra": (11.0, 55.0, 1.1, 13.75),
@@ -97,7 +107,6 @@ BEDROCK_PRICES: dict[str, PriceTuple] = {
     "claude-sonnet-4": (3.0, 15.0, 0.3, 3.75),
     "claude-sonnet-4-5": (3.0, 15.0, 0.3, 3.75),
     "claude-sonnet-4-6": (3.0, 15.0, 0.3, 3.75),
-    "claude-sonnet-5": (2.0, 10.0, 0.2, 2.5),
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
     "gpt-5.6": (5.5, 33.0, 0.55, 6.875),
     "gpt-5.6-sol": (5.5, 33.0, 0.55, 6.875),
@@ -148,6 +157,9 @@ _PROVIDER_DOT_PREFIXES = (
     "openai.",
     "amazon.",
     "meta.",
+    "minimax.",
+    "qwen.",
+    "nvidia.",
     "mistral.",
     "cohere.",
     "ai21.",
@@ -256,7 +268,9 @@ def price_for_full(
     prov = (provider or "").strip().lower()
     force_bedrock = prov in ("bedrock", "mantle", "amazon", "aws")
     use_bedrock = force_bedrock or _looks_bedrock(raw)
-    if key.startswith("gpt-6-astra") and raw.lower().removeprefix("bedrock/").startswith("global."):
+    if use_bedrock and key.startswith(("claude-fable-5-1", "claude-opus-5", "claude-sonnet-5")):
+        return None  # Current AWS rates unverified; never substitute direct API rates.
+    if key.startswith(("gpt-6-astra", "grok-4.6")) and raw.lower().removeprefix("bedrock/").startswith("global."):
         return _lookup_table(PRICES, key)
     table = BEDROCK_PRICES if use_bedrock else PRICES
     hit = _lookup_table(table, key)
@@ -278,7 +292,8 @@ _LONG_CONTEXT_OUTPUT_MULT_GROK = 2.0
 
 def _is_gpt56_family(model_id: str) -> bool:
     key = normalize_model_id(model_id)
-    return key.startswith(("gpt-5.6", "gpt-6-astra"))
+    return (key.startswith(("gpt-5.6", "gpt-6-astra", "gpt-5.5"))
+            or (key.startswith("gpt-5.4") and not key.startswith(("gpt-5.4-mini", "gpt-5.4-nano"))))
 
 
 def _is_grok_family(model_id: str) -> bool:

@@ -57,6 +57,11 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     name: "Anthropic",
     models: [
       { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
+      { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
+      { id: "claude-opus-5", label: "Claude Opus 5" },
+      { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
+      { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
       { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
     ],
   },
@@ -77,6 +82,7 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     name: "xAI (Grok)",
     models: [
       { id: "grok-4.5", label: "Grok 4.5" },
+      { id: "grok-4.6", label: "Grok 4.6" },
       { id: "grok-4.3", label: "Grok 4.3" },
       { id: "grok-4.20-0309-reasoning", label: "Grok 4.20 Reasoning" },
       { id: "grok-4.20-0309-non-reasoning", label: "Grok 4.20 Non-reasoning" },
@@ -100,13 +106,18 @@ export const FALLBACK_PROVIDERS: Provider[] = [
         label: "Claude Sonnet 4.5 (US)",
       },
       {
-        id: "us.anthropic.claude-opus-4-6-20251101-v1:0",
+        id: "us.anthropic.claude-opus-4-6-v1",
         label: "Claude Opus 4.6 (US)",
       },
       {
         id: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         label: "Claude Haiku 4.5 (US)",
       },
+      { id: "us.anthropic.claude-opus-5", label: "Claude Opus 5 (US)" },
+      { id: "us.anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (US)" },
+      { id: "us.anthropic.claude-fable-5-1", label: "Claude Fable 5.1 · requires AWS review opt-in (US)" },
+      { id: "us.amazon.nova-2-lite-v1:0", label: "Amazon Nova 2 Lite (US)" },
+      { id: "us.meta.llama4-maverick-17b-instruct-v1:0", label: "Llama 4 Maverick (US)" },
       { id: "amazon.nova-pro-v1:0", label: "Amazon Nova Pro" },
       { id: "amazon.nova-lite-v1:0", label: "Amazon Nova Lite" },
       { id: "amazon.nova-micro-v1:0", label: "Amazon Nova Micro" },
@@ -123,16 +134,23 @@ export const MANTLE_DEFAULT_MODEL = "openai.gpt-oss-20b";
 /** Client fallback when sidecar catalog is empty but Settings say Mantle. */
 export const MANTLE_FALLBACK_MODELS: Array<{ id: string; label: string }> = [
   { id: "openai.gpt-oss-20b", label: "GPT-OSS 20B (Mantle · chat)" },
+  { id: "minimax.minimax-m2.5", label: "MiniMax M2.5 (Mantle · chat)" },
+  { id: "mistral.devstral-2-123b", label: "Devstral 2 123B (Mantle · chat)" },
+  { id: "qwen.qwen3-coder-next", label: "Qwen3 Coder Next (Mantle · chat)" },
+  { id: "nvidia.nemotron-super-3-120b", label: "Nemotron Super 3 120B (Mantle · chat)" },
+  { id: "mistral.mistral-large-3-675b-instruct", label: "Mistral Large 3 (Mantle · chat)" },
   { id: "deepseek.v3.2", label: "DeepSeek V3.2 (Mantle · chat)" },
   { id: "anthropic.claude-haiku-4-5", label: "Claude Haiku 4.5 (Mantle · messages)" },
-  { id: "anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (Mantle · messages)" },
+  { id: "anthropic.claude-opus-5", label: "Claude Opus 5 (Mantle · messages · us-east-1 / EU / Melbourne)" },
+  { id: "anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (Mantle · messages · us-east-1 / EU / Melbourne)" },
   { id: "anthropic.claude-opus-4-8", label: "Claude Opus 4.8 (Mantle · messages)" },
-  { id: "anthropic.claude-fable-5", label: "Claude Fable 5 (Mantle · needs provider_data_share)" },
+  { id: "anthropic.claude-fable-5", label: "Claude Fable 5 (Mantle · requires AWS review opt-in)" },
   { id: "openai.gpt-6-astra", label: "GPT-6 Astra (Mantle · responses · us-west-2 only)" },
   { id: "openai.gpt-5.6-sol", label: "GPT-5.6 Sol (Mantle · responses · us-east-1/2)" },
   { id: "openai.gpt-5.6-luna", label: "GPT-5.6 Luna (Mantle · responses)" },
   { id: "openai.gpt-5.6-terra", label: "GPT-5.6 Terra (Mantle · responses)" },
   { id: "openai.gpt-5.5", label: "GPT-5.5 (Mantle · responses)" },
+  { id: "xai.grok-4.6", label: "Grok 4.6 (Mantle · responses · us-west-2 only)" },
   { id: "xai.grok-4.3", label: "xAI Grok 4.3 (Mantle · openai/v1)" },
   { id: "zai.glm-5", label: "Z.ai GLM-5 (Mantle · chat)" },
 ];
@@ -228,13 +246,18 @@ export function isNativeBedrockModelId(id: string): boolean {
 
 export function isMantleCatalogModelId(id: string): boolean {
   const m = String(id || "").trim().toLowerCase();
-  if (!m || /^(us|eu|apac|global)\./.test(m)) return false;
+  if (!m || m.includes(":") || /^(us|eu|apac|global)\./.test(m)) return false;
   return (
     m.startsWith("openai.") ||
     m.startsWith("anthropic.") ||
     m.startsWith("deepseek.") ||
     m.startsWith("xai.") ||
-    m.startsWith("zai.")
+    m.startsWith("zai.") ||
+    m.startsWith("minimax.") ||
+    m.startsWith("mistral.") ||
+    m.startsWith("qwen.") ||
+    m.startsWith("nvidia.") ||
+    m.startsWith("moonshotai.")
   );
 }
 
@@ -245,7 +268,7 @@ export function modelLooksLikeOllamaLocalId(id: string): boolean {
   // Vendor-prefixed / geo-prefixed ids belong to Bedrock / Mantle, not Ollama.
   // Version dots like ``llama3.1`` are still local.
   if (
-    /^(openai|anthropic|amazon|meta|deepseek|xai|zai)\./.test(m) ||
+    /^(openai|anthropic|amazon|meta|deepseek|xai|zai|minimax|mistral|qwen|nvidia|moonshotai)\./.test(m) ||
     /^(us|eu|apac|global)\./.test(m)
   ) {
     return false;

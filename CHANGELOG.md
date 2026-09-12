@@ -1,5 +1,11 @@
 # Unreleased
 
+# 1.0.193
+
+- Refresh Claude Fable 5.1, Opus 5, Sonnet 5 and Grok 4.6 choices; add verified Mantle coding models, native Nova 2 Lite and Llama 4 Maverick.
+- Align reasoning controls, model limits, Gemini 3.6 pricing and GPT-5.4/5.5 long-context estimates. Unknown new AWS Claude rates stay unknown.
+- Fix Mantle vendor filtering and native Opus 4.6 ID; label regional and AWS review prerequisites. Require Python 6.20.82 for current-model request compatibility and output caps.
+
 # 1.0.192
 
 - Add GPT-6 Astra to OpenAI and Mantle pickers, including offline catalogs and newly discovered remote models. Keep Terra as the existing default.

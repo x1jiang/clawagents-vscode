@@ -23,8 +23,10 @@ const WINDOWS: Array<[string, number]> = [
   // OpenAI
   ["gpt-6-astra", 1_050_000],
   ["gpt-5.6", 1_050_000],
-  ["gpt-5.5", 400_000],
-  ["gpt-5.4", 400_000],
+  ["gpt-5.5", 1_050_000],
+  ["gpt-5.4-mini", 400_000],
+  ["gpt-5.4-nano", 400_000],
+  ["gpt-5.4", 1_050_000],
   ["gpt-5.3", 400_000],
   ["gpt-5.2", 400_000],
   ["gpt-5.1", 400_000],
@@ -52,7 +54,7 @@ const WINDOWS: Array<[string, number]> = [
   ["claude-haiku-4", 200_000],
   ["claude-3", 200_000],
   // Google
-  ["gemini-3.8", 1_000_000],
+  ["gemini-3.8", 1_048_576],
   ["gemini-3.7", 1_000_000],
   ["gemini-3.6", 1_000_000],
   ["gemini-3.5", 1_000_000],
@@ -60,6 +62,7 @@ const WINDOWS: Array<[string, number]> = [
   ["gemini-2.5", 1_000_000],
   ["gemini-2.0", 1_000_000],
   // xAI
+  ["grok-4.6", 500_000],
   ["grok-4.5", 500_000],
   ["grok-4.3", 1_000_000],
   ["grok-4.20", 1_000_000],
@@ -74,6 +77,13 @@ const WINDOWS: Array<[string, number]> = [
   ["glm-5", 200_000],
   ["glm-4.7", 200_000],
   ["glm-4.6", 200_000],
+  ["minimax-m2.5", 196000],
+  ["devstral-2-123b", 256000],
+  ["qwen3-coder-next", 256000],
+  ["nemotron-super-3-120b", 256000],
+  ["mistral-large-3-675b-instruct", 256000],
+  ["nova-2-lite", 1_000_000],
+  ["llama4-maverick", 1_000_000],
   // Amazon Nova
   ["nova-pro", 300_000],
   ["nova-lite", 300_000],

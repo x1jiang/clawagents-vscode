@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.81** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
+- **clawagents ≥ 6.20.82** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -15,7 +15,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into `clawagents.pythonPath`:
 
 ```text
-clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.81,<7  fastapi  uvicorn  pydantic  python-dotenv
+clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.82,<7  fastapi  uvicorn  pydantic  python-dotenv
 ```
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
@@ -145,3 +145,5 @@ interpreter where the sibling `clawagents_py` is installed in editable mode.
 ## Optional local Gemma
 
 Choose **Gemma Agentic Q4 (coordinator)** in Settings, then **Set up / start locally**. Installation happens only after you request local setup and confirm the download; remote Gemma endpoints remain supported. The helper selects available GPU acceleration or CPU, downloads the Q4 model when missing, starts its server and configures the endpoint. See [local setup, hardware support and controls](LOCAL_GEMMA.md).
+
+Model catalog refresh: [verified models, provider constraints and source audit](MODEL_CATALOG_AUDIT.md) (Python6.20.82 / extension1.0.193).
