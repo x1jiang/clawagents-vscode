@@ -146,4 +146,4 @@ interpreter where the sibling `clawagents_py` is installed in editable mode.
 
 Choose **Gemma Agentic Q4 (coordinator)** in Settings, then **Set up / start locally**. Installation happens only after you request local setup and confirm the download; remote Gemma endpoints remain supported. The helper selects available GPU acceleration or CPU, downloads the Q4 model when missing, starts its server and configures the endpoint. See [local setup, hardware support and controls](LOCAL_GEMMA.md).
 
-Model catalog refresh: [verified models, provider constraints and source audit](MODEL_CATALOG_AUDIT.md) (Python6.20.83 / extension1.0.194).
+Model catalog refresh: [verified models, provider constraints and source audit](MODEL_CATALOG_AUDIT.md) (Python 6.20.83 / extension 1.0.194).
