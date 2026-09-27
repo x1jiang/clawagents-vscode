@@ -51,3 +51,11 @@ test("tabs drop deleted or archived chats and clear chatId when the last tab clo
     /chatIdRef\.current = undefined;\s*setChatId\(undefined\);\s*showPanel\("history"\);\s*post\(\{ type: "deselect_chat" \}\)/,
   );
 });
+
+test("open threads are grouped once and each section can collapse independently", () => {
+  assert.match(app, /const openThreadSections = useMemo/);
+  assert.match(app, /!tab\.pinned && tab\.groupId === group\.id/);
+  assert.match(app, /threadSectionsExpanded\[section\.key\] \?\? true/);
+  assert.match(app, /section\.tabs\.some\(\(tab\) => chatAttention\.has\(tab\.id\)\)/);
+  assert.match(styles, /\.threads-section-rows\[hidden\]\s*\{\s*display:\s*none;/s);
+});

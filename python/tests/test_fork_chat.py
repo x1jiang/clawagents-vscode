@@ -24,6 +24,7 @@ def test_fork_chat_copies_metadata_events_and_memory(tmp_path: Path, monkeypatch
                 "mode": "auto",
                 "message_count": 2,
                 "session_cost_usd": 0.05,
+                "group_id": "group_ccmv",
                 "model_route": {
                     "provider": "anthropic",
                     "model": "claude-sonnet-4-5",
@@ -63,6 +64,7 @@ def test_fork_chat_copies_metadata_events_and_memory(tmp_path: Path, monkeypatch
     assert new_id.startswith("chat_")
     assert forked_meta["title"] == "[Forked] Original Topic"
     assert forked_meta["session_cost_usd"] == 0.05
+    assert forked_meta["group_id"] == "group_ccmv"
     assert forked_meta["model_route"] == {
         "provider": "anthropic",
         "model": "claude-sonnet-4-5",

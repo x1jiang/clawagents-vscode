@@ -82,6 +82,19 @@ test("switching conversations remounts the rich editor and drops collapsed paste
   assert.match(app, /editorRef\.current\.innerHTML = next/);
 });
 
+test("typing before a leading Markdown list creates an editable paragraph", () => {
+  const listExit = section(app, "function moveCaretBeforeLeadingList", "function insertTextAtCaret");
+  assert.match(listExit, /list\.parentElement !== editor/);
+  assert.match(listExit, /list\.firstElementChild !== item/);
+  assert.match(listExit, /before\.toString\(\)/);
+  assert.match(listExit, /list\.before\(paragraph\)/);
+
+  const richEditor = section(app, "const RichMarkdownEditor", "function CopyMessageButton");
+  assert.match(richEditor, /e\.key\.length === 1[\s\S]*moveCaretBeforeLeadingList\(e\.currentTarget\)/);
+  assert.match(richEditor, /insertTextAtCaret\(e\.currentTarget, e\.key\)/);
+  assert.match(richEditor, /inputType === "insertCompositionText"/);
+});
+
 test("closing the last tab or all tabs flushes the composer before deselect", () => {
   assert.match(
     app,

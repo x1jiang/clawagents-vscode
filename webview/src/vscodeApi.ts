@@ -5,6 +5,7 @@ export type {
   InteractionStyle,
   AutoApprove,
   ChatSummary,
+  ChatGroup,
   HostToWebview,
   JobSummary,
   ModelRoute,

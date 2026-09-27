@@ -1,5 +1,9 @@
 # Unreleased
 
+- Add conversation groups with drag-and-drop organization across History and the open-thread popover, plus persistent section state and grouped batch actions.
+- Refine the chat header and rich composer: preserve syntax-highlighted code and `.env` pastes as literal text, provide keyboard exits for fenced code and leading lists, and quiet floating compose controls until they are needed.
+- Keep per-thread model routing and gateway requests aligned with validated protocol fields, with coverage for grouped-history and draft behavior.
+
 # 1.0.194
 
 - Add GPT-6 Sol and Luna to OpenAI model pickers, including per-thread quick selection; retain Astra, legacy models, and existing defaults.

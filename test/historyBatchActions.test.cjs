@@ -6,6 +6,7 @@ const test = require("node:test");
 const root = path.join(__dirname, "..");
 const app = fs.readFileSync(path.join(root, "webview", "src", "App.tsx"), "utf8");
 const provider = fs.readFileSync(path.join(root, "src", "webviewProvider.ts"), "utf8");
+const styles = fs.readFileSync(path.join(root, "webview", "src", "styles.css"), "utf8");
 
 test("History supports range and toggle selection with bulk actions", () => {
   assert.match(app, /event\.shiftKey/);
@@ -23,14 +24,24 @@ test("History supports range and toggle selection with bulk actions", () => {
 });
 
 test("History sections collapse, persist, and expand while searching", () => {
-  assert.match(app, /type HistorySectionKey = "pinned" \| "recent" \| "archived"/);
+  assert.match(app, /type HistorySectionKey = "pinned" \| "recent" \| "archived" \| `group:\$\{string\}`/);
   assert.match(app, /historySectionsExpanded/);
   assert.match(app, /aria-expanded=\{expanded\}/);
   assert.match(app, /hidden=\{!expanded\}/);
-  assert.match(app, /searching \|\| historySectionsExpanded\[key\]/);
+  assert.match(app, /searching \|\| \(historySectionsExpanded\[key\] \?\? true\)/);
   assert.match(app, /renderHistorySection\("pinned", "Pinned", pinnedChats\)/);
-  assert.match(app, /renderHistorySection\("recent", "Recent", regularChats\)/);
+  assert.match(app, /renderHistorySection\("recent", "Recent", regularChats,/);
   assert.match(app, /renderHistorySection\("archived", "Archived", archivedChats\)/);
+  assert.match(styles, /\.chat-list\[hidden\]\s*\{\s*display:\s*none;/s);
+});
+
+test("History supports custom groups, moving chats, and drag ordering", () => {
+  assert.match(app, /create_chat_group/);
+  assert.match(app, /move_chats_to_group/);
+  assert.match(app, /reorder_chat_groups/);
+  assert.match(app, /application\/x-claw-chat/);
+  assert.match(app, /application\/x-claw-group/);
+  assert.match(app, /Delete and archive chats/);
 });
 
 test("host batches mutations behind one refresh helper", () => {

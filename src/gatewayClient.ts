@@ -6,6 +6,7 @@ import type {
   AgentMode,
   AutoApprove,
   ChatSummary,
+  ChatGroup,
   HostToWebview,
   InteractionStyle,
   JobSummary,
@@ -354,7 +355,13 @@ export class GatewayClient {
 
   patchChat(
     chatId: string,
-    patch: { title?: string; pinned?: boolean; archived?: boolean; model_route?: ModelRoute },
+    patch: {
+      title?: string;
+      pinned?: boolean;
+      archived?: boolean;
+      group_id?: string | null;
+      model_route?: ModelRoute;
+    },
   ) {
     return requestJson<Record<string, unknown>>(
       this.requireHandle(),
@@ -362,6 +369,37 @@ export class GatewayClient {
       `/chats/${encodeURIComponent(chatId)}`,
       patch,
     );
+  }
+
+  listChatGroups() {
+    return requestJson<ChatGroup[]>(this.requireHandle(), "GET", "/chat-groups");
+  }
+
+  createChatGroup(name: string) {
+    return requestJson<ChatGroup>(this.requireHandle(), "POST", "/chat-groups", { name });
+  }
+
+  renameChatGroup(groupId: string, name: string) {
+    return requestJson<ChatGroup>(
+      this.requireHandle(),
+      "PATCH",
+      `/chat-groups/${encodeURIComponent(groupId)}`,
+      { name },
+    );
+  }
+
+  deleteChatGroup(groupId: string) {
+    return requestJson<{ ok: boolean; archived_chats: number }>(
+      this.requireHandle(),
+      "DELETE",
+      `/chat-groups/${encodeURIComponent(groupId)}`,
+    );
+  }
+
+  reorderChatGroups(groupIds: string[]) {
+    return requestJson<ChatGroup[]>(this.requireHandle(), "PUT", "/chat-groups/order", {
+      group_ids: groupIds,
+    });
   }
 
   deleteChat(chatId: string) {

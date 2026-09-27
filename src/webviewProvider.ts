@@ -43,6 +43,7 @@ import type {
   AgentMode,
   AutoApprove,
   ChatSummary,
+  ChatGroup,
   HostToWebview,
   InteractionStyle,
   JobSummary,
@@ -1093,6 +1094,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async refreshChatGroups(): Promise<void> {
+    try {
+      const groups = (await this.gateway.listChatGroups()) as ChatGroup[];
+      this.post({ type: "chat_groups", groups });
+    } catch {
+      /* ignore until sidecar up */
+    }
+  }
+
   private clearCurrentChat(): void {
     this.chatId = undefined;
     this.eventsOffset = 0;
@@ -1205,6 +1215,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       health = undefined;
     }
     let chats: ChatSummary[] = [];
+    let chatGroups: ChatGroup[] = [];
     let settings: Record<string, unknown> = {};
     let providers: unknown[] = [];
     let diagnostics: unknown;
@@ -1226,6 +1237,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     } catch {
       /* partial — sidecar may still be starting or down */
     }
+    try {
+      chatGroups = await this.gateway.listChatGroups();
+    } catch {
+      /* compatibility with a sidecar still restarting onto the new API */
+    }
     const keyFlags = await this.config.collectKeyFlags();
     this.post({
       type: "ready",
@@ -1245,6 +1261,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       sidecar: this.sidecar.current ? "running" : "stopped",
       chatId: this.chatId,
       chats,
+      chatGroups,
       settings,
       providers,
       diagnostics,
@@ -1757,6 +1774,50 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             type: "error",
             message: err instanceof Error ? err.message : String(err),
           });
+        }
+        break;
+      case "create_chat_group":
+        try {
+          await this.gateway.createChatGroup(msg.name);
+          await this.refreshChatGroups();
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
+      case "rename_chat_group":
+        try {
+          await this.gateway.renameChatGroup(msg.groupId, msg.name);
+          await this.refreshChatGroups();
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
+      case "delete_chat_group":
+        try {
+          await this.gateway.deleteChatGroup(msg.groupId);
+          await Promise.all([this.refreshChatGroups(), this.refreshChats()]);
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
+      case "reorder_chat_groups":
+        try {
+          await this.gateway.reorderChatGroups(msg.groupIds);
+          await this.refreshChatGroups();
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
+      case "move_chats_to_group":
+        try {
+          await this.applyChatBatch(
+            msg.chatIds,
+            "moved",
+            (chatId) => this.gateway.patchChat(chatId, { group_id: msg.groupId }),
+            false,
+          );
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
         }
         break;
       case "search_chats":

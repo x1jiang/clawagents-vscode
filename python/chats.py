@@ -14,6 +14,7 @@ from typing import Any, Callable
 from caveman_prompt import CAVEMAN_INSTRUCTION
 from grants import GrantStore
 from paths import (
+    CHAT_GROUPS_FILE,
     CHATS_DIR,
     MODEL,
     SESSIONS_MEMORY_DIR,
@@ -31,6 +32,113 @@ from pricing import estimate_usd, long_context_multipliers
 OnEvent = Callable[[str, dict[str, Any]], None]
 
 PINNED_CONTEXT_MAX_CHARS = 4_000
+CHAT_GROUP_NAME_MAX_CHARS = 80
+_UNSET = object()
+
+
+def _normalize_group_name(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:CHAT_GROUP_NAME_MAX_CHARS]
+
+
+def list_chat_groups() -> list[dict[str, str]]:
+    """Return valid workspace chat groups in their persisted display order."""
+    ensure_dirs()
+    raw = read_json(CHAT_GROUPS_FILE, [])
+    if not isinstance(raw, list):
+        return []
+    groups: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for candidate in raw:
+        if not isinstance(candidate, dict):
+            continue
+        group_id = str(candidate.get("id") or "").strip()
+        name = _normalize_group_name(candidate.get("name"))
+        try:
+            from paths import safe_id
+
+            safe_id(group_id, kind="group_id")
+        except ValueError:
+            continue
+        folded = name.casefold()
+        if not name or group_id in seen_ids or folded in seen_names:
+            continue
+        seen_ids.add(group_id)
+        seen_names.add(folded)
+        groups.append({"id": group_id, "name": name})
+    return groups
+
+
+def create_chat_group(name: str) -> dict[str, str]:
+    normalized = _normalize_group_name(name)
+    if not normalized:
+        raise ValueError("Group name cannot be empty")
+    groups = list_chat_groups()
+    if any(group["name"].casefold() == normalized.casefold() for group in groups):
+        raise ValueError("A group with this name already exists")
+    group = {"id": f"group_{uuid.uuid4().hex[:12]}", "name": normalized}
+    atomic_write_json(CHAT_GROUPS_FILE, [*groups, group])
+    return group
+
+
+def rename_chat_group(group_id: str, name: str) -> dict[str, str]:
+    from paths import safe_id
+
+    safe_id(group_id, kind="group_id")
+    normalized = _normalize_group_name(name)
+    if not normalized:
+        raise ValueError("Group name cannot be empty")
+    groups = list_chat_groups()
+    if not any(group["id"] == group_id for group in groups):
+        raise KeyError(group_id)
+    if any(
+        group["id"] != group_id and group["name"].casefold() == normalized.casefold()
+        for group in groups
+    ):
+        raise ValueError("A group with this name already exists")
+    updated = [
+        {**group, "name": normalized} if group["id"] == group_id else group
+        for group in groups
+    ]
+    atomic_write_json(CHAT_GROUPS_FILE, updated)
+    return next(group for group in updated if group["id"] == group_id)
+
+
+def reorder_chat_groups(group_ids: list[str]) -> list[dict[str, str]]:
+    from paths import safe_id
+
+    if len(group_ids) != len(set(group_ids)):
+        raise ValueError("Group order contains duplicates")
+    for group_id in group_ids:
+        safe_id(group_id, kind="group_id")
+    groups = list_chat_groups()
+    current_ids = {group["id"] for group in groups}
+    if set(group_ids) != current_ids:
+        raise ValueError("Group order must contain every group exactly once")
+    by_id = {group["id"]: group for group in groups}
+    ordered = [by_id[group_id] for group_id in group_ids]
+    atomic_write_json(CHAT_GROUPS_FILE, ordered)
+    return ordered
+
+
+def delete_chat_group(group_id: str) -> dict[str, int]:
+    """Archive members and clear membership before removing a group."""
+    from paths import safe_id
+
+    safe_id(group_id, kind="group_id")
+    groups = list_chat_groups()
+    if not any(group["id"] == group_id for group in groups):
+        raise KeyError(group_id)
+    affected = 0
+    for meta in list_chats():
+        if meta.get("group_id") == group_id:
+            patch_chat(str(meta["id"]), archived=True, group_id=None)
+            affected += 1
+    atomic_write_json(
+        CHAT_GROUPS_FILE,
+        [group for group in groups if group["id"] != group_id],
+    )
+    return {"archived_chats": affected}
 
 # UI Plan is the sole owner of the plan lifecycle. The core library exposes
 # these tools by default so headless agents can opt into planning, but exposing
@@ -497,12 +605,28 @@ def create_chat(
     return meta
 
 
-def patch_chat(chat_id: str, **fields: Any) -> dict[str, Any]:
+def patch_chat(
+    chat_id: str,
+    *,
+    group_id: Any = _UNSET,
+    **fields: Any,
+) -> dict[str, Any]:
     meta = get_chat(chat_id)
     if not meta:
         raise KeyError(chat_id)
     clean: dict[str, Any] = {}
     prior_route = normalize_model_route(meta.get("model_route"))
+    if group_id is not _UNSET:
+        if group_id is None:
+            meta.pop("group_id", None)
+        else:
+            from paths import safe_id
+
+            normalized_group_id = str(group_id).strip()
+            safe_id(normalized_group_id, kind="group_id")
+            if not any(group["id"] == normalized_group_id for group in list_chat_groups()):
+                raise ValueError("Chat group not found")
+            clean["group_id"] = normalized_group_id
     for k, v in fields.items():
         if v is None:
             continue

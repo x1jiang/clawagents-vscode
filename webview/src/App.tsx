@@ -24,6 +24,7 @@ import {
   type AgentMode,
   type AutoApprove,
   type ChatSummary,
+  type ChatGroup,
   type HostToWebview,
   type InteractionStyle,
   type JobSummary,
@@ -275,9 +276,9 @@ type SkillsPreview = {
 
 type Panel = "chat" | "history" | "settings" | "diagnostics";
 
-type HistorySectionKey = "pinned" | "recent" | "archived";
+type HistorySectionKey = "pinned" | "recent" | "archived" | `group:${string}`;
 
-type HistorySectionsExpanded = Record<HistorySectionKey, boolean>;
+type HistorySectionsExpanded = Record<string, boolean>;
 
 const DEFAULT_HISTORY_SECTIONS_EXPANDED: HistorySectionsExpanded = {
   pinned: true,
@@ -290,6 +291,7 @@ type ConversationTab = {
   title: string;
   pinned: boolean;
   running?: boolean;
+  groupId?: string;
 };
 
 type SideChat = {
@@ -354,6 +356,7 @@ function persistedConversationTabs(): ConversationTab[] {
             : id,
         pinned: Boolean(value.pinned),
         running: false,
+        groupId: typeof value.groupId === "string" ? value.groupId : undefined,
       });
     }
     return tabs;
@@ -367,8 +370,8 @@ function persistedHistorySectionsExpanded(): HistorySectionsExpanded {
     const saved = getVsCodeApi().getState() as { historySectionsExpanded?: unknown } | undefined;
     const value = saved?.historySectionsExpanded;
     if (!value || typeof value !== "object") return DEFAULT_HISTORY_SECTIONS_EXPANDED;
-    const sections = value as Partial<Record<HistorySectionKey, unknown>>;
-    return {
+    const sections = value as Record<string, unknown>;
+    const result: HistorySectionsExpanded = {
       pinned: typeof sections.pinned === "boolean"
         ? sections.pinned
         : DEFAULT_HISTORY_SECTIONS_EXPANDED.pinned,
@@ -379,8 +382,25 @@ function persistedHistorySectionsExpanded(): HistorySectionsExpanded {
         ? sections.archived
         : DEFAULT_HISTORY_SECTIONS_EXPANDED.archived,
     };
+    for (const [key, expanded] of Object.entries(sections)) {
+      if (key.startsWith("group:") && typeof expanded === "boolean") result[key] = expanded;
+    }
+    return result;
   } catch {
     return DEFAULT_HISTORY_SECTIONS_EXPANDED;
+  }
+}
+
+function persistedThreadSectionsExpanded(): Record<string, boolean> {
+  try {
+    const saved = getVsCodeApi().getState() as { threadSectionsExpanded?: unknown } | undefined;
+    if (!saved?.threadSectionsExpanded || typeof saved.threadSectionsExpanded !== "object") return {};
+    return Object.fromEntries(
+      Object.entries(saved.threadSectionsExpanded as Record<string, unknown>)
+        .filter(([, value]) => typeof value === "boolean"),
+    ) as Record<string, boolean>;
+  } catch {
+    return {};
   }
 }
 
@@ -417,6 +437,7 @@ function reconcileConversationTabs(
       title: summary.title?.trim() || tab.title || tab.id,
       pinned: Boolean(summary.pinned),
       running: Boolean(summary.running),
+      groupId: summary.group_id,
     }];
   });
 }
@@ -435,6 +456,7 @@ function upsertConversationTab(
     title: title?.trim() || summary?.title?.trim() || previous?.title || chatId,
     pinned: summary?.pinned === undefined ? Boolean(previous?.pinned) : Boolean(summary.pinned),
     running: summary?.running === undefined ? Boolean(previous?.running) : Boolean(summary.running),
+    groupId: summary ? summary.group_id : previous?.groupId,
   };
   if (index < 0) return [...current, next];
   const updated = [...current];
@@ -928,6 +950,13 @@ type TranscriptItemProps = {
 
 /** Make unambiguous inline-code file references openable without changing agent output. */
 const assistantMarkdownComponents: Components = {
+  table({ children, node: _node, ...props }) {
+    return (
+      <div className="md-table-scroll">
+        <table {...props}>{children}</table>
+      </div>
+    );
+  },
   code({ children, className, node: _node, ...props }) {
     const text = typeof children === "string" ? children : "";
     const reference = !className ? parseInlinePathReference(text) : undefined;
@@ -948,9 +977,21 @@ const assistantMarkdownComponents: Components = {
   },
 };
 
+/** Source-like text must stay literal even when it happens to contain Markdown
+ * punctuation, such as a comment at the top of an .env file. */
+function isVerbatimSourceText(text: string): boolean {
+  if (/::[A-Za-z_][A-Za-z0-9_]*/.test(text)) return true;
+  const nonEmptyLines = text.split("\n").filter((line) => line.trim());
+  return nonEmptyLines.length > 0 && nonEmptyLines.some((line) =>
+    /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line)) &&
+    nonEmptyLines.every((line) =>
+      /^\s*(?:#.*|(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=.*)$/.test(line));
+}
+
 /** Keep the composer lightweight: only add a rendered preview when there is
  * actual Markdown syntax to show. */
 function hasMarkdownFormatting(text: string): boolean {
+  if (isVerbatimSourceText(text)) return false;
   return /(^|\n)\s*(?:#{1,6}\s|[-*+]\s+|\d+[.)]\s+|>|```|\|.*\|)|\*\*[^*]+\*\*|`[^`]+`/.test(text);
 }
 
@@ -958,10 +999,19 @@ function shouldCollapsePastedText(text: string): boolean {
   return text.length >= 900 || text.split("\n").length >= 14;
 }
 
-/** Preserve all structured clipboard content, including text surrounding tables. */
+/**
+ * Convert only clipboard HTML with structure that plain text cannot preserve.
+ *
+ * Editors frequently put syntax-highlighted source on the clipboard as a
+ * sequence of styled spans (and sometimes divs). Treating that HTML as prose
+ * corrupts perfectly good `text/plain` source by turning each syntax token
+ * into a Markdown block. Plain text is the faithful representation for code,
+ * .env files, and ordinary paragraphs; tables, lists, headings, and quotes
+ * are the cases where the HTML carries useful structure.
+ */
 function clipboardHtmlToMarkdown(html: string): string | undefined {
   const document = new DOMParser().parseFromString(html, "text/html");
-  if (!document.body.querySelector("p, div, h1, h2, h3, h4, h5, h6, ul, ol, table, pre, blockquote")) {
+  if (!document.body.querySelector("h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote")) {
     return undefined;
   }
   return editableMarkdown(document.body) || undefined;
@@ -1001,11 +1051,31 @@ function editableMarkdown(element: HTMLElement): string {
       return [...node.children].map((item, index) => `${node.tagName === "OL" ? `${index + 1}.` : "-"} ${inline(item).trim()}`).join("\n");
     }
     if (["BODY", "DIV", "SECTION", "ARTICLE", "MAIN"].includes(node.tagName)) {
-      return [...node.childNodes]
-        .filter((child) => child.nodeType !== Node.TEXT_NODE || child.textContent?.trim())
-        .map(block)
-        .filter(Boolean)
-        .join("\n\n");
+      // A syntax-highlighted line is commonly a DIV containing several spans.
+      // Those spans are inline content, not individual paragraphs. Group each
+      // adjacent inline run before serializing real block children.
+      const blockTags = new Set([
+        "P", "DIV", "SECTION", "ARTICLE", "MAIN", "H1", "H2", "H3", "H4", "H5", "H6",
+        "UL", "OL", "TABLE", "PRE", "BLOCKQUOTE",
+      ]);
+      const parts: string[] = [];
+      let inlineRun = "";
+      const flushInlineRun = () => {
+        const text = inlineRun.trim();
+        if (text) parts.push(text);
+        inlineRun = "";
+      };
+      for (const child of node.childNodes) {
+        if (child instanceof HTMLElement && blockTags.has(child.tagName)) {
+          flushInlineRun();
+          const text = block(child);
+          if (text) parts.push(text);
+        } else {
+          inlineRun += inline(child);
+        }
+      }
+      flushInlineRun();
+      return parts.join("\n\n");
     }
     return inline(node).trim();
   };
@@ -1037,6 +1107,106 @@ function insertRenderedMarkdown(editor: HTMLElement, html: string): boolean {
     selection.removeAllRanges();
     selection.addRange(range);
   }
+  return true;
+}
+
+/**
+ * A rendered fenced code block is a contentEditable <pre>. Browsers keep the
+ * caret inside it, so an empty trailing line otherwise has no natural way to
+ * become ordinary prose. Delete on that empty line creates a paragraph after
+ * the fence and moves the caret there without changing the existing code.
+ */
+function exitCodeFenceOnEmptyLine(editor: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return false;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !editor.contains(range.commonAncestorContainer)) return false;
+
+  const startElement = range.startContainer instanceof HTMLElement
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  const codeBlock = startElement?.closest("pre");
+  if (!codeBlock || !editor.contains(codeBlock)) return false;
+
+  const before = range.cloneRange();
+  before.selectNodeContents(codeBlock);
+  before.setEnd(range.startContainer, range.startOffset);
+  const after = range.cloneRange();
+  after.selectNodeContents(codeBlock);
+  after.setStart(range.startContainer, range.startOffset);
+  const textBeforeCaret = before.toString();
+  const currentLine = textBeforeCaret.slice(textBeforeCaret.lastIndexOf("\n") + 1);
+  // Do not steal Delete inside code or on an empty line that still has code
+  // below it. A trailing blank line is the explicit exit gesture.
+  if (currentLine.trim() || after.toString().trim()) return false;
+
+  const paragraph = document.createElement("p");
+  paragraph.append(document.createElement("br"));
+  codeBlock.after(paragraph);
+  range.setStart(paragraph, 0);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+/**
+ * List markers are rendered by the browser, so there is no editable position
+ * "before" the first `1.` / `-`. When text is entered at the start of the
+ * leading list item, create a real paragraph before the list and place the
+ * caret there. This preserves the list and makes that visual position usable.
+ */
+function moveCaretBeforeLeadingList(editor: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return false;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !editor.contains(range.commonAncestorContainer)) return false;
+
+  const startElement = range.startContainer instanceof HTMLElement
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  const item = startElement?.closest("li");
+  const list = item?.parentElement;
+  if (
+    !item ||
+    !(list instanceof HTMLOListElement || list instanceof HTMLUListElement) ||
+    list.parentElement !== editor ||
+    list.firstElementChild !== item
+  ) return false;
+
+  // Only provide the paragraph-before-list affordance for the first rendered
+  // block. Later lists already have a preceding editable block to navigate to.
+  const earlierContent = [...editor.childNodes].some((node) =>
+    node !== list && (node.nodeType !== Node.TEXT_NODE || Boolean(node.textContent?.trim())) &&
+    Boolean(node.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING));
+  if (earlierContent) return false;
+
+  const before = range.cloneRange();
+  before.selectNodeContents(item);
+  before.setEnd(range.startContainer, range.startOffset);
+  if (before.toString()) return false;
+
+  const paragraph = document.createElement("p");
+  paragraph.append(document.createElement("br"));
+  list.before(paragraph);
+  range.setStart(paragraph, 0);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
+}
+
+function insertTextAtCaret(editor: HTMLElement, text: string): boolean {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return false;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !editor.contains(range.commonAncestorContainer)) return false;
+  const textNode = document.createTextNode(text);
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
   return true;
 }
 
@@ -1090,7 +1260,37 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
         setHtml(renderedMarkdown(next));
       }}
       onInput={(e) => onChange(editableMarkdown(e.currentTarget))}
+      onBeforeInput={(e) => {
+        const inputType = (e.nativeEvent as InputEvent).inputType;
+        // Keydown below handles ordinary keyboard text. beforeinput also
+        // covers IME composition, where no printable key is available.
+        if (inputType === "insertCompositionText") moveCaretBeforeLeadingList(e.currentTarget);
+      }}
       onKeyDown={(e) => {
+        if (
+          e.key.length === 1 &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          !e.nativeEvent.isComposing &&
+          moveCaretBeforeLeadingList(e.currentTarget)
+        ) {
+          e.preventDefault();
+          if (insertTextAtCaret(e.currentTarget, e.key)) onChange(editableMarkdown(e.currentTarget));
+          return;
+        }
+        if (
+          e.key === "Delete" &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          !e.nativeEvent.isComposing &&
+          exitCodeFenceOnEmptyLine(e.currentTarget)
+        ) {
+          e.preventDefault();
+          onChange(editableMarkdown(e.currentTarget));
+          return;
+        }
         if (
           e.key === "Enter" &&
           (e.metaKey || e.ctrlKey) &&
@@ -1167,9 +1367,7 @@ const TranscriptItem = memo(function TranscriptItem({
   // File events are presented by the turn-level ChangedFilesSummary. Keeping
   // the raw rows as well creates a long duplicate list in write-heavy turns.
   if (item.kind === "file") return null;
-  const time = (item.kind === "user" || item.kind === "assistant")
-    ? formatMessageTime(item.timestamp)
-    : undefined;
+  const time = item.kind === "user" ? formatMessageTime(item.timestamp) : undefined;
   return (
     <div
       className={`item item-${item.kind}`}
@@ -1180,10 +1378,7 @@ const TranscriptItem = memo(function TranscriptItem({
     >
       {item.kind === "user" && (
         <>
-          <div className="label-row">
-            <div className="label">You</div>
-            {time && <time className="message-time" dateTime={item.timestamp}>{time}</time>}
-          </div>
+          {time && <time className="message-time" dateTime={item.timestamp}>{time}</time>}
           <div className="user-message">
             <div className="user-text">
               <div className="md">
@@ -1198,10 +1393,6 @@ const TranscriptItem = memo(function TranscriptItem({
       )}
       {item.kind === "assistant" && (
         <>
-          <div className="label-row">
-            <div className="label">ClawAgents</div>
-            {time && <time className="message-time" dateTime={item.timestamp}>{time}</time>}
-          </div>
           <div className="assistant-message">
             <div className="md">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
@@ -1795,6 +1986,8 @@ export function App() {
   /** Owner stashed by beginDraftHandoff so a failed fork/new/select can resume persist. */
   const draftOwnerBeforeNavRef = useRef<string | undefined>();
   const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [chatGroups, setChatGroups] = useState<ChatGroup[]>([]);
+  const [chatGroupsHydrated, setChatGroupsHydrated] = useState(false);
   const [sideChats, setSideChats] = useState<Record<string, SideChat>>({});
   const sideChatsRef = useRef<Record<string, SideChat>>({});
   const sideChat = chatId ? sideChats[chatId] ?? null : null;
@@ -1810,6 +2003,7 @@ export function App() {
   const [selectedChatIds, setSelectedChatIds] = useState<Set<string>>(() => new Set());
   const [selectionAnchorChatId, setSelectionAnchorChatId] = useState<string | undefined>();
   const [pendingBulkDelete, setPendingBulkDelete] = useState(false);
+  const [openGroupMenuId, setOpenGroupMenuId] = useState<string | undefined>();
   /** Conversations with pending interactive prompts (permission / ask / plan approval). */
   const [chatAttention, setChatAttention] = useState<Map<string, string>>(new Map());
   /** Persisted webview-local unread state. Entering a visible thread acknowledges it. */
@@ -1818,6 +2012,9 @@ export function App() {
   );
   const [openConversationTabs, setOpenConversationTabs] = useState<ConversationTab[]>(
     persistedConversationTabs,
+  );
+  const [threadSectionsExpanded, setThreadSectionsExpanded] = useState<Record<string, boolean>>(
+    persistedThreadSectionsExpanded,
   );
   const [threadsPopoverOpen, setThreadsPopoverOpen] = useState(false);
   const [threadsPopoverPinned, setThreadsPopoverPinned] = useState(false);
@@ -2211,6 +2408,18 @@ export function App() {
   }, [sideChats]);
 
   useEffect(() => {
+    if (!chatGroupsHydrated) return;
+    const valid = new Set(chatGroups.map((group) => `group:${group.id}`));
+    const pruneDeletedGroups = (previous: Record<string, boolean>) => {
+      const next = Object.fromEntries(Object.entries(previous).filter(([key]) =>
+        !key.startsWith("group:") || valid.has(key)));
+      return Object.keys(next).length === Object.keys(previous).length ? previous : next;
+    };
+    setHistorySectionsExpanded(pruneDeletedGroups);
+    setThreadSectionsExpanded(pruneDeletedGroups);
+  }, [chatGroups, chatGroupsHydrated]);
+
+  useEffect(() => {
     const api = getVsCodeApi();
     const previous = api.getState();
     api.setState({
@@ -2218,11 +2427,12 @@ export function App() {
       conversationTabs: openConversationTabs,
       [THREAD_UNREAD_STATE_KEY]: serializeUnreadThreads(unreadChatIds),
       historySectionsExpanded,
+      threadSectionsExpanded,
       [DISMISSED_JOB_IDS_STATE_KEY]: [...dismissedJobIds].slice(
         -MAX_PERSISTED_DISMISSED_JOBS,
       ),
     });
-  }, [dismissedJobIds, historySectionsExpanded, openConversationTabs, unreadChatIds]);
+  }, [dismissedJobIds, historySectionsExpanded, openConversationTabs, threadSectionsExpanded, unreadChatIds]);
 
   useEffect(() => {
     const acknowledgeVisibleThread = () => {
@@ -2540,6 +2750,8 @@ export function App() {
           chatIdRef.current = msg.chatId;
           setChatId(msg.chatId);
           setChats(msg.chats || []);
+          setChatGroups(msg.chatGroups || []);
+          setChatGroupsHydrated(true);
           const readyRoute = (msg.chats || []).find((chat) => chat.id === msg.chatId)?.model_route ?? null;
           threadModelRouteRef.current = readyRoute;
           setThreadModelRoute(readyRoute);
@@ -2653,6 +2865,11 @@ export function App() {
             chatIdRef.current = msg.chatId;
             setChatId(msg.chatId);
           }
+          break;
+        case "chat_groups":
+          setChatGroups(msg.groups || []);
+          setChatGroupsHydrated(true);
+          setOpenGroupMenuId(undefined);
           break;
         case "thread_run_state":
           setChats((previous) => previous.map((chat) =>
@@ -3626,6 +3843,7 @@ export function App() {
   useEffect(() => {
     if (panel !== "history") {
       setOpenChatMenuId(undefined);
+      setOpenGroupMenuId(undefined);
       setPendingDeleteChatId(undefined);
       setSelectedChatIds(new Set());
       setSelectionAnchorChatId(undefined);
@@ -3653,22 +3871,56 @@ export function App() {
     () => visibleChats.filter((c) => c.pinned),
     [visibleChats],
   );
+  const knownGroupIds = useMemo(
+    () => new Set(chatGroups.map((group) => group.id)),
+    [chatGroups],
+  );
   const regularChats = useMemo(
-    () => visibleChats.filter((c) => !c.pinned),
-    [visibleChats],
+    () => visibleChats.filter((c) =>
+      !c.pinned && (!c.group_id || !knownGroupIds.has(c.group_id))),
+    [knownGroupIds, visibleChats],
+  );
+  const groupedChats = useMemo(
+    () => new Map(chatGroups.map((group) => [
+      group.id,
+      visibleChats.filter((chat) => chat.group_id === group.id),
+    ])),
+    [chatGroups, visibleChats],
   );
   const archivedChats = useMemo(
     () => chats.filter((c) => c.archived && !hiddenSideChatIds.has(c.id)),
     [chats, hiddenSideChatIds],
   );
   const orderedHistoryChats = useMemo(
-    () => [...pinnedChats, ...regularChats, ...archivedChats],
-    [pinnedChats, regularChats, archivedChats],
+    () => {
+      const seen = new Set<string>();
+      return [
+        ...pinnedChats,
+        ...chatGroups.flatMap((group) => groupedChats.get(group.id) || []),
+        ...regularChats,
+        ...archivedChats,
+      ].filter((chat) => {
+        if (seen.has(chat.id)) return false;
+        seen.add(chat.id);
+        return true;
+      });
+    },
+    [archivedChats, chatGroups, groupedChats, pinnedChats, regularChats],
   );
-  const orderedOpenConversationTabs = useMemo(
-    () => [...openConversationTabs].sort((a, b) => Number(b.pinned) - Number(a.pinned)),
-    [openConversationTabs],
-  );
+  const openThreadSections = useMemo(() => {
+    const sections: Array<{ key: string; label: string; tabs: ConversationTab[] }> = [];
+    const pinned = openConversationTabs.filter((tab) => tab.pinned);
+    if (pinned.length) sections.push({ key: "pinned", label: "Pinned", tabs: pinned });
+    for (const group of chatGroups) {
+      const tabs = openConversationTabs.filter((tab) => !tab.pinned && tab.groupId === group.id);
+      if (tabs.length) sections.push({ key: `group:${group.id}`, label: group.name, tabs });
+    }
+    const ungrouped = openConversationTabs.filter(
+      (tab) => !tab.pinned && (!tab.groupId || !knownGroupIds.has(tab.groupId)),
+    );
+    if (ungrouped.length) sections.push({ key: "ungrouped", label: "Ungrouped", tabs: ungrouped });
+    return sections;
+  }, [chatGroups, knownGroupIds, openConversationTabs]);
   const openThreadsActivity = useMemo(() => threadActivity(
     openConversationTabs.some((tab) => chatAttention.has(tab.id)),
     openConversationTabs.some((tab) => unreadChatIds.has(tab.id)),
@@ -3875,6 +4127,47 @@ export function App() {
     post({ type: "rename_chat", chatId: renamingChatId, title });
     setRenamingChatId(undefined);
     setRenameDraft("");
+  };
+
+  const createHistoryGroup = () => {
+    const name = window.prompt("New group name")?.trim();
+    if (name) post({ type: "create_chat_group", name });
+  };
+
+  const renameHistoryGroup = (group: ChatGroup) => {
+    const name = window.prompt("Rename group", group.name)?.trim();
+    if (name && name !== group.name) {
+      post({ type: "rename_chat_group", groupId: group.id, name });
+    }
+    setOpenGroupMenuId(undefined);
+  };
+
+  const deleteHistoryGroup = (group: ChatGroup) => {
+    const count = chats.filter((chat) => chat.group_id === group.id).length;
+    const detail = historyQuery.trim()
+      ? `Delete “${group.name}” and archive all of its conversations?`
+      : count
+      ? `Delete “${group.name}” and archive its ${count} conversation${count === 1 ? "" : "s"}?`
+      : `Delete empty group “${group.name}”?`;
+    if (window.confirm(detail)) post({ type: "delete_chat_group", groupId: group.id });
+    setOpenGroupMenuId(undefined);
+  };
+
+  const moveChatsToGroup = (chatIds: string[], groupId: string | null) => {
+    if (!chatIds.length) return;
+    post({ type: "move_chats_to_group", chatIds: [...new Set(chatIds)], groupId });
+  };
+
+  const reorderHistoryGroup = (sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    const ids = chatGroups.map((group) => group.id);
+    const sourceIndex = ids.indexOf(sourceId);
+    const targetIndex = ids.indexOf(targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    ids.splice(sourceIndex, 1);
+    ids.splice(targetIndex, 0, sourceId);
+    setChatGroups(ids.map((id) => chatGroups.find((group) => group.id === id)!));
+    post({ type: "reorder_chat_groups", groupIds: ids });
   };
 
   // Goal / Plan / Act is the primary control.
@@ -4640,14 +4933,22 @@ export function App() {
       Boolean(c.running),
     );
     const routeModel = c.model_route?.model?.trim();
+    const groupName = c.group_id
+      ? chatGroups.find((group) => group.id === c.group_id)?.name
+      : undefined;
     const meta = `${c.message_count || 0} msgs${routeModel ? ` · ${routeModel}` : ""}${
       c.updated_at ? ` · ${new Date(c.updated_at * 1000).toLocaleString()}` : ""
-    }`;
+    }${c.archived && groupName ? ` · ${groupName}` : ""}`;
 
     return (
       <li
         key={c.id}
         className={`${c.id === chatId ? "active" : ""}${isSelected ? " selected" : ""}`.trim()}
+        draggable={!c.archived && !historySelectionMode && !isRenaming}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("application/x-claw-chat", c.id);
+        }}
       >
         {isRenaming ? (
           <div className="chat-item chat-item-edit">
@@ -4793,6 +5094,36 @@ export function App() {
                     >
                       {c.archived ? "Unarchive" : "Archive"}
                     </button>
+                    {!c.archived ? (
+                      <>
+                        <div className="chat-menu-label">Move to group</div>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={!c.group_id}
+                          onClick={() => {
+                            moveChatsToGroup([c.id], null);
+                            setOpenChatMenuId(undefined);
+                          }}
+                        >
+                          No group
+                        </button>
+                        {chatGroups.map((group) => (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            key={group.id}
+                            disabled={c.group_id === group.id}
+                            onClick={() => {
+                              moveChatsToGroup([c.id], group.id);
+                              setOpenChatMenuId(undefined);
+                            }}
+                          >
+                            {group.name}
+                          </button>
+                        ))}
+                      </>
+                    ) : null}
                     <button
                       type="button"
                       className="danger"
@@ -4816,14 +5147,47 @@ export function App() {
     key: HistorySectionKey,
     label: string,
     sectionChats: ChatSummary[],
+    options?: { group?: ChatGroup; dropGroupId?: string | null; showEmpty?: boolean },
   ) => {
-    if (!sectionChats.length) return null;
+    if (!sectionChats.length && !options?.group && !options?.showEmpty) return null;
     const searching = Boolean(historyQuery.trim());
-    const expanded = searching || historySectionsExpanded[key];
+    const expanded = searching || (historySectionsExpanded[key] ?? true);
     const selectedCount = sectionChats.filter((chat) => selectedChatIds.has(chat.id)).length;
     const listId = `history-${key}-list`;
     return (
-      <section className="chat-section" aria-label={`${label} chats`}>
+      <section
+        className="chat-section"
+        aria-label={`${label} chats`}
+        onDragOver={(event) => {
+          if (options && Array.from(event.dataTransfer.types).some((type) =>
+            type === "application/x-claw-chat" || (options.group && type === "application/x-claw-group"))) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }
+        }}
+        onDrop={(event) => {
+          if (!options) return;
+          event.preventDefault();
+          const chatId = event.dataTransfer.getData("application/x-claw-chat");
+          if (chatId) {
+            moveChatsToGroup([chatId], options.dropGroupId ?? null);
+            return;
+          }
+          if (options.group) {
+            const sourceGroupId = event.dataTransfer.getData("application/x-claw-group");
+            if (sourceGroupId) reorderHistoryGroup(sourceGroupId, options.group.id);
+          }
+        }}
+      >
+        <div
+          className="chat-section-heading"
+          draggable={Boolean(options?.group)}
+          onDragStart={(event) => {
+            if (!options?.group) return;
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("application/x-claw-group", options.group.id);
+          }}
+        >
         <button
           type="button"
           className="chat-section-toggle"
@@ -4853,12 +5217,42 @@ export function App() {
             <span className="chat-section-selected">{selectedCount} selected</span>
           ) : null}
         </button>
+        {options?.group ? (
+          <div className="chat-menu-wrap group-menu-wrap">
+            <button
+              type="button"
+              className="ghost tiny chat-menu-trigger"
+              title={`Group options for ${label}`}
+              aria-label={`Group options for ${label}`}
+              aria-expanded={openGroupMenuId === options.group.id}
+              onClick={() => setOpenGroupMenuId((current) =>
+                current === options.group!.id ? undefined : options.group!.id)}
+            >
+              ⋯
+            </button>
+            {openGroupMenuId === options.group.id ? (
+              <div className="chat-menu group-menu" role="menu">
+                <button type="button" role="menuitem" onClick={() => renameHistoryGroup(options.group!)}>
+                  Rename
+                </button>
+                <button type="button" role="menuitem" className="danger" onClick={() => deleteHistoryGroup(options.group!)}>
+                  Delete and archive chats
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        </div>
         <ul
           id={listId}
           className={`chat-list${key === "archived" ? " archived" : ""}`}
           hidden={!expanded}
         >
-          {sectionChats.map(renderHistoryChat)}
+          {sectionChats.length ? sectionChats.map(renderHistoryChat) : (
+            <li className="chat-section-empty">
+              {options?.dropGroupId === null ? "Drop here to remove from a group" : "Drop conversations here"}
+            </li>
+          )}
         </ul>
       </section>
     );
@@ -4874,18 +5268,7 @@ export function App() {
       <header className="header">
         <div className="header-top">
           <div className="brand" title={workspace || workspaceName}>{workspaceName}</div>
-          <div className={`pill sidecar-${sidecar}`} title={sidecarDetail || sidecar}>
-            <span className="pill-dot" />
-            {sidecar === "running"
-              ? "Ready"
-              : sidecar === "starting"
-                ? "Starting"
-                : sidecar === "error"
-                  ? "Error"
-                  : "Idle"}
-          </div>
-        </div>
-        <div className="meta">
+          <div className="meta">
           <ModelRouteCapsule
             disabled={!chatId}
             busy={busy}
@@ -4902,6 +5285,9 @@ export function App() {
             onEffortChange={selectEffort}
             onReset={resetThreadModelRoute}
           />
+          <details className="header-info-capsule">
+            <summary title="Show token, cache, and cost information">Info</summary>
+            <div className="header-info-popover">
           {compactPhase && (
             <span className="compact-chip" title="Compaction in progress">
               compact · {compactPhase}
@@ -5055,6 +5441,19 @@ export function App() {
               Compact
             </button>
           </div>
+            </div>
+          </details>
+        </div>
+          <div className={`pill sidecar-${sidecar}`} title={sidecarDetail || sidecar}>
+            <span className="pill-dot" />
+            {sidecar === "running"
+              ? "Ready"
+              : sidecar === "starting"
+                ? "Starting"
+                : sidecar === "error"
+                  ? "Error"
+                  : "Idle"}
+          </div>
         </div>
         <nav className="tabs" aria-label="Navigation and open conversations">
           <div className="panel-tabs" role="tablist" aria-label="Panels">
@@ -5150,49 +5549,84 @@ export function App() {
                     </button>
                   </div>
                   <div className="threads-list" role="list">
-                    {orderedOpenConversationTabs.map((tab) => {
-                      const active = tab.id === chatId && panel === "chat";
-                      const activity = threadActivity(
-                        chatAttention.has(tab.id),
-                        unreadChatIds.has(tab.id),
-                        Boolean(tab.running),
+                    {openThreadSections.map((section) => {
+                      const expanded = threadSectionsExpanded[section.key] ?? true;
+                      const sectionActivity = threadActivity(
+                        section.tabs.some((tab) => chatAttention.has(tab.id)),
+                        section.tabs.some((tab) => unreadChatIds.has(tab.id)),
+                        section.tabs.some((tab) => Boolean(tab.running)),
                       );
+                      const sectionId = `open-threads-${section.key.replace(/[^a-z0-9_-]/gi, "-")}`;
                       return (
-                        <div
-                          className={`threads-row${active ? " active" : ""}`}
-                          key={tab.id}
-                          role="listitem"
-                        >
+                        <div className="threads-section" key={section.key}>
                           <button
                             type="button"
-                            className="threads-row-main"
-                            title={tab.title}
-                            onClick={() => selectConversationTab(tab)}
+                            className="threads-section-toggle"
+                            aria-expanded={expanded}
+                            aria-controls={sectionId}
+                            onClick={() => setThreadSectionsExpanded((previous) => ({
+                              ...previous,
+                              [section.key]: !expanded,
+                            }))}
                           >
-                            <span
-                              className={`threads-row-status${activity ? ` ${activity}` : ""}`}
-                              aria-label={threadActivityLabel(activity)}
-                            />
-                            <span className="threads-row-title">{tab.title}</span>
+                            <span className={`threads-section-caret${expanded ? " expanded" : ""}`}>›</span>
+                            <span className="threads-section-label">{section.label}</span>
+                            <span className="threads-section-count">{section.tabs.length}</span>
+                            {sectionActivity ? (
+                              <span
+                                className={`threads-row-status ${sectionActivity}`}
+                                aria-label={threadActivityLabel(sectionActivity)}
+                              />
+                            ) : null}
                           </button>
-                          <button
-                            type="button"
-                            className={`threads-row-action${tab.pinned ? " pinned" : ""}`}
-                            title={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
-                            aria-label={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
-                            onClick={() => toggleConversationTabPin(tab)}
-                          >
-                            <IconPin size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            className="threads-row-action threads-row-close"
-                            title={`Close ${tab.title}`}
-                            aria-label={`Close ${tab.title}`}
-                            onClick={() => closeConversationTab(tab.id)}
-                          >
-                            ×
-                          </button>
+                          <div id={sectionId} className="threads-section-rows" hidden={!expanded}>
+                            {section.tabs.map((tab) => {
+                              const active = tab.id === chatId && panel === "chat";
+                              const activity = threadActivity(
+                                chatAttention.has(tab.id),
+                                unreadChatIds.has(tab.id),
+                                Boolean(tab.running),
+                              );
+                              return (
+                                <div
+                                  className={`threads-row${active ? " active" : ""}`}
+                                  key={tab.id}
+                                  role="listitem"
+                                >
+                                  <button
+                                    type="button"
+                                    className="threads-row-main"
+                                    title={tab.title}
+                                    onClick={() => selectConversationTab(tab)}
+                                  >
+                                    <span
+                                      className={`threads-row-status${activity ? ` ${activity}` : ""}`}
+                                      aria-label={threadActivityLabel(activity)}
+                                    />
+                                    <span className="threads-row-title">{tab.title}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`threads-row-action${tab.pinned ? " pinned" : ""}`}
+                                    title={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
+                                    aria-label={tab.pinned ? `Unpin ${tab.title}` : `Pin ${tab.title}`}
+                                    onClick={() => toggleConversationTabPin(tab)}
+                                  >
+                                    <IconPin size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="threads-row-action threads-row-close"
+                                    title={`Close ${tab.title}`}
+                                    aria-label={`Close ${tab.title}`}
+                                    onClick={() => closeConversationTab(tab.id)}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       );
                     })}
@@ -5522,6 +5956,9 @@ export function App() {
             >
               {historySelectionMode ? "Done" : "Select"}
             </button>
+            <button type="button" className="ghost" onClick={createHistoryGroup}>
+              + Group
+            </button>
             <button
               type="button"
               className="primary"
@@ -5573,6 +6010,25 @@ export function App() {
               >
                 {allSelectedArchived ? "Unarchive" : "Archive"}
               </button>
+              <select
+                className="history-group-select"
+                aria-label="Move selected conversations to group"
+                defaultValue=""
+                onChange={(event) => {
+                  if (!event.target.value) return;
+                  moveChatsToGroup(
+                    selectedChats.filter((chat) => !chat.archived).map((chat) => chat.id),
+                    event.target.value === "__none__" ? null : event.target.value,
+                  );
+                  event.target.value = "";
+                }}
+              >
+                <option value="" disabled>Move to…</option>
+                <option value="__none__">No group</option>
+                {chatGroups.map((group) => (
+                  <option value={group.id} key={group.id}>{group.name}</option>
+                ))}
+              </select>
               {pendingBulkDelete ? (
                 <>
                   <button
@@ -5624,7 +6080,13 @@ export function App() {
           {chats.length ? (
             <div className="chat-sections">
               {renderHistorySection("pinned", "Pinned", pinnedChats)}
-              {renderHistorySection("recent", "Recent", regularChats)}
+              {chatGroups.map((group) => renderHistorySection(
+                `group:${group.id}`,
+                group.name,
+                groupedChats.get(group.id) || [],
+                { group, dropGroupId: group.id },
+              ))}
+              {renderHistorySection("recent", "Recent", regularChats, { dropGroupId: null, showEmpty: true })}
               {renderHistorySection("archived", "Archived", archivedChats)}
             </div>
           ) : (

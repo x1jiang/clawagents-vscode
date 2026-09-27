@@ -142,6 +142,21 @@ test("accepts bounded, unique chat batches and rejects unsafe IDs", () => {
   );
 });
 
+test("accepts safe chat group management and movement requests", () => {
+  assert.deepEqual(parseWebviewToHost({ type: "create_chat_group", name: "CCMV" }), {
+    type: "create_chat_group",
+    name: "CCMV",
+  });
+  assert.ok(parseWebviewToHost({ type: "rename_chat_group", groupId: "group-1", name: "Research" }));
+  assert.ok(parseWebviewToHost({ type: "delete_chat_group", groupId: "group-1" }));
+  assert.ok(parseWebviewToHost({ type: "reorder_chat_groups", groupIds: ["group-2", "group-1"] }));
+  assert.ok(parseWebviewToHost({ type: "move_chats_to_group", chatIds: ["chat-1"], groupId: null }));
+  assert.ok(parseWebviewToHost({ type: "move_chats_to_group", chatIds: ["chat-1"], groupId: "group-1" }));
+  assert.equal(parseWebviewToHost({ type: "create_chat_group", name: "" }), undefined);
+  assert.equal(parseWebviewToHost({ type: "delete_chat_group", groupId: "../bad" }), undefined);
+  assert.equal(parseWebviewToHost({ type: "move_chats_to_group", chatIds: [], groupId: null }), undefined);
+});
+
 test("accepts Meta per-thread routes", () => {
   const message = { type: "set_chat_model_route", chatId: "meta-thread",
     modelRoute: { provider: "meta", model: "Muse-Glimmer-30B", wire_api: "chat_completions" } };
