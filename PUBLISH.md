@@ -1,6 +1,6 @@
-Publisher **`clawagents`** · version **1.0.193**
+Publisher **`clawagents`** · version **1.0.194**
 
-- Release target: extension **1.0.193**. Current model catalog and request compatibility refresh; Python floor **6.20.82**.
+- Release target: extension **1.0.194**. GPT-6 Sol/Luna catalogs, reasoning controls, context windows, and pricing; Python floor **6.20.83**.
 - Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
 
 - [x] clawagents **6.20.80** on PyPI + GitHub: edit follow-ups, paged artifact recall, run-scoped todos, diagnostic receipts, efficiency counters. Published download hashes verified.

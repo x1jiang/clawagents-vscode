@@ -29,6 +29,8 @@ PriceTuple = tuple[float, float, float, float]
 # Direct API list prices (Anthropic / OpenAI / Gemini / xAI)
 PRICES: dict[str, PriceTuple] = {
     "gpt-6-astra": (10.0, 50.0, 1.0, 12.5),
+    "gpt-6-sol": (2.0, 10.0, 0.2, 2.5),
+    "gpt-6-luna": (0.1, 0.5, 0.01, 0.125),
     # OpenAI GPT-5.6 family (Sol / Terra / Luna) — cached read = 10%, write = 1.25×
     "gpt-5.6": (5.0, 30.0, 0.5, 6.25),
     "gpt-5.6-sol": (5.0, 30.0, 0.5, 6.25),
@@ -268,7 +270,7 @@ def price_for_full(
     prov = (provider or "").strip().lower()
     force_bedrock = prov in ("bedrock", "mantle", "amazon", "aws")
     use_bedrock = force_bedrock or _looks_bedrock(raw)
-    if use_bedrock and key.startswith(("claude-fable-5-1", "claude-opus-5", "claude-sonnet-5")):
+    if use_bedrock and key.startswith(("gpt-6-sol", "gpt-6-luna", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5")):
         return None  # Current AWS rates unverified; never substitute direct API rates.
     if key.startswith(("gpt-6-astra", "grok-4.6")) and raw.lower().removeprefix("bedrock/").startswith("global."):
         return _lookup_table(PRICES, key)
@@ -292,7 +294,7 @@ _LONG_CONTEXT_OUTPUT_MULT_GROK = 2.0
 
 def _is_gpt56_family(model_id: str) -> bool:
     key = normalize_model_id(model_id)
-    return (key.startswith(("gpt-5.6", "gpt-6-astra", "gpt-5.5"))
+    return (key.startswith(("gpt-5.6", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5"))
             or (key.startswith("gpt-5.4") and not key.startswith(("gpt-5.4-mini", "gpt-5.4-nano"))))
 
 

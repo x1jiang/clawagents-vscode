@@ -1,5 +1,11 @@
 # Unreleased
 
+# 1.0.194
+
+- Add GPT-6 Sol and Luna to OpenAI model pickers, including per-thread quick selection; retain Astra, legacy models, and existing defaults.
+- Support Sol/Luna reasoning from none through max, 1.05M context windows, and direct OpenAI cache and long-context pricing. Do not substitute direct rates for unverified Bedrock availability.
+- Require Python 6.20.83 for GPT-6 request compatibility and 128K output limits.
+
 # 1.0.193
 
 - Refresh Claude Fable 5.1, Opus 5, Sonnet 5 and Grok 4.6 choices; add verified Mantle coding models, native Nova 2 Lite and Llama 4 Maverick.

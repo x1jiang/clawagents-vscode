@@ -1,3 +1,15 @@
+# GPT-6 support update — 2026-09-27
+
+Release: Python 6.20.83 / VS Code 1.0.194. Add GPT-6 Sol and Luna to direct OpenAI settings and per-thread pickers. Astra, legacy selections, and defaults remain available.
+
+- Sol/Luna support `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning; legacy `minimal` selections normalize to `low`. Astra continues to require reasoning (`low` through `max`).
+- Both additions have a 1,050,000-token context window and 128,000-token output ceiling. The Python core selects Responses for reasoning with tools; Chat Completions tool requests use `none`.
+- Sol input/output/cache-read/cache-write rates are $2/$10/$0.20/$2.50 per million tokens; Luna rates are $0.10/$0.50/$0.01/$0.125. Prompts exceeding 272K use 2x input/cache rates and 1.5x output rates for the full request.
+- Bedrock Sol/Luna availability and pricing were not verified. Neither model is added to curated Bedrock catalogs, and direct OpenAI rates are not substituted for AWS estimates.
+- Primary sources: [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol), [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna).
+
+The earlier provider audit follows; its other model claims were not re-audited for this update.
+
 # Model catalog audit — 2026-09-12
 
 Release: Python 6.20.82 / VS Code 1.0.193. Scope is tool-capable text/coding models on existing provider paths. Existing saved model selections and defaults are preserved. Curated availability is not proof of account entitlement; live discovery can further restrict/extend it.
