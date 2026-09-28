@@ -51,6 +51,7 @@ export type ChatSummary = {
   updated_at?: number;
   pinned?: boolean;
   archived?: boolean;
+  group_id?: string;
   message_count?: number;
   session_cost_usd?: number;
   session_prompt_tokens?: number;
@@ -59,6 +60,11 @@ export type ChatSummary = {
   model_route?: ModelRoute;
   /** Ephemeral extension-host state; never persisted by the sidecar. */
   running?: boolean;
+};
+
+export type ChatGroup = {
+  id: string;
+  name: string;
 };
 
 /** A compact, stable pointer to a user-authored message in the UI event log. */
@@ -91,6 +97,7 @@ export type HostToWebview =
       sidecar: "stopped" | "running";
       chatId?: string;
       chats?: ChatSummary[];
+      chatGroups?: ChatGroup[];
       settings?: Record<string, unknown>;
       providers?: unknown[];
       diagnostics?: unknown;
@@ -238,6 +245,7 @@ export type HostToWebview =
     }
   | { type: "query_index"; chatId: string; entries: QueryIndexEntry[] }
   | { type: "chats"; chats: ChatSummary[]; chatId?: string }
+  | { type: "chat_groups"; groups: ChatGroup[] }
   | { type: "chat_model_route"; chatId: string; modelRoute: ModelRoute }
   | { type: "model_changed"; chatId: string; text: string }
   /** A temporary fork rendered in the webview's side-chat overlay. */
@@ -445,6 +453,11 @@ export type WebviewToHost =
   | { type: "pin_chats"; chatIds: string[]; pinned: boolean }
   | { type: "archive_chat"; chatId: string; archived: boolean }
   | { type: "archive_chats"; chatIds: string[]; archived: boolean }
+  | { type: "create_chat_group"; name: string }
+  | { type: "rename_chat_group"; groupId: string; name: string }
+  | { type: "delete_chat_group"; groupId: string }
+  | { type: "reorder_chat_groups"; groupIds: string[] }
+  | { type: "move_chats_to_group"; chatIds: string[]; groupId: string | null }
   | { type: "search_chats"; query: string }
   | { type: "regenerate" }
   | { type: "set_mode"; mode: AgentMode }
@@ -722,6 +735,23 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         : undefined;
     case "archive_chats":
       return opaqueIds(value.chatIds) && typeof value.archived === "boolean"
+        ? value as WebviewToHost
+        : undefined;
+    case "create_chat_group":
+      return text(value.name, 80) && Boolean(value.name.trim())
+        ? value as WebviewToHost
+        : undefined;
+    case "rename_chat_group":
+      return opaqueId(value.groupId) && text(value.name, 80) && Boolean(value.name.trim())
+        ? value as WebviewToHost
+        : undefined;
+    case "delete_chat_group":
+      return opaqueId(value.groupId) ? value as WebviewToHost : undefined;
+    case "reorder_chat_groups":
+      return opaqueIds(value.groupIds) ? value as WebviewToHost : undefined;
+    case "move_chats_to_group":
+      return opaqueIds(value.chatIds)
+        && (value.groupId === null || opaqueId(value.groupId))
         ? value as WebviewToHost
         : undefined;
     case "fork_chat":

@@ -18,6 +18,15 @@
   --error: var(--vscode-errorForeground, #f44747);
   --accent: var(--vscode-textLink-foreground, #4fc1ff);
   --warn-bg: color-mix(in srgb, #d7a100 18%, transparent);
+  /* One responsive content track keeps transcript, cards, and composer
+     aligned. Individual components should not add a second outer gutter. */
+  /* A deliberately small shared gutter gives the full-bleed layout a little
+     breathing room without reintroducing the previous wide rails. */
+  --content-gutter: 4px;
+  /* Reading benefits from a slightly calmer measure than composing. */
+  --conversation-gutter: 12px;
+  --surface-radius: 22px;
+  --surface-radius-large: 28px;
   font-family: var(--vscode-font-family, system-ui, sans-serif);
   font-size: var(--vscode-font-size, 13px);
 }
@@ -29,8 +38,12 @@
 html,
 body,
 #root {
+  width: 100%;
   height: 100%;
   margin: 0;
+  /* VS Code's base webview stylesheet supplies body padding. It sits outside
+     the app layout, so the composer cannot counteract it with its own margin. */
+  padding: 0 !important;
   background: var(--bg);
   color: var(--fg);
 }
@@ -39,10 +52,12 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
 }
 
 .header {
+  --info-drawer-reserve: 0px;
   padding: 10px 12px 0;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -57,14 +72,27 @@ body,
     var(--bg);
 }
 
+/* Info is a disclosure rather than a transient tooltip. Reserve room for its
+   panel while it is open so the transcript never sits underneath it. */
+.header:has(.header-info-capsule[open]) {
+  --info-drawer-reserve: 84px;
+  padding-bottom: var(--info-drawer-reserve);
+}
+
 .header-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .brand {
+  flex: 0 1 auto;
+  max-width: 14rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 700;
   letter-spacing: 0.03em;
   font-size: 14px;
@@ -74,9 +102,75 @@ body,
   color: var(--muted);
   font-size: 11px;
   display: flex;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: visible;
   gap: 6px 8px;
   align-items: center;
+}
+
+.header-top .pill {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.header-info-capsule {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.header-info-capsule > summary {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--input-bg) 74%, transparent);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+  list-style: none;
+}
+
+.header-info-capsule > summary::-webkit-details-marker {
+  display: none;
+}
+
+.header-info-capsule:hover > summary,
+.header-info-capsule[open] > summary {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--input-bg));
+}
+
+.header-info-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 7px);
+  left: 0;
+  display: flex;
+  width: max-content;
+  max-width: min(38rem, calc(100vw - 24px));
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  background: var(--vscode-editorWidget-background, var(--bg));
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 40%, transparent);
+}
+
+.header-info-popover .meta-actions {
+  margin-left: 0;
+}
+
+.header-info-capsule:not([open]) > .header-info-popover {
+  display: none;
 }
 
 .meta-workspace {
@@ -746,11 +840,24 @@ body,
 
 .messages {
   flex: 1;
-  overflow: auto;
-  padding: 12px;
+  min-width: 0;
+  /* The transcript itself must never become a horizontal scroller. Long
+     Markdown prose wraps to the available reading width; fenced code and
+     tables retain their own, deliberate horizontal scrollers. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 14px var(--conversation-gutter);
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* Flex/grid descendants otherwise retain their min-content width and can
+   widen the entire transcript by a few pixels (enough to shift prose off the
+   left edge). Keep every ordinary message constrained to the conversation. */
+.messages > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* A transcript map that lives over the panel edge, never in the message flow.
@@ -759,7 +866,8 @@ body,
   position: absolute;
   z-index: 8;
   top: 50%;
-  right: 0;
+  left: 0;
+  right: auto;
   bottom: auto;
   width: 58px;
   height: auto;
@@ -846,7 +954,8 @@ body,
 
 .query-index-preview {
   position: absolute;
-  right: 42px;
+  left: 42px;
+  right: auto;
   top: 50%;
   display: -webkit-box;
   width: min(280px, 52vw);
@@ -865,7 +974,7 @@ body,
   opacity: 0;
   pointer-events: none;
   text-align: left;
-  transform: translateY(-50%) translateX(4px);
+  transform: translateY(-50%) translateX(-4px);
   transition: opacity 120ms ease, transform 120ms ease;
 }
 
@@ -880,7 +989,7 @@ body,
   top: 50%;
   bottom: auto;
   left: 0;
-  width: 22px;
+  width: 18px;
   height: 48px;
   display: grid;
   grid-template-rows: repeat(2, 1fr);
@@ -1024,8 +1133,46 @@ body,
   overflow-wrap: anywhere;
   font-family: inherit;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  padding: 8px 38px 8px 10px;
-  border-radius: 6px;
+  padding: 10px 40px 10px 13px;
+  border-radius: var(--surface-radius);
+}
+
+/* ReactMarkdown gives paragraphs a trailing margin by default. Removing it
+   from the final block keeps the message bubble's top and bottom padding
+   visually equal without affecting spacing between multiple paragraphs. */
+.user-text .md > :last-child {
+  margin-bottom: 0;
+}
+
+/* User input often contains Markdown copied from another editor. Its browser
+   defaults make blockquotes and lists look like separate, widely spaced
+   cards, so keep those authored blocks compact inside the sent-message bubble.
+   Assistant replies retain the roomier reading rhythm. */
+.user-text .md {
+  line-height: 1.38;
+}
+
+.user-text .md p {
+  margin-bottom: 0.38em;
+}
+
+.user-text .md :is(ul, ol) {
+  margin: 0.35em 0 0.45em;
+  padding-inline-start: 1.35em;
+}
+
+.user-text .md li + li {
+  margin-top: 0.16em;
+}
+
+.user-text .md blockquote {
+  margin: 0.45em 0;
+  padding: 0.45em 0.7em;
+}
+
+.user-text .md pre {
+  margin: 0.45em 0;
+  padding: 10px 12px;
 }
 
 .user-message,
@@ -1035,11 +1182,14 @@ body,
 
 .user-message {
   width: fit-content;
-  max-width: min(82%, 720px);
+  min-width: 0;
+  max-width: min(94%, 1,080px);
 }
 
 .assistant-message {
   min-height: 24px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .copy-message {
@@ -1093,7 +1243,9 @@ body,
 }
 
 .md {
+  min-width: 0;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .md p {
@@ -1102,10 +1254,11 @@ body,
 
 .md pre {
   overflow: auto;
-  padding: 12px;
-  background: color-mix(in srgb, var(--input-bg) 88%, var(--fg));
-  border: 1px solid color-mix(in srgb, var(--border) 78%, var(--fg));
-  border-radius: 8px;
+  margin: 0.8em 0;
+  padding: 18px 20px;
+  background: color-mix(in srgb, var(--input-bg) 92%, var(--fg));
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--fg));
+  border-radius: var(--surface-radius-large);
   color: var(--fg);
 }
 
@@ -1135,13 +1288,19 @@ body,
   line-height: inherit;
 }
 
+.md-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
 .md table {
   width: max-content;
   min-width: 100%;
   border: 1px solid color-mix(in srgb, var(--border) 84%, var(--fg));
   border-spacing: 0;
   border-collapse: separate;
-  border-radius: 6px;
+  border-radius: 16px;
   margin: 0.65em 0;
   overflow: hidden;
   color: inherit;
@@ -1845,8 +2004,8 @@ button.inline-path-link code {
 }
 
 .composer {
-  border-top: 1px solid var(--border);
-  padding: 10px 12px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding: 10px var(--content-gutter) 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2326,7 +2485,7 @@ button.side-chat-peek:active {
 
 .compose-row {
   display: block;
-  border-radius: 8px;
+  border-radius: var(--surface-radius-large);
   transition: box-shadow 0.12s ease, background 0.12s ease;
 }
 
@@ -2341,9 +2500,10 @@ button.side-chat-peek:active {
 
 .compose-shell {
   position: relative;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--input-bg);
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: var(--surface-radius-large);
+  background: color-mix(in srgb, var(--input-bg) 92%, var(--bg));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 4%, transparent);
   overflow: visible;
 }
 
@@ -2375,13 +2535,13 @@ button.side-chat-peek:active {
   display: block;
   width: 100%;
   resize: none;
-  min-height: 52px;
-  max-height: 320px;
+  min-height: 92px;
+  max-height: 360px;
   background: transparent;
   color: var(--input-fg);
   border: none;
   border-radius: 0;
-  padding: 8px 42px 36px 10px;
+  padding: 15px 66px 50px 16px;
   font: inherit;
   box-sizing: border-box;
 }
@@ -2391,11 +2551,11 @@ button.side-chat-peek:active {
 }
 
 .composer-rich-editor {
-  min-height: 52px;
-  max-height: 320px;
+  min-height: 92px;
+  max-height: 360px;
   overflow: auto;
-  margin: 0 0 36px;
-  padding: 8px 42px 8px 10px;
+  margin: 0 0 50px;
+  padding: 15px 66px 10px 16px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -2421,17 +2581,17 @@ button.side-chat-peek:active {
 
 .composer-paste-card {
   display: grid;
-  width: calc(100% - 20px);
+  width: calc(100% - 32px);
   gap: 5px;
-  margin: 8px 10px 42px;
-  padding: 9px 10px;
+  margin: 12px 16px 52px;
+  padding: 14px 16px;
   overflow: hidden;
   color: var(--input-fg);
   text-align: left;
   font: inherit;
   background: color-mix(in srgb, var(--accent) 8%, var(--input-bg));
   border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
-  border-radius: 6px;
+  border-radius: var(--surface-radius);
   cursor: text;
   box-sizing: border-box;
 }
@@ -2459,22 +2619,55 @@ button.side-chat-peek:active {
 
 .compose-shell:focus-within {
   border-color: color-mix(in srgb, var(--accent, #0d9488) 55%, var(--border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 5%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .compose-actions {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
+  right: 12px;
+  bottom: 12px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  /* These controls float over the last input line. Keep them available but
+     visually quiet until the pointer or keyboard focus reaches the group. */
+  opacity: 0.52;
+  transition: opacity 140ms ease;
+}
+
+.compose-actions:hover,
+.compose-actions:focus-within {
+  opacity: 1;
+}
+
+.compose-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--input-bg) 48%, transparent);
+}
+
+.compose-actions .icon-btn.primary {
+  width: 32px;
+  height: 32px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--btn) 78%, var(--input-bg));
+}
+
+.compose-actions .redirect-draft {
+  width: auto;
+  gap: 5px;
+  padding: 0 10px;
+  font-size: 11px;
 }
 
 .always-on {
   position: absolute;
   z-index: 4;
-  top: 8px;
-  right: 8px;
+  top: 12px;
+  right: 12px;
 }
 
 .always-on-trigger {
@@ -2484,10 +2677,10 @@ button.side-chat-peek:active {
   height: 24px;
   padding: 0 5px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 12px;
   background: transparent;
   color: var(--muted);
-  opacity: 0.38;
+  opacity: 0.48;
   transition: opacity 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
@@ -2941,6 +3134,75 @@ button.threads-close-all {
   overflow-y: auto;
 }
 
+.threads-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.threads-section + .threads-section {
+  margin-top: 3px;
+}
+
+button.threads-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+button.threads-section-toggle:hover,
+button.threads-section-toggle:focus-visible {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+
+.threads-section-caret {
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+.threads-section-caret.expanded {
+  transform: rotate(90deg);
+}
+
+.threads-section-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.threads-section-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.threads-section-toggle .threads-row-status {
+  margin-left: auto;
+}
+
+.threads-section-rows[hidden] {
+  display: none;
+}
+
 .threads-row {
   display: flex;
   align-items: center;
@@ -3384,6 +3646,17 @@ button.history-select-toggle.active {
   margin-left: auto;
 }
 
+.history-group-select {
+  min-height: 26px;
+  max-width: 140px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  background: var(--input-bg);
+  font: inherit;
+  font-size: 11px;
+}
+
 .chat-list {
   list-style: none;
   margin: 0;
@@ -3391,6 +3664,10 @@ button.history-select-toggle.active {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.chat-list[hidden] {
+  display: none;
 }
 
 .chat-list li {
@@ -3473,6 +3750,26 @@ button.history-select-toggle.active {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.chat-section-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-section-heading[draggable="true"] {
+  cursor: grab;
+}
+
+.chat-section-empty {
+  display: block !important;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
 }
 
 .chat-section + .chat-section {
@@ -3608,6 +3905,24 @@ button.chat-pin.active {
 
 .chat-menu button:hover {
   background: color-mix(in srgb, var(--input-bg) 84%, var(--fg));
+}
+
+.chat-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chat-menu-label {
+  padding: 5px 8px 2px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.group-menu-wrap .chat-menu {
+  min-width: 190px;
 }
 
 .chat-menu button.danger {

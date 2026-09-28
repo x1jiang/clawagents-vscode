@@ -18,6 +18,7 @@ GATEWAY_API_KEY = os.getenv("GATEWAY_API_KEY", "")
 CLAW_DIR = WORKSPACE / ".clawagents"
 SESSIONS_MEMORY_DIR = CLAW_DIR / "sessions-memory"
 CHATS_DIR = CLAW_DIR / "vscode-chats"
+CHAT_GROUPS_FILE = CLAW_DIR / "vscode-chat-groups.json"
 # Permission grants are approvals, not repository configuration. Keep them in
 # user-owned state keyed by the canonical workspace so a cloned repository
 # cannot grant itself shell or filesystem permissions.

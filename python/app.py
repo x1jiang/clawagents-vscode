@@ -19,13 +19,18 @@ from chats import (
     tool_mutation_succeeded,
     append_ui_event,
     create_chat,
+    create_chat_group,
+    delete_chat_group,
     delete_chat,
     fork_chat,
     get_chat,
     get_chat_meta,
     list_user_event_index,
     list_chats,
+    list_chat_groups,
     patch_chat,
+    rename_chat_group,
+    reorder_chat_groups,
     read_ui_events,
     read_ui_events_page,
     run_chat_turn,
@@ -719,7 +724,16 @@ class PatchChatBody(BaseModel):
     mode: Mode | None = None
     pinned: bool | None = None
     archived: bool | None = None
+    group_id: str | None = None
     model_route: dict[str, Any] | None = None
+
+
+class ChatGroupNameBody(BaseModel):
+    name: str
+
+
+class ChatGroupOrderBody(BaseModel):
+    group_ids: list[str]
 
 
 class RestoreBody(BaseModel):
@@ -1248,6 +1262,57 @@ def create_app() -> FastAPI:
             return denied
         return search_chats(q) if q else list_chats()
 
+    @app.get("/chat-groups")
+    async def chat_groups_list(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return list_chat_groups()
+
+    @app.post("/chat-groups")
+    async def chat_groups_create(body: ChatGroupNameBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            return create_chat_group(body.name)
+        except ValueError as exc:
+            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+
+    @app.put("/chat-groups/order")
+    async def chat_groups_reorder(body: ChatGroupOrderBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            return reorder_chat_groups(body.group_ids)
+        except ValueError as exc:
+            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+
+    @app.patch("/chat-groups/{group_id}")
+    async def chat_groups_rename(group_id: str, body: ChatGroupNameBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            return rename_chat_group(group_id, body.name)
+        except KeyError:
+            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+        except ValueError as exc:
+            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+
+    @app.delete("/chat-groups/{group_id}")
+    async def chat_groups_delete(group_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            return {"ok": True, **delete_chat_group(group_id)}
+        except KeyError:
+            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+        except ValueError as exc:
+            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+
     @app.post("/chats")
     async def chats_create(body: CreateChatBody, request: Request):
         denied = _auth_or_401(request)
@@ -1326,16 +1391,23 @@ def create_app() -> FastAPI:
         if denied:
             return denied
         try:
+            fields: dict[str, Any] = {
+                "title": body.title,
+                "mode": body.mode,
+                "pinned": body.pinned,
+                "archived": body.archived,
+                "model_route": body.model_route,
+            }
+            if "group_id" in body.model_fields_set:
+                fields["group_id"] = body.group_id
             return patch_chat(
                 chat_id,
-                title=body.title,
-                mode=body.mode,
-                pinned=body.pinned,
-                archived=body.archived,
-                model_route=body.model_route,
+                **fields,
             )
         except KeyError:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
+        except ValueError as exc:
+            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
 
     @app.delete("/chats/{chat_id}")
     async def chats_delete(chat_id: str, request: Request):
