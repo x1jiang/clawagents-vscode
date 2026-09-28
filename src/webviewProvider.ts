@@ -1094,6 +1094,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async promptChatGroupName(currentName?: string): Promise<string | undefined> {
+    const validateInput = (value: string): string | undefined => {
+      if (!value.trim()) return "Enter a group name.";
+      if (value.trim().length > 80) return "Group names must be 80 characters or fewer.";
+      return undefined;
+    };
+    const value = await vscode.window.showInputBox({
+      title: currentName === undefined ? "New group" : "Rename group",
+      prompt: "Group name",
+      value: currentName ?? "",
+      validateInput,
+    });
+    return value === undefined || validateInput(value) ? undefined : value.trim();
+  }
+
   private async refreshChatGroups(): Promise<void> {
     try {
       const groups = (await this.gateway.listChatGroups()) as ChatGroup[];
@@ -1778,7 +1793,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "create_chat_group":
         try {
-          await this.gateway.createChatGroup(msg.name);
+          const name = await this.promptChatGroupName();
+          if (!name) break;
+          await this.gateway.createChatGroup(name);
           await this.refreshChatGroups();
         } catch (err) {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
@@ -1786,7 +1803,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "rename_chat_group":
         try {
-          await this.gateway.renameChatGroup(msg.groupId, msg.name);
+          const group = (await this.gateway.listChatGroups()).find((group) => group.id === msg.groupId);
+          if (!group) throw new Error("This group no longer exists. Refresh History and try again.");
+          const name = await this.promptChatGroupName(group.name);
+          if (!name || name === group.name) break;
+          await this.gateway.renameChatGroup(msg.groupId, name);
           await this.refreshChatGroups();
         } catch (err) {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
@@ -1794,6 +1815,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "delete_chat_group":
         try {
+          const group = (await this.gateway.listChatGroups()).find((group) => group.id === msg.groupId);
+          if (!group) throw new Error("This group no longer exists. Refresh History and try again.");
+          const action = "Delete and archive chats";
+          const choice = await vscode.window.showWarningMessage(
+            `Delete “${group.name}” and archive all of its conversations?`,
+            { modal: true },
+            action,
+          );
+          if (choice !== action) break;
           await this.gateway.deleteChatGroup(msg.groupId);
           await Promise.all([this.refreshChatGroups(), this.refreshChats()]);
         } catch (err) {

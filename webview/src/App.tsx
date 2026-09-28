@@ -4171,26 +4171,16 @@ export function App() {
   };
 
   const createHistoryGroup = () => {
-    const name = window.prompt("New group name")?.trim();
-    if (name) post({ type: "create_chat_group", name });
+    post({ type: "create_chat_group" });
   };
 
   const renameHistoryGroup = (group: ChatGroup) => {
-    const name = window.prompt("Rename group", group.name)?.trim();
-    if (name && name !== group.name) {
-      post({ type: "rename_chat_group", groupId: group.id, name });
-    }
+    post({ type: "rename_chat_group", groupId: group.id });
     setOpenGroupMenuId(undefined);
   };
 
   const deleteHistoryGroup = (group: ChatGroup) => {
-    const count = chats.filter((chat) => chat.group_id === group.id).length;
-    const detail = historyQuery.trim()
-      ? `Delete “${group.name}” and archive all of its conversations?`
-      : count
-      ? `Delete “${group.name}” and archive its ${count} conversation${count === 1 ? "" : "s"}?`
-      : `Delete empty group “${group.name}”?`;
-    if (window.confirm(detail)) post({ type: "delete_chat_group", groupId: group.id });
+    post({ type: "delete_chat_group", groupId: group.id });
     setOpenGroupMenuId(undefined);
   };
 

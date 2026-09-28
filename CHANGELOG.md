@@ -1,6 +1,8 @@
 # Unreleased
 
-- Add conversation groups with drag-and-drop organization across History and the open-thread popover, plus persistent section state and grouped batch actions.
+# 1.0.195
+
+- Add conversation groups with drag-and-drop organization across History and the open-thread popover, plus persistent section state and grouped batch actions. Use native VS Code dialogs for group creation, renaming, and deletion so these controls work inside the webview sandbox.
 - Refine the chat header and rich composer: preserve syntax-highlighted code and `.env` pastes as literal text, provide keyboard exits for fenced code and leading lists, and quiet floating compose controls until they are needed.
 - Keep composer focus through live Markdown-mode switches, use compact rounded composition surfaces, constrain transcript width without horizontal scrolling, and move transcript navigation to a non-overlapping left edge rail.
 - Keep per-thread model routing and gateway requests aligned with validated protocol fields, with coverage for grouped-history and draft behavior.

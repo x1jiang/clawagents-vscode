@@ -453,8 +453,8 @@ export type WebviewToHost =
   | { type: "pin_chats"; chatIds: string[]; pinned: boolean }
   | { type: "archive_chat"; chatId: string; archived: boolean }
   | { type: "archive_chats"; chatIds: string[]; archived: boolean }
-  | { type: "create_chat_group"; name: string }
-  | { type: "rename_chat_group"; groupId: string; name: string }
+  | { type: "create_chat_group" }
+  | { type: "rename_chat_group"; groupId: string }
   | { type: "delete_chat_group"; groupId: string }
   | { type: "reorder_chat_groups"; groupIds: string[] }
   | { type: "move_chats_to_group"; chatIds: string[]; groupId: string | null }
@@ -738,13 +738,8 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         ? value as WebviewToHost
         : undefined;
     case "create_chat_group":
-      return text(value.name, 80) && Boolean(value.name.trim())
-        ? value as WebviewToHost
-        : undefined;
+      return { type: "create_chat_group" };
     case "rename_chat_group":
-      return opaqueId(value.groupId) && text(value.name, 80) && Boolean(value.name.trim())
-        ? value as WebviewToHost
-        : undefined;
     case "delete_chat_group":
       return opaqueId(value.groupId) ? value as WebviewToHost : undefined;
     case "reorder_chat_groups":
