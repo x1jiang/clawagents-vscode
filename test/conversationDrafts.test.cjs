@@ -95,6 +95,17 @@ test("typing before a leading Markdown list creates an editable paragraph", () =
   assert.match(richEditor, /inputType === "insertCompositionText"/);
 });
 
+test("switching between plain and rich composer modes preserves focus", () => {
+  const richEditor = section(app, "type RichMarkdownEditorProps", "function CopyMessageButton");
+  assert.match(richEditor, /restoreFocus: boolean/);
+  assert.match(richEditor, /editor\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(richEditor, /range\.collapse\(false\)/);
+  assert.match(richEditor, /onExitToPlain\(next\)/);
+  assert.match(app, /composerFocusTargetRef\.current = "rich"/);
+  assert.match(app, /composerFocusTargetRef\.current = "plain"/);
+  assert.match(app, /textarea\.focus\(\{ preventScroll: true \}\)/);
+});
+
 test("closing the last tab or all tabs flushes the composer before deselect", () => {
   assert.match(
     app,

@@ -1216,8 +1216,13 @@ type RichMarkdownEditorProps = {
    *  resync even if the editor still thinks it is focused. */
   syncKey: string;
   onChange: (markdown: string) => void;
+  /** Called when an in-place edit removes the final Markdown construct. */
+  onExitToPlain: (text: string) => void;
   onSend: () => void;
   onPasteFiles: (files: File[]) => void;
+  /** Only set for a live textarea → rich-editor transition, never a restore. */
+  restoreFocus: boolean;
+  onFocusRestored: () => void;
 };
 
 /** Keep browser-edited DOM outside React reconciliation. React owning the
@@ -1227,8 +1232,11 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
   markdown,
   syncKey,
   onChange,
+  onExitToPlain,
   onSend,
   onPasteFiles,
+  restoreFocus,
+  onFocusRestored,
 }: RichMarkdownEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const focusedRef = useRef(false);
@@ -1245,6 +1253,29 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
     if (editorRef.current) editorRef.current.innerHTML = next;
   }, [markdown, syncKey]);
 
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!restoreFocus || !editor) return;
+    // Switching from textarea to contentEditable replaces the focused node.
+    // Restore focus synchronously and put the caret after the rendered draft.
+    editor.focus({ preventScroll: true });
+    focusedRef.current = true;
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    onFocusRestored();
+  }, [onFocusRestored, restoreFocus]);
+
+  const syncEditedMarkdown = (next: string) => {
+    if (hasMarkdownFormatting(next)) onChange(next);
+    else onExitToPlain(next);
+  };
+
   return (
     <div
       ref={editorRef}
@@ -1259,7 +1290,7 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
         onChange(next);
         setHtml(renderedMarkdown(next));
       }}
-      onInput={(e) => onChange(editableMarkdown(e.currentTarget))}
+      onInput={(e) => syncEditedMarkdown(editableMarkdown(e.currentTarget))}
       onBeforeInput={(e) => {
         const inputType = (e.nativeEvent as InputEvent).inputType;
         // Keydown below handles ordinary keyboard text. beforeinput also
@@ -1314,7 +1345,7 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
         if (!pastedText) return;
         e.preventDefault();
         if (insertRenderedMarkdown(e.currentTarget, renderedMarkdown(pastedText))) {
-          onChange(editableMarkdown(e.currentTarget));
+          syncEditedMarkdown(editableMarkdown(e.currentTarget));
         }
       }}
       aria-label="Rich Markdown editor"
@@ -2202,6 +2233,8 @@ export function App() {
     );
   }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** Which editor owns the next focus after Markdown changes its renderer. */
+  const composerFocusTargetRef = useRef<"plain" | "rich">();
   const bugReportTextareaRef = useRef<HTMLTextAreaElement>(null);
   const localAttachInputRef = useRef<HTMLInputElement>(null);
   const persistTimer = useRef<number | undefined>();
@@ -2217,6 +2250,14 @@ export function App() {
   const pendingSettingsSaves = useRef(
     new Map<number, { key: string; patch: Record<string, unknown> }>(),
   );
+
+  useLayoutEffect(() => {
+    if (composerFocusTargetRef.current !== "plain" || !textareaRef.current) return;
+    const textarea = textareaRef.current;
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    composerFocusTargetRef.current = undefined;
+  }, [draft]);
   /**
    * Fingerprint of last *confirmed* settings (host ok / cancelled revert).
    * Autosave only runs when local settings differ — prevents forever PUT loops.
@@ -5440,6 +5481,17 @@ export function App() {
               ) : null}
               Compact
             </button>
+            <button
+              type="button"
+              className="tool-chip compact-action"
+              title="Report a bug (type, speak, or screenshot → email)"
+              onClick={() => {
+                setBugReportOpen(true);
+                setBugReportStatus("");
+              }}
+            >
+              Report issue
+            </button>
           </div>
             </div>
           </details>
@@ -8344,7 +8396,17 @@ export function App() {
                     syncKey={chatId ?? "new"}
                     markdown={draft}
                     onChange={setDraft}
+                    onExitToPlain={(text) => {
+                      composerFocusTargetRef.current = "plain";
+                      setDraft(text);
+                    }}
                     onSend={send}
+                    restoreFocus={composerFocusTargetRef.current === "rich"}
+                    onFocusRestored={() => {
+                      if (composerFocusTargetRef.current === "rich") {
+                        composerFocusTargetRef.current = undefined;
+                      }
+                    }}
                     onPasteFiles={(files) => {
                       void attachLocalBrowserFiles(
                         files,
@@ -8359,7 +8421,9 @@ export function App() {
                     ref={textareaRef}
                     value={draft}
                     onChange={(e) => {
-                      setDraft(e.target.value);
+                      const next = e.target.value;
+                      if (hasMarkdownFormatting(next)) composerFocusTargetRef.current = "rich";
+                      setDraft(next);
                     }}
                     onPaste={(e) => {
                       const files = collectTransferFiles(e.clipboardData);
@@ -8379,11 +8443,12 @@ export function App() {
                           // is converted as a whole so text around tables is preserved.
                           e.preventDefault();
                           const target = e.currentTarget;
-                          setDraft((current) =>
-                            current.slice(0, target.selectionStart) +
+                          const next =
+                            target.value.slice(0, target.selectionStart) +
                             pastedText +
-                            current.slice(target.selectionEnd),
-                          );
+                            target.value.slice(target.selectionEnd);
+                          if (hasMarkdownFormatting(next)) composerFocusTargetRef.current = "rich";
+                          setDraft(next);
                           setComposerPreviewCollapsed(
                             !hasMarkdownFormatting(pastedText) && shouldCollapsePastedText(pastedText),
                           );
@@ -8434,18 +8499,6 @@ export function App() {
                 <div className="compose-actions">
                   <button
                     type="button"
-                    className="icon-btn"
-                    title="Report a bug (type, speak, or screenshot → email)"
-                    aria-label="Report a bug"
-                    onClick={() => {
-                      setBugReportOpen(true);
-                      setBugReportStatus("");
-                    }}
-                  >
-                    <IconComment />
-                  </button>
-                  <button
-                    type="button"
                     className={`icon-btn mic-btn${dictating ? " active" : ""}`}
                     title={
                       dictating
@@ -8462,7 +8515,7 @@ export function App() {
                     <>
                       <button
                         type="button"
-                        className="icon-btn"
+                        className="icon-btn redirect-draft"
                         title="Redirect draft mid-turn (without stopping)"
                         aria-label="Redirect draft mid-turn"
                         disabled={!draft.trim()}
@@ -8474,6 +8527,7 @@ export function App() {
                         }}
                       >
                         <IconRedirect />
+                        <span>Redirect</span>
                       </button>
                       <button
                         type="button"
