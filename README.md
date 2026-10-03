@@ -5,17 +5,17 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 ## Requirements
 
 - VS Code **1.85+** (or Cursor)
-- Python **3.11+** on your PATH (or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.83** (Context Observatory, artifact security, raw tool archival, workspace-scoped turns)
+- Python **3.10+** on this host (managed mode discovers compatible PATH and standard installations, or set `clawagents.pythonPath`)
+- **clawagents ≥ 6.20.85** (GPT-6.1 Sol provider support)
 - A provider credential for at least one model provider
 
 ## Quick start
 
 1. Install this extension from the Marketplace (or a `.vsix`).
-2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into `clawagents.pythonPath`:
+2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into its isolated managed environment (or `clawagents.pythonPath` when using the `custom` runtime):
 
 ```text
-clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.83,<7  fastapi  uvicorn  pydantic  python-dotenv
+clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.85,<7  fastapi  uvicorn  pydantic  python-dotenv
 ```
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
@@ -42,8 +42,8 @@ You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Co
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `clawagents.pythonRuntime` | `managed` | Isolated extension-owned virtualenv; choose `custom` to use `pythonPath` directly |
-| `clawagents.pythonPath` | `python3` | Base interpreter for the managed environment, or the exact custom interpreter |
+| `clawagents.pythonRuntime` | `managed` | Isolated extension-owned virtualenv with compatible host-local Python discovery; choose `custom` for an exact environment |
+| `clawagents.pythonPath` | `python3` | Preferred managed base (host discovery if missing/incompatible), or the exact custom interpreter |
 | `clawagents.model` | *(empty)* | Model override |
 | `clawagents.provider` | `auto` | Preferred provider for credential selection |
 | `clawagents.defaultMode` | `auto` | Default permission mode |
@@ -81,6 +81,8 @@ Command Palette → **ClawAgents: Ensure Companions** forces a re-probe/upgrade.
 
 ## Troubleshooting
 
+- **Python interpreter not found** — managed mode discovers compatible Python on the extension host when the configured base is missing or incompatible. If none is available, run **ClawAgents: Select Python Interpreter**, or click **Select Python** in the error banner. Enter `python3` or a full path to Python 3.10+. This validates Python, saves User/Remote settings, and retries startup when idle. In an SSH window, use a remote interpreter; a local Mac path such as `/usr/local/bin/python3` may not exist there. Custom mode never substitutes another environment.
+- **Missing Python packages** — click **Install Python dependencies** in the error banner. This installs into the actual sidecar runtime, including its isolated environment in managed mode.
 - **Sidecar health check timed out** — open *ClawAgents Sidecar* output. Usually missing pip packages or a bad `clawagents.pythonPath`.
 - **provider_auth** — invalid credential. Precedence: SecretStorage → workspace `.env` → shell. Path-like values (`python.exe`) are ignored/purged so a real key elsewhere can win.
 - **Gemini** — set the Gemini/Google provider credential; `pip install 'clawagents[gemini]'`.
@@ -117,7 +119,7 @@ In VS Code **User settings** (or **Remote settings** in an SSH window), set:
 
 On Windows, use the full `venv\\Scripts\\python.exe` path in JSON. The interpreter must exist on the host running the extension. Workspace absolute paths are ignored for security; VS Code's separate Python extension selection does not configure ClawAgents.
 
-Custom mode runs the sidecar with this interpreter and prepends its directory to PATH for local agent commands. Managed mode creates a separate extension-owned venv using the selected base Python. A missing configured interpreter is an error, never a reason to silently choose system Python. Settings changes restart the sidecar when active tasks finish; **ClawAgents: Restart Sidecar** applies them immediately.
+Custom mode runs the sidecar with this exact interpreter and prepends its directory to PATH for local agent commands. A missing or incompatible custom interpreter is an error. Managed mode creates a separate extension-owned venv using the preferred base Python; if unavailable, it discovers Python 3.10+ on the current host, excluding workspace executables and relative PATH entries. Discovery does not modify your settings or other Python installations. The chosen base, version, and host appear in **ClawAgents Sidecar** output. Settings changes restart the sidecar when active tasks finish; **ClawAgents: Restart Sidecar** applies them immediately.
 
 In **Output → ClawAgents Sidecar**, `Starting sidecar:` shows the interpreter and `PATH pin:` shows its command directory. To verify a local agent command, run `python -c "import sys; print(sys.executable); print(sys.prefix)"`. Explicit absolute commands and separately configured containers/remote execution environments retain their own interpreter selection.
 

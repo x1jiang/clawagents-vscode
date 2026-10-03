@@ -1188,11 +1188,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       void vscode.window
         .showErrorMessage(
           `ClawAgents sidecar failed: ${detail.split("\n")[0]}`,
+          "Select Python",
           "Show Sidecar Log",
           "Open Settings",
         )
         .then((choice) => {
-          if (choice === "Show Sidecar Log") {
+          if (choice === "Select Python") {
+            void vscode.commands.executeCommand("clawagents.selectPythonInterpreter");
+          } else if (choice === "Show Sidecar Log") {
             void vscode.commands.executeCommand("workbench.action.output.toggleOutput");
           } else if (choice === "Open Settings") {
             void vscode.commands.executeCommand(
@@ -2173,6 +2176,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "restart_sidecar":
         await this.restartSidecar();
         break;
+      case "select_python":
+        await vscode.commands.executeCommand("clawagents.selectPythonInterpreter");
+        break;
+      case "install_python_deps":
+        await vscode.commands.executeCommand("clawagents.installPythonDeps");
+        break;
       case "load_settings":
         this.post({ type: "gemma_local_status", ...this.localGemma.status });
         try {
@@ -2767,7 +2776,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         const out = this.sidecar.output;
         out.appendLine("Sending bug report email…");
         const result = await sendBugReportEmail({
-          python: this.config.pythonPath,
+          python: await this.sidecar.resolvePythonRuntime(),
           extensionPath: this.context.extensionUri.fsPath,
           text: msg.text,
           screenshots: msg.screenshots,

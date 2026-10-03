@@ -27,6 +27,8 @@ function withCache(input: number, output: number, cached?: number, write?: numbe
 
 const PRICES: Record<string, Rates> = {
   "gpt-6-astra": withCache(10, 50, 1, 12.5),
+  // https://developers.openai.com/api/docs/models/gpt-6.1-sol
+  "gpt-6.1-sol": withCache(2, 10, 0.1, 2.5),
   "gpt-6-sol": withCache(2, 10, 0.2, 2.5),
   "gpt-6-luna": withCache(0.1, 0.5, 0.01, 0.125),
   "gpt-5.6": withCache(5, 30, 0.5, 6.25),
@@ -231,7 +233,7 @@ function lookup(
   if ((key.startsWith("gpt-6-astra") || key.startsWith("grok-4.6")) && raw.toLowerCase().replace(/^bedrock\//, "").startsWith("global.")) {
     return lookupTable(PRICES, key);
   }
-  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6-(sol|luna)|claude-fable-5-1|claude-opus-5|claude-sonnet-5)/.test(key)) return null;
+  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6\.1-sol|gpt-6-(sol|luna)|claude-fable-5-1|claude-opus-5|claude-sonnet-5)/.test(key)) return null;
   const primary = forceBedrock || looksBedrock(raw) ? BEDROCK_PRICES : PRICES;
   const hit = lookupTable(primary, key);
   if (hit) return hit;
@@ -248,7 +250,7 @@ const LONG_CONTEXT_OUTPUT_MULT_GROK = 2;
 
 function isGpt56Family(modelId: string): boolean {
   const key = normalizeModelId(modelId);
-  return key.startsWith("gpt-5.6") || /^gpt-6-(astra|sol|luna)/.test(key) || key.startsWith("gpt-5.5")
+  return key.startsWith("gpt-5.6") || key.startsWith("gpt-6.1-sol") || /^gpt-6-(astra|sol|luna)/.test(key) || key.startsWith("gpt-5.5")
     || (key.startsWith("gpt-5.4") && !/^gpt-5\.4-(mini|nano)/.test(key));
 }
 

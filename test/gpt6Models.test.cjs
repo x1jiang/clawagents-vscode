@@ -45,3 +45,24 @@ test("GPT-6 direct pricing includes cached input, with no inferred Bedrock price
     assert.equal(pricing.estimateCostUsd(`openai.${id}`, 100000, 10000), null);
   }
 });
+
+test("GPT-6.1 Sol is selectable in the catalog and thread route picker", () => {
+  const openai = catalog.FALLBACK_PROVIDERS.find(p => p.id === "openai");
+  assert(openai.models.some(m => m.id === "gpt-6.1-sol" && m.label === "GPT-6.1 Sol"));
+  const routeSource = fs.readFileSync(path.join(__dirname, "../webview/src/ModelRouteCapsule.tsx"), "utf8");
+  assert(routeSource.includes('"gpt-6.1-sol"'));
+});
+
+test("GPT-6.1 Sol uses its own reasoning, context, and cache pricing contract", () => {
+  assert(selection.modelSupportsEffort("gpt-6.1-sol"));
+  assert.deepEqual(selection.effortOptionsForModel("gpt-6.1-sol").map(o => o.value), ["low", "medium", "high", "xhigh", "max"]);
+  for (const effort of ["none", "minimal"]) {
+    assert.equal(selection.compatibleEffortForModel("gpt-6.1-sol", effort), "low");
+  }
+  assert.equal(selection.compatibleEffortForModel("gpt-6.1-sol", "max"), "max");
+  assert.equal(context.contextWindowFor("gpt-6.1-sol"), 1050000);
+  assert(Math.abs(pricing.estimateCostUsd("gpt-6.1-sol", 100000, 10000, undefined, "openai", 50000) - .205) < 1e-12);
+  assert(Math.abs(pricing.estimateCostUsd("gpt-6.1-sol", 300000, 10000, undefined, "openai", 100000) - .97) < 1e-12);
+  assert.equal(pricing.estimateCostUsd("gpt-6.1-sol", 100000, 10000, undefined, "bedrock"), null);
+  assert.equal(pricing.estimateCostUsd("openai.gpt-6.1-sol", 100000, 10000), null);
+});

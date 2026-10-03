@@ -4,12 +4,13 @@ import * as http from "http";
 import * as net from "net";
 import * as path from "path";
 import * as vscode from "vscode";
-import { AWS_ENV_KEYS, ExtensionConfig, sanitizeApiKey, workspaceRoot } from "./config";
+import { AWS_ENV_KEYS, ExtensionConfig, sanitizeApiKey, trustedPythonPathSetting, workspaceRoot } from "./config";
 import { curatedProcessEnv } from "./envCurate";
 import { ensureCompanions } from "./companionDeps";
 import { ensureSidecarDeps } from "./pythonDeps";
 import { pinPythonPathEnv } from "./pythonPathPin";
 import { StartGeneration } from "./startGeneration";
+import { resolveSidecarBasePython } from "./pythonInterpreter";
 import {
   clearManagedPythonFailures,
   ensureManagedPython,
@@ -111,8 +112,10 @@ export class SidecarManager {
   }
 
   async resolvePythonRuntime(): Promise<string> {
-    const basePython = this.config.pythonPath;
-    if (this.config.pythonRuntime === "custom") {
+    const runtime = this.config.pythonRuntime;
+    const basePython = await resolveSidecarBasePython(trustedPythonPathSetting(), runtime, this.output,
+      (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath));
+    if (runtime === "custom") {
       return basePython;
     }
     return ensureManagedPython(basePython, this.globalStoragePath, this.output, {
@@ -228,6 +231,7 @@ export class SidecarManager {
     this.stopChild();
 
     const python = await this.resolvePythonRuntime();
+    this.assertCurrentStart(generation);
     const bridge = path.join(this.extensionPath, "python", "bridge.py");
     // Do not PATH-sync / pip-upgrade other interpreters on every restart —
     // that used --break-system-packages, hung offline, and slowed startup.

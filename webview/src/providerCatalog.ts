@@ -47,6 +47,7 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     models: [
       { id: PREFERRED_OPENAI_MODEL, label: "GPT-5.6 Terra" },
       { id: "gpt-6-astra", label: "GPT-6 Astra" },
+      { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
       { id: "gpt-6-sol", label: "GPT-6 Sol" },
       { id: "gpt-6-luna", label: "GPT-6 Luna" },
       { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },

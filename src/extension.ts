@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import {
   buildProblemsContext,
   ExtensionConfig,
+  selectPythonInterpreter,
   setPreferredWorkspaceRoot,
   trackEditorFocus,
   wrapCurrentFileRef,
@@ -215,6 +216,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("clawagents.setupLocalGemma", async () => { await provider?.setupLocalGemma(); }),
     vscode.commands.registerCommand("clawagents.stopLocalGemma", () => { provider?.stopLocalGemma(); }),
+    vscode.commands.registerCommand("clawagents.selectPythonInterpreter", selectPythonInterpreter),
     vscode.commands.registerCommand("clawagents.installPythonDeps", async () => {
       const manager = sidecar;
       if (!manager) {
@@ -382,7 +384,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!sidecarSettings.some((k) => e.affectsConfiguration(k))) {
         return;
       }
-      if (!sidecar?.current) {
+      if (!sidecar || (!sidecar.current
+        && !e.affectsConfiguration("clawagents.pythonPath")
+        && !e.affectsConfiguration("clawagents.pythonRuntime"))) {
         return;
       }
       if (provider?.busy) {

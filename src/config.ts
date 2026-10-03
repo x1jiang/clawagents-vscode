@@ -1,4 +1,3 @@
-import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -10,6 +9,8 @@ import {
   runtimeTrustStorageKey,
 } from "./runtimeTrust";
 import { chooseWorkspaceRoot } from "./workspaceSelection";
+import { MIN_PYTHON_VERSION, probePythonVersion, resolvePythonExecutable } from "./pythonInterpreter";
+export { resolvePythonExecutable } from "./pythonInterpreter";
 
 const SECRET_KEYS = {
   openai: "clawagents.openaiApiKey",
@@ -141,24 +142,36 @@ const _purgedPathSecrets = new Set<string>();
 export type ProviderKind = keyof typeof SECRET_KEYS | "auto";
 export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
 
-/** Resolve only the requested interpreter; never substitute another Python. */
-export function resolvePythonExecutable(configured: string): string {
-  const candidate = configured.trim() || (process.platform === "win32" ? "python" : "python3");
-  if (path.isAbsolute(candidate)) {
-    if (fs.existsSync(candidate)) return candidate;
-  } else {
-    const finder = process.platform === "win32" ? "where" : "which";
-    const result = spawnSync(finder, [candidate], { encoding: "utf8" });
-    const resolved = (result.stdout || "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line && fs.existsSync(line));
-    if (resolved) return resolved;
+/** User-triggered recovery; probe on the extension host before saving its setting. */
+export async function selectPythonInterpreter(): Promise<boolean> {
+  const validateInput = async (value: string): Promise<string | undefined> => {
+    if (!value.trim()) return "Enter a Python command or full interpreter path.";
+    try {
+      await probePythonVersion(resolvePythonExecutable(value));
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    return undefined;
+  };
+  const selected = await vscode.window.showInputBox({
+    title: "ClawAgents: Select Python Interpreter",
+    prompt: vscode.env.remoteName
+      ? "Enter Python on the remote host. Saves to Remote settings; retries the sidecar when idle."
+      : "Enter Python on this machine. Saves to User settings; retries the sidecar when idle.",
+    value: process.platform === "win32" ? "python" : "python3",
+    placeHolder: `Python ${MIN_PYTHON_VERSION}+ command or /path/to/venv/bin/python`,
+    ignoreFocusOut: true,
+    validateInput,
+  });
+  if (selected === undefined) return false;
+  const problem = await validateInput(selected);
+  if (problem) {
+    void vscode.window.showErrorMessage(problem);
+    return false;
   }
-  throw new Error(
-    `Python interpreter "${candidate}" not found. Set clawagents.pythonPath in User ` +
-    `or Remote settings to an interpreter on this host. ClawAgents will not select another Python automatically.`,
-  );
+  await vscode.workspace.getConfiguration("clawagents")
+    .update("pythonPath", selected.trim(), vscode.ConfigurationTarget.Global);
+  return true;
 }
 
 /** Bare interpreter names safe even from workspace settings. */

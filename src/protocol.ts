@@ -490,6 +490,8 @@ export type WebviewToHost =
   | { type: "setup_local_gemma" }
   | { type: "stop_local_gemma" }
   | { type: "restart_sidecar" }
+  | { type: "select_python" }
+  | { type: "install_python_deps" }
   | { type: "load_settings" }
   | { type: "save_settings"; revision: number; settings: Record<string, unknown> }
   | { type: "load_skills" }
@@ -569,7 +571,7 @@ export type WebviewToHost =
 
 const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
-  "clear_images", "clear_files", "compact_chat", "restart_sidecar", "load_settings", "setup_local_gemma", "stop_local_gemma",
+  "clear_images", "clear_files", "compact_chat", "restart_sidecar", "select_python", "install_python_deps", "load_settings", "setup_local_gemma", "stop_local_gemma",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
   "load_stats", "bug_report_capture_screenshot", "load_older_chat", "load_query_index",
   "list_jobs", "load_pinned",

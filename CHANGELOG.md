@@ -1,5 +1,11 @@
 # Unreleased
 
+# 1.0.196
+
+- Recover missing or incompatible managed Python bases by discovering compatible interpreters on the current host. Validate Python versions with isolated, timed probes; exclude workspace executables, preserve selected venv symlinks, and leave custom runtime selections exact. Log the chosen base and host without changing settings or upgrading other Python installations.
+- Add a validated **Select Python Interpreter** command and sidecar error actions for selecting Python and installing dependencies into the actual runtime. Retry startup after Python settings change even when the previous launch failed; replace the misleading generic pip command with host-specific guidance.
+- Add GPT-6.1 Sol to settings and per-thread model listings with its documented reasoning choices, Responses tool routing, context window, and pricing. Require clawagents **6.20.85** for the matching Python provider support.
+
 # 1.0.195
 
 - Add conversation groups with drag-and-drop organization across History and the open-thread popover, plus persistent section state and grouped batch actions. Use native VS Code dialogs for group creation, renaming, and deletion so these controls work inside the webview sandbox.

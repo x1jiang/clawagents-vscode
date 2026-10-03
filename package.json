@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.195",
+  "version": "1.0.196",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -79,6 +79,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "clawagents.selectPythonInterpreter",
+        "title": "ClawAgents: Select Python Interpreter"
+      },
       {
         "command": "clawagents.openChat",
         "title": "ClawAgents: Open Chat",
@@ -255,7 +259,7 @@
           "type": "string",
           "default": "python3",
           "scope": "machine-overridable",
-          "description": "Set in User or Remote settings. With Python Runtime = custom, this exact interpreter is used for the sidecar and its local Python commands; a missing path is an error, never a fallback. With managed, it creates an isolated sidecar venv. Workspace absolute paths are ignored."
+          "description": "Set in User or Remote settings. Custom uses this exact interpreter and fails if it is missing or incompatible. Managed uses it as the base for an isolated sidecar venv, discovering compatible host-local Python if the base is unavailable. Discovery excludes workspace executables. Workspace absolute settings are ignored."
         },
         "clawagents.pythonRuntime": {
           "type": "string",
@@ -265,7 +269,7 @@
           ],
           "default": "managed",
           "scope": "machine-overridable",
-          "description": "Choose custom to use your selected Python environment for the sidecar and local Python commands. Managed creates an isolated environment in VS Code global storage. Changes apply when active tasks finish."
+          "description": "Managed discovers compatible Python on the current host when needed and creates an isolated environment in VS Code global storage. Custom uses your exact selected environment. Changes apply when active tasks finish, including recovery after a failed start."
         },
         "clawagents.model": {
           "type": "string",

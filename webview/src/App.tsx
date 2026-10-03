@@ -5750,16 +5750,27 @@ export function App() {
               <button
                 type="button"
                 className="ghost"
+                onClick={() => post({ type: "select_python" })}
+              >
+                Select Python
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => post({ type: "install_python_deps" })}
+              >
+                Install Python dependencies
+              </button>
+              <button
+                type="button"
+                className="ghost"
                 onClick={() => post({ type: "restart_sidecar" })}
               >
                 Restart sidecar
               </button>
-              On a remote SSH host, install packages into the <em>remote</em> Python (
-              <code>clawagents.pythonPath</code>), then Restart Sidecar:
-              <pre>
-                python3 -m pip install &apos;clawagents[gemini,anthropic,bedrock,mcp]&apos; fastapi uvicorn
-                pydantic
-              </pre>
+              If no compatible interpreter is available, select Python 3.10+ on this host.
+              In an SSH window, Python must be installed on the remote host.
+              Dependency installation uses the selected runtime, including its managed environment.
               Details: Output panel → <em>ClawAgents Sidecar</em>
             </div>
           </div>
