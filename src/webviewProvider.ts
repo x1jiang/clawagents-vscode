@@ -19,7 +19,7 @@ import {
   wrapCurrentFileRef,
   wrapSelectionBlock,
 } from "./config";
-import { GatewayClient, isSidecarTransportError } from "./gatewayClient";
+import { GatewayClient, isChatNotFoundError, isSidecarTransportError } from "./gatewayClient";
 import { eventsToItems } from "./chatItems";
 import {
   decodeLocalAttachment,
@@ -326,8 +326,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
       }
       // Migrate the former single-draft state into its owning conversation.
-      if (saved.chatId && saved.draft && this.drafts[saved.chatId] === undefined) {
-        this.drafts[saved.chatId] = saved.draft;
+      if (saved.draft && this.drafts[saved.chatId || ""] === undefined) {
+        this.drafts[saved.chatId || ""] = saved.draft;
       }
       if (saved.autoApprove) {
         this.autoApprove = { ...DEFAULT_AUTO_APPROVE, ...saved.autoApprove };
@@ -354,15 +354,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private draftForChat(chatId = this.chatId): string {
-    return chatId ? this.drafts[chatId] || "" : "";
+    return this.drafts[chatId || ""] || "";
   }
 
   private rememberDraft(chatId: string | undefined, draft: string): void {
-    if (!chatId) return;
     if (draft) {
-      this.drafts[chatId] = draft;
+      this.drafts[chatId || ""] = draft;
     } else {
-      delete this.drafts[chatId];
+      delete this.drafts[chatId || ""];
     }
   }
 
@@ -922,7 +921,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         await this.refreshChats();
         return;
       }
+      const unassignedDraft = startedOn ? "" : this.draftForChat();
       this.chatId = String(chat.id);
+      this.rememberDraft(this.chatId, unassignedDraft);
+      this.rememberDraft(undefined, "");
       const modelRoute = modelRouteFromChat(chat);
       if (modelRoute) this.modelRoutes.set(this.chatId, modelRoute);
       this.eventsOffset = 0;
@@ -930,7 +932,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       this.post({
         type: "restore",
         items: [],
-        draft: "",
+        draft: unassignedDraft,
         mode: this.mode,
         chatId: this.chatId,
         autoApprove: this.autoApprove,
@@ -1060,6 +1062,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     try {
       await this.sidecar.ensureStarted();
       this.post({ type: "sidecar", state: "running" });
+      await this.restoreCurrentChat();
       await this.pushReady();
     } catch (err) {
       this.post({
@@ -1118,14 +1121,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private clearCurrentChat(): void {
+  private clearCurrentChat(draft = ""): void {
     this.chatId = undefined;
+    this.rememberDraft(undefined, draft);
     this.eventsOffset = 0;
     this.eventsHasMore = false;
     this.post({
       type: "restore",
       items: [],
-      draft: "",
+      draft,
       mode: this.mode,
       chatId: null,
       autoApprove: this.autoApprove,
@@ -1205,6 +1209,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           }
         });
     }
+    await this.restoreCurrentChat();
     await this.pushReady();
     // Re-sync staged attachment chips: the webview loses its local list on
     // reload while the attachments stay staged host-side (and would still send).
@@ -1213,14 +1218,23 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     // A reload must not hide a job that is still running. Conversation-scoped
     // add-on context is sent alongside the restore below.
     await this.refreshJobs();
-    if (!this.chatId) {
-      return;
-    }
+  }
+
+  private async restoreCurrentChat(): Promise<void> {
+    const chatId = this.chatId;
+    if (!chatId) return;
     try {
-      const chat = await this.gateway.getChat(this.chatId, { tail: 400 });
-      await this.postChatRestore(this.chatId, chat);
-    } catch {
-      /* ignore */
+      const chat = await this.gateway.getChat(chatId, { tail: 400 });
+      if (this.chatId === chatId) await this.postChatRestore(chatId, chat);
+    } catch (error) {
+      if (this.chatId === chatId && !this.runs.isActive(chatId) && isChatNotFoundError(error, chatId)) {
+        const draft = this.draftForChat(chatId);
+        this.modelRoutes.delete(chatId);
+        this.clearCurrentChat(draft);
+        await this.persistLocal(this.persistState());
+        await this.refreshChats();
+        this.post({ type: "status", message: "The previous conversation is unavailable in this workspace. Start a new chat; your draft is preserved." });
+      }
     }
   }
 
@@ -1700,6 +1714,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               }
               await this.refreshChats();
             } catch (err) {
+              if (isChatNotFoundError(err, msg.chatId)) {
+                if (this.chatId === msg.chatId) await this.restoreCurrentChat();
+                else await this.refreshChats();
+                return;
+              }
               this.post({
                 type: "error",
                 message: err instanceof Error ? err.message : String(err),

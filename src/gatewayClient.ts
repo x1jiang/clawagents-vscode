@@ -18,6 +18,25 @@ export type StreamHandlers = {
   signal?: AbortSignal;
 };
 
+export class SidecarHttpError extends Error {
+  constructor(
+    readonly method: string,
+    readonly pathName: string,
+    readonly statusCode: number,
+    body: string,
+  ) {
+    super(`${method} ${pathName} HTTP ${statusCode}: ${body}`);
+  }
+}
+
+/** Only a confirmed missing chat may invalidate its saved selection. */
+export function isChatNotFoundError(error: unknown, chatId: string): boolean {
+  if (!(error instanceof Error)) return false;
+  const detail = error as Partial<SidecarHttpError>;
+  return detail.statusCode === 404 && (detail.method === "GET" || detail.method === "PATCH")
+    && detail.pathName?.split("?")[0] === `/chats/${encodeURIComponent(chatId)}`;
+}
+
 /** True for local sidecar transport failures that mean "restart me". */
 export function isSidecarTransportError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
@@ -74,7 +93,7 @@ function requestJson<T>(
         });
         res.on("end", () => {
           if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`${method} ${pathName} HTTP ${res.statusCode}: ${data}`));
+            reject(new SidecarHttpError(method, pathName, res.statusCode, data));
             return;
           }
           try {

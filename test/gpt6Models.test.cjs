@@ -4,6 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { buildSync } = require("esbuild");
+const ts = require("typescript");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-astra-"));
 function load(name) {
   const outfile = path.join(dir, `${name}.cjs`);
@@ -65,4 +66,83 @@ test("GPT-6.1 Sol uses its own reasoning, context, and cache pricing contract", 
   assert(Math.abs(pricing.estimateCostUsd("gpt-6.1-sol", 300000, 10000, undefined, "openai", 100000) - .97) < 1e-12);
   assert.equal(pricing.estimateCostUsd("gpt-6.1-sol", 100000, 10000, undefined, "bedrock"), null);
   assert.equal(pricing.estimateCostUsd("openai.gpt-6.1-sol", 100000, 10000), null);
+});
+
+function appHandler(name, scope) {
+  const source = fs.readFileSync(path.join(__dirname, "../webview/src/App.tsx"), "utf8");
+  const file = ts.createSourceFile("App.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let declaration;
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(file) === name) declaration = node;
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  assert(declaration, `Missing App handler ${name}`);
+  const compiled = ts.transpileModule(`const ${name} = ${declaration.initializer.getText(file)};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  return new Function(...Object.keys(scope), `${compiled}\nreturn ${name};`)(...Object.values(scope));
+}
+
+test("GPT-6.1 Sol coding chats explicitly select Responses for direct OpenAI", () => {
+  for (const provider of ["openai", "auto", "profile:openai"]) {
+    assert(selection.modelRequiresResponsesForTools("gpt-6.1-sol", provider));
+    assert.equal(selection.compatibleWireApiForModel("gpt-6.1-sol", provider, "chat_completions"), "responses");
+    for (const wire of ["auto", "responses"]) {
+      assert.equal(selection.compatibleWireApiForModel("gpt-6.1-sol", provider, wire), "responses");
+    }
+  }
+  for (const [model, provider] of [["gpt-6-sol", "openai"], ["gpt-6.1-sol", "bedrock"],
+    ["gpt-6.1-sol", "ollama"], ["openai.gpt-6.1-sol", "auto"]]) {
+    assert(!selection.modelRequiresResponsesForTools(model, provider));
+    assert.equal(selection.compatibleWireApiForModel(model, provider, "chat_completions"), "chat_completions");
+  }
+});
+
+test("thread and default model changes persist the GPT-6.1 Sol wire correction", () => {
+  const inherited = { provider: "openai", model: "gpt-6-sol", wire_api: "chat_completions", reasoning_effort: "none" };
+  let persisted;
+  const selectThread = appHandler("selectModel", {
+    threadSettings: inherited,
+    isMantleSettings: () => false,
+    compatibleEffortForModel: selection.compatibleEffortForModel,
+    compatibleWireApiForModel: selection.compatibleWireApiForModel,
+    modelRouteForSettings: value => value,
+    persistThreadModelRoute: value => { persisted = value; return true; },
+    setModel: () => {},
+  });
+  selectThread("gpt-6.1-sol");
+  assert.equal(persisted.wire_api, "responses");
+  assert.equal(persisted.reasoning_effort, "low");
+
+  let saved;
+  const selectDefault = appHandler("selectDefaultModel", {
+    settings: inherited,
+    setModel: () => {}, isMantleSettings: () => false,
+    compatibleEffortForModel: selection.compatibleEffortForModel,
+    compatibleWireApiForModel: selection.compatibleWireApiForModel,
+    skipSettingsAutosave: {}, setSettings: () => {},
+    normalizeSettingsForSave: value => value,
+    settingsSaveKey: () => "test", inflightSettingsKey: {}, pendingSettingsPatch: {},
+    setVerifyMsg: () => {}, postSettingsSave: value => { saved = value; },
+  });
+  selectDefault("gpt-6.1-sol");
+  assert.equal(saved.wire_api, "responses");
+  assert.equal(saved.reasoning_effort, "low");
+});
+
+test("Wire API control cannot reintroduce incompatible GPT-6.1 Sol chat tools", () => {
+  let saved;
+  const selectWire = appHandler("selectWireApi", {
+    settings: { provider: "openai", model: "gpt-6.1-sol" },
+    compatibleWireApiForModel: selection.compatibleWireApiForModel,
+    skipSettingsAutosave: {}, setSettings: () => {},
+    settingsSaveKey: () => "test", inflightSettingsKey: {}, pendingSettingsPatch: {},
+    setVerifyMsg: () => {}, postSettingsSave: value => { saved = value; },
+  });
+  selectWire("chat_completions");
+  assert.equal(saved.wire_api, "responses");
+  const app = fs.readFileSync(path.join(__dirname, "../webview/src/App.tsx"), "utf8");
+  assert.match(app, /<option value="chat_completions"\s+disabled=\{modelRequiresResponsesForTools\(/);
+  assert.match(app, /Chat Completions is supported without tools/);
 });

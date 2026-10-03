@@ -1,5 +1,11 @@
 # Unreleased
 
+# 1.0.197
+
+- Store no-folder conversations in stable host storage instead of the versioned extension installation. Import retained legacy chat history and settings once without overwriting newer state, following symlinks, deleting source files, or resurrecting conversations on later starts.
+- Validate restored chat IDs before publishing Ready. Clear only confirmed missing selections, preserve unsent drafts, and recover model-setting 404s without recreating deleted conversations or clearing a newer selection.
+- When direct OpenAI GPT-6.1 Sol is selected, explicitly select Responses for agent tools, including inherited defaults and saved Chat Completions pins. Disable incompatible Chat selection and explain that tool-free Chat Completions remains supported. Python 6.20.85 already provides the matching provider behavior.
+
 # 1.0.196
 
 - Recover missing or incompatible managed Python bases by discovering compatible interpreters on the current host. Validate Python versions with isolated, timed probes; exclude workspace executables, preserve selected venv symlinks, and leave custom runtime selections exact. Log the chosen base and host without changing settings or upgrading other Python installations.

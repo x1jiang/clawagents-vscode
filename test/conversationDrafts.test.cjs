@@ -17,7 +17,7 @@ function section(source, start, end) {
 
 test("composer drafts persist per conversation and migrate the legacy draft", () => {
   assert.match(provider, /drafts\?: Record<string, string>/);
-  assert.match(provider, /this\.drafts\[saved\.chatId\] = saved\.draft/);
+  assert.match(provider, /this\.drafts\[saved\.chatId \|\| ""\] = saved\.draft/);
 
   const persistState = section(provider, "private persistState()", "resolveWebviewView(");
   assert.match(persistState, /draft: this\.draftForChat\(\)/);

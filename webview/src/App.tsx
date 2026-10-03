@@ -1,4 +1,4 @@
-import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel } from "./modelSelection";
+import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel, modelRequiresResponsesForTools, compatibleWireApiForModel } from "./modelSelection";
 import { normalizeEfficiency, efficiencyLabel, type Efficiency } from "../../src/efficiency";
 import {
   memo,
@@ -4613,6 +4613,8 @@ export function App() {
     if (isMantleSettings(nextThreadSettings) && next) {
       nextThreadSettings.wire_api = mantleWireApiForModel(next);
     }
+    nextThreadSettings.wire_api = compatibleWireApiForModel(next,
+      String(nextThreadSettings.provider || "auto"), String(nextThreadSettings.wire_api || "auto"));
     nextThreadSettings.reasoning_effort = compatibleEffortForModel(next, String(nextThreadSettings.reasoning_effort || ""));
     if (persistThreadModelRoute(modelRouteForSettings(nextThreadSettings))) {
       setModel(next || "default");
@@ -4627,6 +4629,8 @@ export function App() {
     if (isMantleSettings(nextSettings) && next) {
       nextSettings.wire_api = mantleWireApiForModel(next);
     }
+    nextSettings.wire_api = compatibleWireApiForModel(next,
+      String(nextSettings.provider || "auto"), String(nextSettings.wire_api || "auto"));
     // Immediate save for the next turn; skip the debounced effect to avoid a double write.
     skipSettingsAutosave.current = true;
     setSettings(nextSettings);
@@ -4732,11 +4736,13 @@ export function App() {
   };
 
   const selectWireApi = (next: string) => {
+    const wire = compatibleWireApiForModel(String(settings.model || ""),
+      String(settings.provider || "auto"), next);
     skipSettingsAutosave.current = true;
-    const nextSettings = { ...settings, wire_api: next };
+    const nextSettings = { ...settings, wire_api: wire };
     setSettings(nextSettings);
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
-    const patch = { wire_api: next };
+    const patch = { wire_api: wire };
     pendingSettingsPatch.current = patch;
     setVerifyMsg("Saving…");
     postSettingsSave(patch, nextSettings);
@@ -7064,12 +7070,15 @@ export function App() {
                     >
                       <option value="auto">Auto (model decides)</option>
                       <option value="responses">Responses (/v1/responses)</option>
-                      <option value="chat_completions">
+                      <option value="chat_completions"
+                        disabled={modelRequiresResponsesForTools(String(settings.model || ""), settingsProvider)}>
                         Chat Completions (/v1/chat/completions)
                       </option>
                     </select>
                     <span className="settings-hint">
-                      {String(settings.bedrock_mode || "") === "mantle"
+                      {modelRequiresResponsesForTools(String(settings.model || ""), settingsProvider)
+                        ? "GPT-6.1 Sol requires Responses for ClawAgents tool use. Chat Completions is supported without tools."
+                        : String(settings.bedrock_mode || "") === "mantle"
                         ? "Mantle chooses the route by model; Claude Haiku/Sonnet use Mantle Messages."
                         : "Use Responses for Codex or gateways that do not expose chat/completions."}
                     </span>

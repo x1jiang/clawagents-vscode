@@ -1,6 +1,6 @@
-Publisher **`clawagents`** · version **1.0.196**
+Publisher **`clawagents`** · version **1.0.197**
 
-- Release target: extension **1.0.196**. Compatible host-local Python discovery for managed runtimes, validated interpreter recovery actions, and GPT-6.1 Sol settings/thread listings. Python floor **6.20.85** provides the matching reasoning and Responses tool-routing support.
+- Release target: extension **1.0.197**. Stable no-folder chat storage, legacy history recovery, stale-chat handling, and GPT-6.1 Sol Responses tool compatibility. Release 1.0.196 added compatible host-local Python discovery for managed runtimes, validated interpreter recovery actions, and GPT-6.1 Sol settings/thread listings. Python floor **6.20.85** provides the matching reasoning and Responses tool-routing support.
 - Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
 
 - [x] clawagents **6.20.80** on PyPI + GitHub: edit follow-ups, paged artifact recall, run-scoped todos, diagnostic receipts, efficiency counters. Published download hashes verified.

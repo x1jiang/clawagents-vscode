@@ -149,3 +149,9 @@ interpreter where the sibling `clawagents_py` is installed in editable mode.
 Choose **Gemma Agentic Q4 (coordinator)** in Settings, then **Set up / start locally**. Installation happens only after you request local setup and confirm the download; remote Gemma endpoints remain supported. The helper selects available GPU acceleration or CPU, downloads the Q4 model when missing, starts its server and configures the endpoint. See [local setup, hardware support and controls](LOCAL_GEMMA.md).
 
 Model catalog refresh: [verified models, provider constraints and source audit](MODEL_CATALOG_AUDIT.md) (Python 6.20.83 / extension 1.0.194).
+
+### Chat storage without an open folder
+
+No-folder windows keep chat history and settings in `no-folder-workspace` under the extension's host-local global storage. This location survives VSIX upgrades. On the first start, retained `.clawagents` state from older ClawAgents installation folders is copied without overwriting current files; the original files remain intact. Open workspace folders continue to use their own `.clawagents` state.
+
+GPT-6.1 Sol agent tools require the Responses API. Selecting that model corrects an inherited Chat Completions setting to Responses. OpenAI also supports tool-free Chat Completions for this model.

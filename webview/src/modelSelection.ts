@@ -1,5 +1,16 @@
 import { normalizeModelId } from "./pricing";
 
+/** ClawAgents chats call tools, which GPT-6.1 Sol supports only in Responses. */
+export function modelRequiresResponsesForTools(model: string, provider: string): boolean {
+  return ["auto", "openai", "profile:openai"].includes(provider.trim().toLowerCase())
+    && /^gpt-6\.1-sol(?:$|[-_])/.test(model.trim().toLowerCase());
+}
+
+export function compatibleWireApiForModel(model: string, provider: string, wireApi: string): string {
+  return modelRequiresResponsesForTools(model, provider)
+    ? "responses" : wireApi;
+}
+
 /** Model-specific reasoning controls shared by Settings and the thread picker. */
 export function modelSupportsEffort(model: string): boolean {
   const m = normalizeModelId(model);

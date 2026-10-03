@@ -11,6 +11,7 @@ import { ensureSidecarDeps } from "./pythonDeps";
 import { pinPythonPathEnv } from "./pythonPathPin";
 import { StartGeneration } from "./startGeneration";
 import { resolveSidecarBasePython } from "./pythonInterpreter";
+import { resolveSidecarWorkspace } from "./sidecarWorkspace";
 import {
   clearManagedPythonFailures,
   ensureManagedPython,
@@ -259,7 +260,7 @@ export class SidecarManager {
 
     const port = await findFreePort();
     const token = crypto.randomBytes(32).toString("hex");
-    const cwd = workspaceRoot() || this.extensionPath;
+    const cwd = resolveSidecarWorkspace(workspaceRoot(), this.globalStoragePath, this.extensionPath, this.output);
     const apiEnv = await this.config.getApiKeyEnv();
     const dotenvEnv = this.config.loadWorkspaceDotenv();
     const model = this.config.model;
