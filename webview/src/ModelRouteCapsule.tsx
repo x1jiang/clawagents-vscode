@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Provider } from "./providerCatalog";
 
 type ModelOption = {
@@ -23,11 +23,14 @@ type Props = {
   models: ModelOption[];
   activeModelId: string;
   effort: string;
+  showFastMode: boolean;
+  fastMode: boolean;
   showEffort: boolean;
   efforts: readonly EffortOption[];
   onProviderChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onEffortChange: (value: string) => void;
+  onFastModeChange: (value: boolean) => void;
   onReset: () => void;
 };
 
@@ -41,14 +44,18 @@ export function ModelRouteCapsule({
   models,
   activeModelId,
   effort,
+  showFastMode,
+  fastMode,
   showEffort,
   efforts,
   onProviderChange,
   onModelChange,
   onEffortChange,
+  onFastModeChange,
   onReset,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const fastTooltipId = useId();
   const root = useRef<HTMLDivElement>(null);
   const activeModel = models.find((item) => item.id === activeModelId);
   const effortLabel = efforts.find((item) => item.value === effort)?.label || "Default";
@@ -76,23 +83,45 @@ export function ModelRouteCapsule({
 
   return (
     <div className="model-route-capsule-root" ref={root}>
-      <button
-        type="button"
-        className="model-route-capsule"
-        disabled={disabled}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        title={`Model for this thread${busy ? " (applies next turn)" : ""}`}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className="model-route-capsule-main">
-          {providerLabel} · {activeModel?.label || activeModelId || "Default"}
-        </span>
-        {showEffort && <span className="model-route-capsule-effort">{effortLabel}</span>}
-        <svg className="model-route-capsule-chevron" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
+      <div className="model-route-capsule">
+        {showFastMode && (
+          <button
+            type="button"
+            className={`model-route-fast-toggle${fastMode ? " active" : ""}`}
+            disabled={disabled}
+            aria-label="Fast mode"
+            aria-pressed={fastMode}
+            aria-describedby={fastTooltipId}
+            onClick={() => onFastModeChange(!fastMode)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z" fill={fastMode ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+            </svg>
+            <span id={fastTooltipId} className="model-route-fast-tooltip" role="tooltip">
+              <span>Fast mode {fastMode ? "on" : "off"}</span>
+              <span className="model-route-fast-tooltip-detail">Faster responses · higher API cost</span>
+              {busy && <span className="model-route-fast-tooltip-detail">Applies next turn</span>}
+            </span>
+          </button>
+        )}
+        <button
+          type="button"
+          className="model-route-capsule-trigger"
+          disabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          title={`Model for this thread${busy ? " (applies next turn)" : ""}`}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="model-route-capsule-main">
+            {providerLabel} · {activeModel?.label || activeModelId || "Default"}
+          </span>
+          {showEffort && <span className="model-route-capsule-effort">{effortLabel}</span>}
+          <svg className="model-route-capsule-chevron" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
       {open && (
         <div className="model-route-popover" role="dialog" aria-label="Thread model settings">
           <section className="model-route-column" aria-label="Provider">

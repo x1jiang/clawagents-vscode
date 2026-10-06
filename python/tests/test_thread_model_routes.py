@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import chats
+from pricing import estimate_usd
 
 
 def _isolate_chat_files(tmp_path: Path, monkeypatch) -> None:
@@ -119,6 +120,35 @@ def test_route_overlay_isolated_between_threads():
     assert anthropic["model"] == "claude-sonnet-4-5"
     assert anthropic["reasoning_effort"] == ""
     assert defaults["provider"] == "openai"
+
+
+def test_fast_mode_is_per_thread_and_defaults_off():
+    defaults = {"provider": "openai", "model": "gpt-6-sol", "fast_mode": True}
+    fast = chats.settings_with_model_route(defaults, {
+        "provider": "openai", "model": "gpt-6-sol", "fast_mode": True,
+    })
+    ordinary = chats.settings_with_model_route(defaults, {
+        "provider": "openai", "model": "gpt-6-sol",
+    })
+    assert fast["fast_mode"] is True
+    assert chats._resolve_model_kwargs(None, fast)["fast_mode"] is True
+    assert ordinary["fast_mode"] is False
+    assert chats._resolve_model_kwargs(None, ordinary)["fast_mode"] is False
+    standard = estimate_usd("gpt-6-sol", prompt_tokens=100_000, completion_tokens=10_000)
+    fast_cost = estimate_usd("gpt-6-sol", prompt_tokens=100_000, completion_tokens=10_000, fast_mode=True)
+    assert fast_cost == standard * 2
+
+
+def test_fast_mode_is_disabled_for_unsupported_model_or_endpoint():
+    unsupported = chats.normalize_model_route({
+        "provider": "anthropic", "model": "claude-sonnet-4-5", "fast_mode": True,
+    })
+    assert unsupported["fast_mode"] is False
+    proxy = chats.settings_with_model_route(
+        {"provider": "openai", "model": "gpt-6-sol", "base_url": "https://proxy.example.test/v1"},
+        {"provider": "openai", "model": "gpt-6-sol", "fast_mode": True},
+    )
+    assert chats._resolve_model_kwargs(None, proxy)["fast_mode"] is False
 
 
 def test_route_overlay_preserves_global_proxy_configuration():

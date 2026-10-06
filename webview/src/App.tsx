@@ -1,4 +1,5 @@
-import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel, modelRequiresResponsesForTools, compatibleWireApiForModel } from "./modelSelection";
+import { collectDropUris, hasVsCodeUriPayload } from "./dropPaths";
+import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel, modelRequiresResponsesForTools, compatibleWireApiForModel, modelSupportsFastMode } from "./modelSelection";
 import { normalizeEfficiency, efficiencyLabel, type Efficiency } from "../../src/efficiency";
 import {
   memo,
@@ -325,6 +326,7 @@ function modelRouteForSettings(value: Record<string, unknown>): ModelRoute {
     provider: String(value.provider || "auto").trim().toLowerCase(),
     model: String(value.model || "").trim(),
     reasoning_effort: String(value.reasoning_effort || "").trim().toLowerCase(),
+    fast_mode: value.fast_mode === true,
   };
   for (const key of MODEL_ROUTE_FIELDS) {
     if (key === "reasoning_effort") continue;
@@ -1241,13 +1243,17 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const focusedRef = useRef(false);
   const syncKeyRef = useRef(syncKey);
+  const lastEditedMarkdownRef = useRef(markdown);
   const [html, setHtml] = useState(() => renderedMarkdown(markdown));
 
   useEffect(() => {
     const conversationChanged = syncKeyRef.current !== syncKey;
     syncKeyRef.current = syncKey;
     if (conversationChanged) focusedRef.current = false;
-    if (focusedRef.current && !conversationChanged) return;
+    // Skip our own typing echoes, but apply host-inserted paths/context while
+    // focused. Otherwise the next input overwrites the unseen insertion.
+    if (focusedRef.current && !conversationChanged && markdown === lastEditedMarkdownRef.current) return;
+    lastEditedMarkdownRef.current = markdown;
     const next = renderedMarkdown(markdown);
     setHtml(next);
     if (editorRef.current) editorRef.current.innerHTML = next;
@@ -1272,6 +1278,7 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
   }, [onFocusRestored, restoreFocus]);
 
   const syncEditedMarkdown = (next: string) => {
+    lastEditedMarkdownRef.current = next;
     if (hasMarkdownFormatting(next)) onChange(next);
     else onExitToPlain(next);
   };
@@ -1307,7 +1314,7 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
           moveCaretBeforeLeadingList(e.currentTarget)
         ) {
           e.preventDefault();
-          if (insertTextAtCaret(e.currentTarget, e.key)) onChange(editableMarkdown(e.currentTarget));
+          if (insertTextAtCaret(e.currentTarget, e.key)) syncEditedMarkdown(editableMarkdown(e.currentTarget));
           return;
         }
         if (
@@ -1319,7 +1326,7 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
           exitCodeFenceOnEmptyLine(e.currentTarget)
         ) {
           e.preventDefault();
-          onChange(editableMarkdown(e.currentTarget));
+          syncEditedMarkdown(editableMarkdown(e.currentTarget));
           return;
         }
         if (
@@ -1384,6 +1391,51 @@ function CopyMessageButton({ text }: { text: string }) {
   );
 }
 
+/**
+ * Keep very long sent Markdown readable without allowing one prompt to take
+ * over the transcript.  The overflow check uses the rendered height, so it
+ * also catches a single long paragraph that wraps to many lines.
+ */
+const CollapsibleUserMessage = memo(function CollapsibleUserMessage({ text }: { text: string }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isLong, setIsLong] = useState(false);
+  const [isMeasured, setIsMeasured] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    setExpanded(false);
+    setIsLong(content.scrollHeight > content.clientHeight + 1);
+    setIsMeasured(true);
+  }, [text]);
+
+  const preview = !isMeasured || (isLong && !expanded);
+
+  return (
+    <div className={`user-message${isLong ? " has-overflow" : ""}${expanded ? " is-expanded" : ""}`}>
+      <div ref={contentRef} className={`user-text${preview ? " is-preview" : ""}`}>
+        <div className="md">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+            {text}
+          </ReactMarkdown>
+        </div>
+      </div>
+      {isLong && (
+        <button
+          type="button"
+          className="user-message-expander"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "Collapse message" : "Show full message"}
+        </button>
+      )}
+      <CopyMessageButton text={text} />
+    </div>
+  );
+});
+
 const TranscriptItem = memo(function TranscriptItem({
   item,
   changedFiles,
@@ -1410,16 +1462,7 @@ const TranscriptItem = memo(function TranscriptItem({
       {item.kind === "user" && (
         <>
           {time && <time className="message-time" dateTime={item.timestamp}>{time}</time>}
-          <div className="user-message">
-            <div className="user-text">
-              <div className="md">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
-                  {item.text}
-                </ReactMarkdown>
-              </div>
-            </div>
-            <CopyMessageButton text={item.text} />
-          </div>
+          <CollapsibleUserMessage text={item.text} />
         </>
       )}
       {item.kind === "assistant" && (
@@ -2342,6 +2385,7 @@ export function App() {
       String(settingsRef.current.provider || ""),
       u.cachedInputTokens || 0,
       u.cacheCreationTokens || 0,
+      threadModelRouteRef.current?.fast_mode === true,
     );
     if (cost != null && cost > 0) {
       setSessionCostUsd((s) => s + cost);
@@ -3594,6 +3638,7 @@ export function App() {
               String(settingsRef.current.provider || ""),
               finalUsage.cachedInputTokens || 0,
               finalUsage.cacheCreationTokens || 0,
+              threadModelRouteRef.current?.fast_mode === true,
             );
           setItems((prev) => [
             ...prev.filter((it) => it.kind !== "status"),
@@ -4521,9 +4566,9 @@ export function App() {
     promptTok > 0 && cachedTok > 0
       ? Math.round(Math.min(100, (cachedTok / promptTok) * 100))
       : null;
-  // Context % = latest request size only. Fall back to promptTok only when
-  // we have never received a last-request sample (pre-fix chats / legacy).
-  const contextTok = usage.lastInputTokens || (busy ? 0 : promptTok) || 0;
+  // Cumulative run input cannot stand in for the latest request's context.
+  // Without a last-request sample, leave the meter unavailable.
+  const contextTok = usage.lastInputTokens || 0;
   const ctx = contextUsage(activeModelId || model, contextTok);
   const ctxPct = ctx ? Math.round(Math.min(1, ctx.ratio) * 100) : null;
   const lastCheckpointTs = useMemo(() => {
@@ -4552,6 +4597,7 @@ export function App() {
           selectedProvider,
           cachedTok,
           cacheCreateTok,
+          threadSettings.fast_mode === true,
         );
   // While a run is in flight, include its live estimate in the session total.
   const sessionCostShown =
@@ -4602,6 +4648,7 @@ export function App() {
       next.wire_api = "auto";
     }
     next.reasoning_effort = compatibleEffortForModel(String(next.model || ""), String(next.reasoning_effort || ""));
+    next.fast_mode = false;
     const route = modelRouteForSettings(next);
     persistThreadModelRoute(route);
     setModel(route.model || "default");
@@ -4616,6 +4663,9 @@ export function App() {
     nextThreadSettings.wire_api = compatibleWireApiForModel(next,
       String(nextThreadSettings.provider || "auto"), String(nextThreadSettings.wire_api || "auto"));
     nextThreadSettings.reasoning_effort = compatibleEffortForModel(next, String(nextThreadSettings.reasoning_effort || ""));
+    if (!modelSupportsFastMode(next, String(nextThreadSettings.provider || "auto"), String(nextThreadSettings.base_url || ""))) {
+      nextThreadSettings.fast_mode = false;
+    }
     if (persistThreadModelRoute(modelRouteForSettings(nextThreadSettings))) {
       setModel(next || "default");
       return;
@@ -4714,6 +4764,11 @@ export function App() {
     const route = modelRouteForSettings({ ...threadSettings, reasoning_effort: next });
     if (persistThreadModelRoute(route)) return;
     selectDefaultEffort(next);
+  };
+
+  const selectFastMode = (next: boolean) => {
+    if (!modelSupportsFastMode(activeModelId || model, String(threadSettings.provider || "auto"), String(threadSettings.base_url || ""))) return;
+    persistThreadModelRoute(modelRouteForSettings({ ...threadSettings, fast_mode: next }));
   };
 
   const resetThreadModelRoute = () => {
@@ -5315,11 +5370,14 @@ export function App() {
             models={allModels}
             activeModelId={activeModelId}
             effort={compatibleEffortForModel(activeModelId || model, String(threadSettings.reasoning_effort || ""))}
+            showFastMode={modelSupportsFastMode(activeModelId || model, String(threadSettings.provider || "auto"), String(threadSettings.base_url || ""))}
+            fastMode={threadSettings.fast_mode === true}
             showEffort={modelSupportsEffort(activeModelId || model)}
             efforts={effortOptionsForModel(activeModelId || model)}
             onProviderChange={selectThreadProvider}
             onModelChange={selectModel}
             onEffortChange={selectEffort}
+            onFastModeChange={selectFastMode}
             onReset={resetThreadModelRoute}
           />
           <details className="header-info-capsule">
@@ -5334,7 +5392,9 @@ export function App() {
             <span
               className="meta-stat"
               title={
-                `Current request ${contextTok.toLocaleString()} in` +
+                (contextTok > 0
+                  ? `Latest request ${contextTok.toLocaleString()} in`
+                  : "Latest request input unavailable") +
                 ` · Run ${promptTok.toLocaleString()} in / ${completionTok.toLocaleString()} out` +
                 (usage.requestCount
                   ? ` across ${usage.requestCount} request(s)`
@@ -5448,9 +5508,9 @@ export function App() {
               className="tool-chip compact-action"
               title={
                 ctx && ctxPct != null
-                  ? `Current-request context ~${ctxPct}% (${contextTok.toLocaleString()} / ${ctx.window.toLocaleString()}). ` +
-                    `Not run-cumulative tokens. Compact session (/compact).`
-                  : "Compact session (/compact)"
+                  ? `Latest-request context ~${ctxPct}% (${contextTok.toLocaleString()} / ${ctx.window.toLocaleString()} configured window). ` +
+                    `Includes cached input; excludes cumulative run usage and later messages. Compact session (/compact).`
+                  : "Latest-request context unavailable. Compact session (/compact)"
               }
               disabled={compactPhase === "start"}
               onClick={() => {
@@ -8298,14 +8358,14 @@ export function App() {
                 e.stopPropagation();
                 dragDepth.current = 0;
                 setDragOver(false);
-                if (hasVsCodeUriPayload(e.dataTransfer)) {
-                  const uris = collectDropUris(e.dataTransfer);
-                  if (uris.length > 0) {
-                    post({ type: "attach_uris", uris });
-                    return;
-                  }
-                }
+                const uris = collectDropUris(e.dataTransfer);
                 const localFiles = collectTransferFiles(e.dataTransfer);
+                // Shift drops insert paths even when Explorer/OS only supplies
+                // text/uri-list or plain paths alongside browser File objects.
+                if (uris.length > 0 && (e.shiftKey || hasVsCodeUriPayload(e.dataTransfer))) {
+                  post({ type: "attach_uris", uris });
+                  return;
+                }
                 if (localFiles.length > 0) {
                   void attachLocalBrowserFiles(
                     localFiles,
@@ -8315,7 +8375,6 @@ export function App() {
                   );
                   return;
                 }
-                const uris = collectDropUris(e.dataTransfer);
                 if (uris.length) {
                   post({ type: "attach_uris", uris });
                 } else {
@@ -9044,13 +9103,6 @@ function nextLocalAttachmentRequestId(): string {
   return `local-${Date.now().toString(36)}-${localAttachmentRequestSequence.toString(36)}`;
 }
 
-function hasVsCodeUriPayload(data: DataTransfer): boolean {
-  return Array.from(data.types ?? []).some((type) => {
-    const normalized = type.toLowerCase();
-    return normalized === "application/vnd.code.uri-list" || normalized === "resourceurls";
-  });
-}
-
 function collectTransferFiles(data: DataTransfer): File[] {
   const files = Array.from(data.files ?? []);
   if (files.length > 0) {
@@ -9172,63 +9224,4 @@ function fileToBase64(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
-}
-
-/** Collect file URIs from a VS Code explorer drag onto the composer. */
-function collectDropUris(dt: DataTransfer): string[] {
-  const found: string[] = [];
-  const pushLine = (raw: string) => {
-    for (const line of raw.split(/\r?\n/)) {
-      const t = line.trim();
-      if (t && !t.startsWith("#")) {
-        found.push(t);
-      }
-    }
-  };
-  const pushPayload = (type: string, data: string) => {
-    if (!data) {
-      return;
-    }
-    const lower = type.toLowerCase();
-    // VS Code explorer uses JSON string arrays for ResourceURLs.
-    if (lower === "resourceurls" || data.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(data) as unknown;
-        if (Array.isArray(parsed)) {
-          for (const item of parsed) {
-            if (typeof item === "string" && item.trim()) {
-              found.push(item.trim());
-            }
-          }
-          return;
-        }
-      } catch {
-        /* fall through to line split */
-      }
-    }
-    pushLine(data);
-  };
-  const types = [
-    "application/vnd.code.uri-list",
-    "text/uri-list",
-    "ResourceURLs",
-    "resourceurls",
-  ];
-  for (const type of types) {
-    if (!dt.types.includes(type)) continue;
-    try {
-      pushPayload(type, dt.getData(type));
-    } catch {
-      /* ignore */
-    }
-  }
-
-  if (found.length === 0 && dt.types.includes("text/plain")) {
-    try {
-      pushPayload("text/plain", dt.getData("text/plain"));
-    } catch {
-      /* ignore */
-    }
-  }
-  return [...new Set(found)];
 }

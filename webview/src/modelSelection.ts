@@ -1,5 +1,13 @@
 import { normalizeModelId } from "./pricing";
 
+/** Only direct OpenAI model families documented for Fast processing. */
+export function modelSupportsFastMode(model: string, provider: string, baseUrl: string): boolean {
+  if (!["auto", "openai", "profile:openai"].includes(provider.trim().toLowerCase())) return false;
+  const endpoint = baseUrl.trim().replace(/\/+$/, "").toLowerCase();
+  if (endpoint && endpoint !== "https://api.openai.com/v1") return false;
+  return /^(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-sol|gpt-5\.6(?:-(?:sol|terra|luna))?)(?:-\d{4}-\d{2}-\d{2})?$/.test(model.trim().toLowerCase());
+}
+
 /** ClawAgents chats call tools, which GPT-6.1 Sol supports only in Responses. */
 export function modelRequiresResponsesForTools(model: string, provider: string): boolean {
   return ["auto", "openai", "profile:openai"].includes(provider.trim().toLowerCase())

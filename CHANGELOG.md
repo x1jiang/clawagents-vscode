@@ -1,5 +1,10 @@
 # Unreleased
 
+- Add per-conversation OpenAI Fast mode with a compact lightning toggle, supported-model and direct-endpoint checks, a one-second hover hint, and Fast token-cost estimates. Conversations without a Fast setting remain off.
+- Improve file and folder path drops, including Shift drops, MIME casing, Windows paths, and workspace-root paths. Keep externally inserted paths synchronized while the rich composer is focused.
+- Collapse long sent messages, give draft text the full composer area, reveal floating actions on hover, and keep the transcript navigation rail from intercepting message interactions.
+- Show context usage only from the latest request sample and simplify the header Info panel styling.
+
 # 1.0.197
 
 - Store no-folder conversations in stable host storage instead of the versioned extension installation. Import retained legacy chat history and settings once without overwriting newer state, following symlinks, deleting source files, or resurrecting conversations on later starts.

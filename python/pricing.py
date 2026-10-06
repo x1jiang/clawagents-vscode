@@ -325,6 +325,7 @@ def estimate_usd(
     cached_input_tokens: int = 0,
     cache_creation_tokens: int = 0,
     provider: str | None = None,
+    fast_mode: bool = False,
 ) -> float | None:
     """Estimate USD for one run, applying prompt-cache discounts when reported.
 
@@ -365,12 +366,15 @@ def estimate_usd(
         write_rate *= in_m
         out *= out_m
     write_premium = max(0.0, write_rate - inp)
-    return (
+    total = (
         (uncached / 1_000_000.0) * inp
         + (cached / 1_000_000.0) * cached_rate
         + (creation / 1_000_000.0) * write_premium
         + (completion / 1_000_000.0) * out
     )
+    # Fast is billed at twice the model's standard token rates. This remains
+    # an estimate because the API can report a different processed tier.
+    return total * (2 if fast_mode else 1)
 
 
 def attach_prices(models: list[dict]) -> list[dict]:

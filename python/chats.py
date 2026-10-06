@@ -213,6 +213,7 @@ _MODEL_ROUTE_KEYS = (
     "aws_region",
     "aws_profile",
     "wire_api",
+    "fast_mode",
 )
 _MODEL_ROUTE_PROVIDERS = frozenset(
     {"auto", "openai", "anthropic", "gemini", "bedrock", "ollama", "xai", "meta"}
@@ -312,6 +313,18 @@ def _gpt61_sol_requires_responses(model: str, provider: str) -> bool:
     )
 
 
+def _supports_direct_openai_fast(model: str, provider: str, base_url: str = "") -> bool:
+    if provider.strip().lower() not in {"auto", "openai", "profile:openai"}:
+        return False
+    endpoint = base_url.strip().rstrip("/").lower()
+    if endpoint and endpoint != "https://api.openai.com/v1":
+        return False
+    return bool(re.fullmatch(
+        r"(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-sol|gpt-5\.6(?:-(?:sol|terra|luna))?)"
+        r"(?:-\d{4}-\d{2}-\d{2})?", model.strip().lower(),
+    ))
+
+
 def normalize_model_route(value: Any) -> dict[str, Any] | None:
     """Validate a non-secret per-chat model route."""
     if not isinstance(value, dict):
@@ -335,6 +348,8 @@ def normalize_model_route(value: Any) -> dict[str, Any] | None:
         # effort when a thread switches to a provider that has no effort knob.
         "reasoning_effort": effort,
     }
+    if "fast_mode" in value:
+        route["fast_mode"] = value.get("fast_mode") is True and _supports_direct_openai_fast(model, provider)
     if mode:
         route["bedrock_mode"] = mode
     for key, limit in (("aws_region", 128), ("aws_profile", 256), ("wire_api", 64)):
@@ -349,7 +364,7 @@ def normalize_model_route(value: Any) -> dict[str, Any] | None:
 def model_route_from_settings(
     settings: dict[str, Any], *, model: str | None = None
 ) -> dict[str, Any]:
-    source = {key: settings.get(key) for key in _MODEL_ROUTE_KEYS}
+    source = {key: settings[key] for key in _MODEL_ROUTE_KEYS if key in settings}
     if model and model != "default":
         source["model"] = model
     return normalize_model_route(source) or {"provider": "auto", "model": ""}
@@ -387,7 +402,7 @@ def _model_route_notice_label(route: dict[str, Any] | None) -> str:
         "xhigh": "Extra High",
         "none": "None",
     }.get(effort, "")
-    return " · ".join(part for part in (provider, model, effort_label) if part)
+    return " · ".join(part for part in (provider, model, effort_label, "Fast" if clean.get("fast_mode") else "") if part)
 
 
 def _model_route_notice_changed(
@@ -398,7 +413,7 @@ def _model_route_notice_changed(
     after = normalize_model_route(current) or {"provider": "auto", "model": ""}
     return any(
         before.get(key, "") != after.get(key, "")
-        for key in ("provider", "model", "reasoning_effort", "bedrock_mode")
+        for key in ("provider", "model", "reasoning_effort", "bedrock_mode", "fast_mode")
     )
 
 
@@ -410,6 +425,9 @@ def settings_with_model_route(
     if not clean:
         return dict(settings)
     merged = dict(settings)
+    # A pre-Fast conversation has no Fast choice; it must remain off even if
+    # the workspace default is later changed.
+    merged["fast_mode"] = clean.get("fast_mode") is True
     for key in _MODEL_ROUTE_KEYS:
         if key in clean:
             merged[key] = clean[key]
@@ -1507,6 +1525,10 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
                     compact_usage.get("cache_creation_tokens") or 0
                 ),
                 provider=str(settings.get("provider") or ""),
+                fast_mode=settings.get("fast_mode") is True and _supports_direct_openai_fast(
+                    str(compact_usage.get("model") or model), str(settings.get("provider") or ""),
+                    str(settings.get("base_url") or ""),
+                ),
             )
         except Exception:  # noqa: BLE001
             return None
@@ -1791,6 +1813,9 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         wire = "responses"
     if wire:
         kwargs["wire_api"] = wire
+    kwargs["fast_mode"] = settings.get("fast_mode") is True and _supports_direct_openai_fast(
+        str(effective_model or ""), provider, str(settings.get("base_url") or "")
+    )
     if "ssl_verify" in settings:
         kwargs["ssl_verify"] = bool(settings.get("ssl_verify"))
     return kwargs
@@ -2406,6 +2431,9 @@ async def run_chat_turn(
                 cached_input_tokens=cached,
                 cache_creation_tokens=created,
                 provider=provider_for_cost,
+                fast_mode=settings.get("fast_mode") is True and _supports_direct_openai_fast(
+                    model_id_for_cost, provider_for_cost, str(settings.get("base_url") or ""),
+                ),
             )
             if req_cost is not None:
                 usage_totals["run_cost_usd"] = float(
@@ -2655,6 +2683,9 @@ async def run_chat_turn(
             cached_input_tokens=cached_n,
             cache_creation_tokens=created_n,
             provider=provider_for_cost,
+            fast_mode=settings.get("fast_mode") is True and _supports_direct_openai_fast(
+                model_id_for_cost, provider_for_cost, str(settings.get("base_url") or ""),
+            ),
         )
         run_cost_f = float(run_cost) if run_cost is not None else None
     # Rough next-prompt estimate: last request size (history+tools+system after

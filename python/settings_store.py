@@ -75,6 +75,7 @@ DEFAULTS: dict[str, Any] = {
     "reasoning_effort": "medium",
     # OpenAI transport for compatible endpoints: auto | responses | chat_completions.
     "wire_api": "auto",
+    "fast_mode": False,
     # TLS verify for custom base_url (False for private-CA / corporate proxies).
     "ssl_verify": True,
     # Library agent mode override (empty = use chat mode from the client).
