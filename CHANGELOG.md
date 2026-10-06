@@ -1,4 +1,6 @@
-# Unreleased
+# 1.0.198
+
+- Require Python clawagents **6.20.86**, which adds the `fast_mode` agent argument used by per-conversation Fast mode and the SQL-only ungrounded-count fix.
 
 - Add per-conversation OpenAI Fast mode with a compact lightning toggle, supported-model and direct-endpoint checks, a one-second hover hint, and Fast token-cost estimates. Conversations without a Fast setting remain off.
 - Improve file and folder path drops, including Shift drops, MIME casing, Windows paths, and workspace-root paths. Keep externally inserted paths synchronized while the rich composer is focused.

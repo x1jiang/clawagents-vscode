@@ -1,6 +1,6 @@
-Publisher **`clawagents`** · version **1.0.197**
+Publisher **`clawagents`** · version **1.0.198**
 
-- Release target: extension **1.0.197**. Stable no-folder chat storage, legacy history recovery, stale-chat handling, and GPT-6.1 Sol Responses tool compatibility. Release 1.0.196 added compatible host-local Python discovery for managed runtimes, validated interpreter recovery actions, and GPT-6.1 Sol settings/thread listings. Python floor **6.20.85** provides the matching reasoning and Responses tool-routing support.
+- Release target: extension **1.0.198**. Per-conversation OpenAI Fast mode, path-drop fixes and composer refinements; Python floor **6.20.86** adds `fast_mode` and the SQL-only grounding fix. Release 1.0.197: Stable no-folder chat storage, legacy history recovery, stale-chat handling, and GPT-6.1 Sol Responses tool compatibility. Release 1.0.196 added compatible host-local Python discovery for managed runtimes, validated interpreter recovery actions, and GPT-6.1 Sol settings/thread listings. Python floor **6.20.85** provides the matching reasoning and Responses tool-routing support.
 - Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
 
 - [x] clawagents **6.20.80** on PyPI + GitHub: edit follow-ups, paged artifact recall, run-scoped todos, diagnostic receipts, efficiency counters. Published download hashes verified.
