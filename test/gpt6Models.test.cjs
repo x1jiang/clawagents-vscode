@@ -16,6 +16,17 @@ const selection = load("modelSelection");
 const pricing = load("pricing");
 const context = load("contextWindow");
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+test("Fast toggle is available only for supported direct OpenAI models", () => {
+  for (const id of ["gpt-5.6-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"]) {
+    assert.equal(selection.modelSupportsFastMode(id, "openai", ""), true);
+    assert.equal(selection.modelSupportsFastMode(id, "auto", "https://api.openai.com/v1/"), true);
+    assert.equal(selection.modelSupportsFastMode(id, "anthropic", ""), false);
+    assert.equal(selection.modelSupportsFastMode(id, "openai", "https://proxy.example.test/v1"), false);
+  }
+  for (const id of ["gpt-4o", "openai.gpt-6-sol", "gpt-6"]) {
+    assert.equal(selection.modelSupportsFastMode(id, "openai", ""), false);
+  }
+});
 test("GPT-6 Sol and Luna are OpenAI-only additions without changing defaults", () => {
   const openai = catalog.FALLBACK_PROVIDERS.find(p => p.id === "openai");
   assert.equal(openai.models[0].id, "gpt-5.6-terra");
@@ -37,6 +48,7 @@ for (const id of ["gpt-6-sol", "gpt-6-luna", "gpt-6-sol-2026-09-22", "gpt-6-luna
 }
 test("GPT-6 direct pricing includes cached input, with no inferred Bedrock prices", () => {
   assert(Math.abs(pricing.estimateCostUsd("gpt-6-sol", 100000, 10000) - .3) < 1e-12);
+  assert(Math.abs(pricing.estimateCostUsd("gpt-6-sol", 100000, 10000, undefined, "openai", 0, 0, true) - .6) < 1e-12);
   assert(Math.abs(pricing.estimateCostUsd("gpt-6-luna", 100000, 10000) - .015) < 1e-12);
   assert(Math.abs(pricing.estimateCostUsd("gpt-6-sol", 100000, 10000, undefined, "openai", 50000) - .21) < 1e-12);
   assert(Math.abs(pricing.estimateCostUsd("gpt-6-sol", 300000, 10000) - 1.35) < 1e-12);
@@ -107,6 +119,7 @@ test("thread and default model changes persist the GPT-6.1 Sol wire correction",
     isMantleSettings: () => false,
     compatibleEffortForModel: selection.compatibleEffortForModel,
     compatibleWireApiForModel: selection.compatibleWireApiForModel,
+    modelSupportsFastMode: selection.modelSupportsFastMode,
     modelRouteForSettings: value => value,
     persistThreadModelRoute: value => { persisted = value; return true; },
     setModel: () => {},

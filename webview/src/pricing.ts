@@ -280,6 +280,7 @@ export function estimateCostUsd(
   provider?: string,
   cachedInputTokens: number = 0,
   cacheCreationTokens: number = 0,
+  fastMode: boolean = false,
 ): number | null {
   const rates = lookup(modelId, fromModel, provider);
   if (!rates) {
@@ -302,12 +303,13 @@ export function estimateCostUsd(
     out *= mults.output;
   }
   const writePremium = Math.max(0, writeRate - inp);
-  return (
+  const total = (
     (uncached / 1_000_000) * inp +
     (cached / 1_000_000) * cachedRate +
     (creation / 1_000_000) * writePremium +
     (completion / 1_000_000) * out
   );
+  return total * (fastMode ? 2 : 1);
 }
 
 /** Format like $0.12 / $1.20 / <$0.01 */

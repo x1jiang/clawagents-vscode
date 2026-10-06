@@ -27,7 +27,7 @@ const SETTINGS_SAVE_KEYS = [
   "workspace_system_prompt", "skill_dirs", "skill_auto_discover", "skill_ignore_dirs",
   "skill_exclude", "allow_full_access", "allow_external_skill_dirs", "skill_user_homes",
   "allow_clinical_samples",
-  "aws_region", "aws_profile", "bedrock_mode", "reasoning_effort", "wire_api",
+  "aws_region", "aws_profile", "bedrock_mode", "reasoning_effort", "wire_api", "fast_mode",
   "ssl_verify", "agent_mode", "action_mode",
 ] as const;
 
@@ -53,7 +53,7 @@ export function settingsPatchMismatches(
   saved: Record<string, unknown>,
 ): string[] {
   const critical = new Set([
-    "wire_api", "reasoning_effort", "ssl_verify", "model", "provider", "agent_mode",
+    "wire_api", "reasoning_effort", "fast_mode", "ssl_verify", "model", "provider", "agent_mode",
     "action_mode", "bedrock_mode", "base_url", "aws_region",
   ]);
   const keys = Object.keys(patch).filter((key) => !key.startsWith("_"));

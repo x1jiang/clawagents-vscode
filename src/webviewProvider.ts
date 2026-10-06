@@ -169,6 +169,7 @@ function modelRouteFromChat(chat: Record<string, unknown> | undefined): ModelRou
     provider: route.provider,
     model: route.model,
     reasoning_effort: typeof route.reasoning_effort === "string" ? route.reasoning_effort : "",
+    fast_mode: route.fast_mode === true,
   };
   for (const key of ["reasoning_effort", "bedrock_mode", "aws_region", "aws_profile", "wire_api"] as const) {
     if (key === "reasoning_effort") continue;
@@ -203,12 +204,12 @@ function modelRouteNoticeLabel(route: ModelRoute): string {
     xhigh: "Extra High",
     none: "None",
   }[route.reasoning_effort || ""];
-  return [provider, route.model || "default", effort].filter(Boolean).join(" · ");
+  return [provider, route.model || "default", effort, route.fast_mode ? "Fast" : ""].filter(Boolean).join(" · ");
 }
 
 function isVisibleModelRouteChange(previous: ModelRoute | undefined, next: ModelRoute): boolean {
   if (!previous) return false;
-  return ["provider", "model", "reasoning_effort", "bedrock_mode"].some(
+  return ["provider", "model", "reasoning_effort", "bedrock_mode", "fast_mode"].some(
     (key) => previous[key as keyof ModelRoute] !== next[key as keyof ModelRoute],
   );
 }
@@ -3171,7 +3172,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     for (const folder of folders) {
       const root = path.resolve(folder.uri.fsPath);
       if (resolved === root || resolved.startsWith(root + path.sep)) {
-        return path.relative(root, resolved).split(path.sep).join("/");
+        return path.relative(root, resolved).split(path.sep).join("/") || ".";
       }
     }
     return undefined;

@@ -42,6 +42,7 @@ export type ModelRoute = {
   aws_region?: string;
   aws_profile?: string;
   wire_api?: string;
+  fast_mode?: boolean;
 };
 
 export type ChatSummary = {
@@ -648,7 +649,8 @@ function modelRoute(value: unknown): boolean {
     && optionalText(value.bedrock_mode, 16)
     && optionalText(value.aws_region, 128)
     && optionalText(value.aws_profile, 256)
-    && optionalText(value.wire_api, 64);
+    && optionalText(value.wire_api, 64)
+    && (value.fast_mode === undefined || typeof value.fast_mode === "boolean");
 }
 
 /** Decode the untrusted webview message before it reaches extension authority. */
