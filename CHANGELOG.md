@@ -1,3 +1,7 @@
+# 1.0.200
+
+- Require Python clawagents **6.20.88**, which bridges GPT-6 Astra and GPT-6.1 Sol tool calls to Responses at the library level, so scripts and profiles that pin Chat Completions also work. The extension already routed these chats to Responses.
+
 # 1.0.199
 
 - GPT-6 Astra coding chats now always use Responses, like GPT-6.1 Sol: saved Chat Completions pins migrate, the Chat Completions option is disabled in Settings, and the hint names the selected model. The OpenAI API rejects Astra function tools on Chat Completions at every reasoning effort.
