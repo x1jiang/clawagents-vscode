@@ -104,7 +104,12 @@ test("GPT-6.1 Sol coding chats explicitly select Responses for direct OpenAI", (
       assert.equal(selection.compatibleWireApiForModel("gpt-6.1-sol", provider, wire), "responses");
     }
   }
-  for (const [model, provider] of [["gpt-6-sol", "openai"], ["gpt-6.1-sol", "bedrock"],
+  for (const provider of ["openai", "auto", "profile:openai"]) {
+    assert(selection.modelRequiresResponsesForTools("gpt-6-astra", provider));
+    assert.equal(selection.compatibleWireApiForModel("gpt-6-astra", provider, "chat_completions"), "responses");
+  }
+  for (const [model, provider] of [["gpt-6-sol", "openai"], ["gpt-6-luna", "openai"], ["gpt-6.1-sol", "bedrock"],
+    ["openai.gpt-6-astra", "bedrock"], ["openai.gpt-6-astra", "auto"],
     ["gpt-6.1-sol", "ollama"], ["openai.gpt-6.1-sol", "auto"]]) {
     assert(!selection.modelRequiresResponsesForTools(model, provider));
     assert.equal(selection.compatibleWireApiForModel(model, provider, "chat_completions"), "chat_completions");

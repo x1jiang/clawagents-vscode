@@ -7137,7 +7137,7 @@ export function App() {
                     </select>
                     <span className="settings-hint">
                       {modelRequiresResponsesForTools(String(settings.model || ""), settingsProvider)
-                        ? "GPT-6.1 Sol requires Responses for ClawAgents tool use. Chat Completions is supported without tools."
+                        ? `${/astra/i.test(String(settings.model || "")) ? "GPT-6 Astra" : "GPT-6.1 Sol"} requires Responses for ClawAgents tool use. Chat Completions is supported without tools.`
                         : String(settings.bedrock_mode || "") === "mantle"
                         ? "Mantle chooses the route by model; Claude Haiku/Sonnet use Mantle Messages."
                         : "Use Responses for Codex or gateways that do not expose chat/completions."}

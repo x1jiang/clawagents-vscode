@@ -306,10 +306,10 @@ def _title_from_text(text: str) -> str:
     return line or "New chat"
 
 
-def _gpt61_sol_requires_responses(model: str, provider: str) -> bool:
-    """Direct OpenAI GPT-6.1 Sol coding chats use tools via Responses."""
+def _requires_responses_for_tools(model: str, provider: str) -> bool:
+    """Direct OpenAI GPT-6.1 Sol / GPT-6 Astra coding chats use tools via Responses."""
     return provider.strip().lower() in {"auto", "openai", "profile:openai"} and bool(
-        re.fullmatch(r"gpt-6\.1-sol(?:[-_].*)?", model.strip().lower())
+        re.fullmatch(r"gpt-6(?:\.1-sol|-astra)(?:[-_].*)?", model.strip().lower())
     )
 
 
@@ -356,7 +356,7 @@ def normalize_model_route(value: Any) -> dict[str, Any] | None:
         text = str(value.get(key) or "").strip()[:limit]
         if text:
             route[key] = text
-    if _gpt61_sol_requires_responses(model, provider):
+    if _requires_responses_for_tools(model, provider):
         route["wire_api"] = "responses"
     return route
 
@@ -1809,7 +1809,7 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
     if effort:
         kwargs["reasoning_effort"] = effort
     wire = str(settings.get("wire_api") or settings.get("openai_wire_api") or "").strip()
-    if _gpt61_sol_requires_responses(str(effective_model or ""), provider):
+    if _requires_responses_for_tools(str(effective_model or ""), provider):
         wire = "responses"
     if wire:
         kwargs["wire_api"] = wire

@@ -1,3 +1,8 @@
+# 1.0.199
+
+- GPT-6 Astra coding chats now always use Responses, like GPT-6.1 Sol: saved Chat Completions pins migrate, the Chat Completions option is disabled in Settings, and the hint names the selected model. The OpenAI API rejects Astra function tools on Chat Completions at every reasoning effort.
+- Require Python clawagents **6.20.87** (Astra Responses-only tools, slimmer sdist). GPT-6 Astra, Sol, Luna and GPT-6.1 Sol were live-verified with tool-calling agent runs.
+
 # 1.0.198
 
 - Require Python clawagents **6.20.86**, which adds the `fast_mode` agent argument used by per-conversation Fast mode and the SQL-only ungrounded-count fix.

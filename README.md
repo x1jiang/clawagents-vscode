@@ -6,7 +6,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 
 - VS Code **1.85+** (or Cursor)
 - Python **3.10+** on this host (managed mode discovers compatible PATH and standard installations, or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.86** (OpenAI Fast mode support)
+- **clawagents ≥ 6.20.87** (GPT-6 family verified)
 - A provider credential for at least one model provider
 
 ## Quick start
@@ -15,7 +15,7 @@ Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** 
 2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into its isolated managed environment (or `clawagents.pythonPath` when using the `custom` runtime):
 
 ```text
-clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.86,<7  fastapi  uvicorn  pydantic  python-dotenv
+clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.87,<7  fastapi  uvicorn  pydantic  python-dotenv
 ```
 
 You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.

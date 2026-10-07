@@ -8,10 +8,10 @@ export function modelSupportsFastMode(model: string, provider: string, baseUrl: 
   return /^(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-sol|gpt-5\.6(?:-(?:sol|terra|luna))?)(?:-\d{4}-\d{2}-\d{2})?$/.test(model.trim().toLowerCase());
 }
 
-/** ClawAgents chats call tools, which GPT-6.1 Sol supports only in Responses. */
+/** ClawAgents chats call tools, which GPT-6.1 Sol and GPT-6 Astra support only in Responses. */
 export function modelRequiresResponsesForTools(model: string, provider: string): boolean {
   return ["auto", "openai", "profile:openai"].includes(provider.trim().toLowerCase())
-    && /^gpt-6\.1-sol(?:$|[-_])/.test(model.trim().toLowerCase());
+    && /^gpt-6(?:\.1-sol|-astra)(?:$|[-_])/.test(model.trim().toLowerCase());
 }
 
 export function compatibleWireApiForModel(model: string, provider: string, wireApi: string): string {

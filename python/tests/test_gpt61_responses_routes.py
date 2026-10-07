@@ -1,4 +1,4 @@
-"""GPT-6.1 Sol coding chats must use Responses before the agent starts."""
+"""GPT-6.1 Sol / GPT-6 Astra coding chats must use Responses before the agent starts."""
 import json
 
 import pytest
@@ -7,18 +7,20 @@ import chats
 import spawn_secrets
 
 
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6-astra"])
 @pytest.mark.parametrize("provider", ["openai", "auto", "profile:openai"])
 @pytest.mark.parametrize("wire", ["", "auto", "chat_completions", "responses"])
-def test_gpt61_saved_model_routes_require_responses(provider, wire):
-    route = chats.normalize_model_route({"provider": provider, "model": "gpt-6.1-sol", "wire_api": wire})
+def test_gpt61_saved_model_routes_require_responses(model, provider, wire):
+    route = chats.normalize_model_route({"provider": provider, "model": model, "wire_api": wire})
     assert route["wire_api"] == "responses"
 
 
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6-astra"])
 @pytest.mark.parametrize("wire", ["", "auto", "chat_completions", "responses"])
-def test_gpt61_settings_kwargs_require_responses(wire, monkeypatch):
+def test_gpt61_settings_kwargs_require_responses(model, wire, monkeypatch):
     monkeypatch.setattr(spawn_secrets, "resolve_api_key", lambda *args: "test")
     kwargs = chats._resolve_model_kwargs(None, {
-        "provider": "openai", "model": "gpt-6.1-sol", "wire_api": wire,
+        "provider": "openai", "model": model, "wire_api": wire,
     })
     assert kwargs["wire_api"] == "responses"
 
@@ -44,7 +46,8 @@ def test_gpt61_existing_chat_pin_migrates_to_responses(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("provider,model", [
-    ("openai", "gpt-6-sol"), ("ollama", "gpt-6.1-sol"),
+    ("openai", "gpt-6-sol"), ("openai", "gpt-6-luna"), ("ollama", "gpt-6.1-sol"),
+    ("bedrock", "openai.gpt-6-astra"),
     ("bedrock", "openai.gpt-6.1-sol"), ("auto", "openai.gpt-6.1-sol"),
 ])
 def test_other_routes_preserve_explicit_chat(provider, model):
