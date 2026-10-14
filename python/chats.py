@@ -1638,7 +1638,7 @@ def _model_looks_bedrock(model: str | None) -> bool:
         return bool(is_bedrock_model_id(m))
     except Exception:  # noqa: BLE001
         lower = m.lower()
-        if lower.startswith(("us.", "eu.", "apac.", "global.", "bedrock/")):
+        if lower.startswith(("us.", "eu.", "apac.", "au.", "jp.", "global.", "bedrock/")):
             return True
         return lower.startswith(
             ("anthropic.", "amazon.", "meta.", "openai.", "deepseek.", "qwen.")
@@ -1770,7 +1770,7 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
             # Claude → Anthropic Messages; openai.gpt-5.* → Responses.
             if mantle_host and not str(settings.get("wire_api") or "").strip():
                 model_l = str(kwargs.get("model") or effective_model or "").lower()
-                if model_l.startswith("anthropic.") or model_l.startswith("claude"):
+                if model_l.startswith("anthropic.") or model_l.startswith("claude") or ".anthropic." in model_l:
                     pass  # Messages API; wire_api unused
                 elif model_l.startswith(("xai.grok", "grok-")):
                     kwargs["wire_api"] = "responses"

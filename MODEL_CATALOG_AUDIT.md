@@ -1,3 +1,13 @@
+# Gemini 4 Argon & Claude 5.5 support update — 2026-10-14
+
+Release: Python 6.20.89 / VS Code 1.0.201. Add Gemini 4 Argon (`gemini-4-argon`) and the Claude 5.5 family (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) across direct APIs, native AWS Bedrock (`bedrock-runtime`), and AWS Bedrock Mantle (`bedrock-mantle`).
+
+- **Gemini 4 Argon (`gemini-4-argon`):** 1,048,576 input / 65,536 synchronous output token limits. Supports `low`, `medium`, and `high` thinking levels and omits rejected sampling parameters. Direct introductory API rates through 2026-11-30: $2.00 input / $10.00 output / $0.10 cached input read per 1M tokens.
+- **Claude 5.5 (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`):** 1,000,000 input / 128,000 output token limits, `low` through `max` effort options, and rejected sampling parameters omitted. Adaptive thinking is always on for Opus 5.5 and Sonnet 5.5; Haiku 5.5 disables thinking when `effort="none"`.
+- **Bedrock & Mantle:** Native Bedrock supports `us.`, `eu.`, `apac.`, `au.`, `jp.`, and `global.` inference profiles (including `us.anthropic.claude-haiku-5-5`, `global.anthropic.claude-haiku-5-5`, `au.anthropic.claude-haiku-5-5`, `jp.anthropic.claude-haiku-5-5`); Mantle routes `anthropic.claude-{opus,sonnet,haiku}-5-5` to `/anthropic/v1/messages`.
+- **Pricing:** Direct Anthropic rates are $4/$20/$0.20/$5.00 for Opus 5.5, $2/$10/$0.10/$2.50 for Sonnet 5.5, and $0.10/$0.50/$0.01/$0.125 for Haiku 5.5 (with a 5× long-context multiplier on Haiku 5.5 when `prompt_tokens > 100,000`). Unverified AWS Bedrock Claude 5/5.5 rates remain unknown.
+- Primary sources: [Gemini 4 Argon](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon), [Anthropic models](https://platform.claude.com/docs/en/about-claude/models/overview), [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing), [AWS Claude Haiku 5.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-5-5.html), [AWS Claude Opus 5.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5-5.html), [AWS Claude Sonnet 5.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5-5.html).
+
 # GPT-6 support update — 2026-09-27
 
 Release: Python 6.20.83 / VS Code 1.0.194. Add GPT-6 Sol and Luna to direct OpenAI settings and per-thread pickers. Astra, legacy selections, and defaults remain available.

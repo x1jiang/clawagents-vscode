@@ -95,6 +95,14 @@ test("dependency versions stay inside the supported major ranges", () => {
   assert.ok(
     deps.SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK.includes(deps.CLAWAGENTS_GITHUB_WHEEL),
   );
+  const requirementsTxt = fs.readFileSync(
+    path.join(__dirname, "..", "python", "requirements.txt"),
+    "utf8",
+  );
+  assert.ok(
+    requirementsTxt.includes(`>=${floor},<7`),
+    `python/requirements.txt must pin >=${floor},<7 in lockstep with MIN_CLAWAGENTS_VERSION`,
+  );
 });
 
 test("dependency probe prefers dist-info over clawagents.__version__", () => {

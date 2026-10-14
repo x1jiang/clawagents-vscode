@@ -5,12 +5,33 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import providers
 import pricing
 
-@pytest.mark.parametrize("provider,ids",[("anthropic",["claude-fable-5-1","claude-opus-5","claude-sonnet-5"]),("xai",["grok-4.6"])])
+@pytest.mark.parametrize(
+ "provider,ids",
+ [
+  ("anthropic",["claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5","claude-opus-5","claude-sonnet-5"]),
+  ("gemini",["gemini-4-argon","gemini-3.8-flash"]),
+  ("bedrock",["us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","global.anthropic.claude-haiku-5-5"]),
+  ("xai",["grok-4.6"]),
+ ],
+)
 def test_current_direct_catalog(provider,ids):
  models={m["id"] for p in providers._CATALOG if p["id"]==provider for m in p["models"]}
  assert set(ids)<=models
 
-@pytest.mark.parametrize("model,rates",[("claude-fable-5-1",(10,50,.25,12.5)),("claude-opus-5",(5,25,.5,6.25)),("grok-4.6",(2,6,.5,2)),("gemini-3.6-flash",(.75,3.75,.075,.9375))])
+@pytest.mark.parametrize(
+ "model,rates",
+ [
+  ("claude-fable-5-1",(10,50,.25,12.5)),
+  ("claude-opus-5-5",(4,20,.2,5)),
+  ("claude-sonnet-5-5",(2,10,.1,2.5)),
+  ("claude-haiku-5-5",(.1,.5,.01,.125)),
+  ("claude-haiku-5.5",(.1,.5,.01,.125)),
+  ("claude-opus-5",(5,25,.5,6.25)),
+  ("gemini-4-argon",(2,10,.1,2.5)),
+  ("grok-4.6",(2,6,.5,2)),
+  ("gemini-3.6-flash",(.75,3.75,.075,.9375)),
+ ],
+)
 def test_current_rates(model,rates):
  assert pricing.price_for_full(model)==rates
 
@@ -19,6 +40,12 @@ def test_current_openai_pricing_cliffs(model):
  assert pricing.long_context_multipliers(model,272000) is None
  assert pricing.long_context_multipliers(model,272001)==(2,1.5)
  assert pricing.long_context_multipliers("gpt-5.4-mini",300000) is None
+
+def test_current_haiku_55_pricing_cliff():
+ assert pricing.long_context_multipliers("claude-haiku-5-5",100000) is None
+ assert pricing.long_context_multipliers("claude-haiku-5-5",100001)==(5,5)
+ assert pricing.estimate_usd("claude-haiku-5-5",prompt_tokens=100000,completion_tokens=10000)==pytest.approx(0.015)
+ assert pricing.estimate_usd("claude-haiku-5-5",prompt_tokens=200000,completion_tokens=10000)==pytest.approx(0.125)
 
 @pytest.mark.parametrize("model",["minimax.minimax-m2.5","mistral.devstral-2-123b","qwen.qwen3-coder-next","nvidia.nemotron-super-3-120b","mistral.mistral-large-3-675b-instruct"])
 def test_mantle_models_route_to_chat(model,monkeypatch):
@@ -29,7 +56,16 @@ def test_mantle_models_route_to_chat(model,monkeypatch):
  assert kwargs["wire_api"]=="chat_completions"
  assert "bedrock-mantle.us-east-1.api.aws" in kwargs["base_url"]
 
-@pytest.mark.parametrize("model",["us.anthropic.claude-opus-5","anthropic.claude-sonnet-5","us.anthropic.claude-fable-5-1"])
+@pytest.mark.parametrize("model",["anthropic.claude-opus-5-5","anthropic.claude-sonnet-5-5","anthropic.claude-haiku-5-5"])
+def test_mantle_claude_55_routes_to_anthropic_messages(model,monkeypatch):
+ import chats
+ monkeypatch.setattr(chats,"_bedrock_api_key",lambda **kwargs:"test")
+ assert model in {m["id"] for m in providers._MANTLE_MODELS}
+ kwargs=chats._resolve_model_kwargs(model,{"provider":"bedrock","bedrock_mode":"mantle","aws_region":"us-east-1"})
+ assert "wire_api" not in kwargs
+ assert "bedrock-mantle.us-east-1.api.aws" in kwargs["base_url"]
+
+@pytest.mark.parametrize("model",["us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","au.anthropic.claude-haiku-5-5","jp.anthropic.claude-haiku-5-5","us.anthropic.claude-opus-5","anthropic.claude-sonnet-5","us.anthropic.claude-fable-5-1"])
 def test_unverified_aws_prices_stay_unknown(model):
  assert pricing.price_for_full(model) is None
 

@@ -51,12 +51,15 @@ const WINDOWS: Array<[string, number]> = [
   ["claude-opus-4-6", 1_000_000],
   ["claude-sonnet-5", 1_000_000],
   ["claude-sonnet-4-6", 1_000_000],
+  ["claude-haiku-5", 1_000_000],
   // Anthropic — 200K
   ["claude-opus-4", 200_000],
   ["claude-sonnet-4", 200_000],
   ["claude-haiku-4", 200_000],
   ["claude-3", 200_000],
   // Google
+  ["gemini-4-argon", 1_048_576],
+  ["gemini-4", 1_048_576],
   ["gemini-3.8", 1_048_576],
   ["gemini-3.7", 1_000_000],
   ["gemini-3.6", 1_000_000],

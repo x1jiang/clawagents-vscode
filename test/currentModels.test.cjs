@@ -17,25 +17,37 @@ const context = load("contextWindow");
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 test("Newest tool-capable models appear offline", () => {
  const models = id => catalog.FALLBACK_PROVIDERS.find(p=>p.id===id).models.map(m=>m.id);
- for (const m of ["claude-fable-5-1","claude-opus-5","claude-sonnet-5"]) assert(models("anthropic").includes(m));
+ for (const m of ["claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5","claude-opus-5","claude-sonnet-5"]) assert(models("anthropic").includes(m));
+ assert(models("gemini").includes("gemini-4-argon"));
+ for (const m of ["us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","global.anthropic.claude-haiku-5-5"]) assert(models("bedrock").includes(m));
+ for (const m of ["anthropic.claude-opus-5-5","anthropic.claude-sonnet-5-5","anthropic.claude-haiku-5-5"]) assert(catalog.MANTLE_FALLBACK_MODELS.some(row=>row.id===m));
  assert(models("xai").includes("grok-4.6"));
 });
 test("Reasoning controls match current provider capabilities", () => {
- for(const m of ["claude-fable-5-1","claude-opus-5","anthropic.claude-sonnet-5"]){
+ for(const m of ["claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5","us.anthropic.claude-haiku-5-5","au.anthropic.claude-haiku-5-5","claude-opus-5","anthropic.claude-sonnet-5"]){
   assert(selection.modelSupportsEffort(m));
   assert.deepEqual(selection.effortOptionsForModel(m).map(o=>o.value),["low","medium","high","xhigh","max"]);
  }
  assert(selection.modelSupportsEffort("grok-4.6"));
  assert.deepEqual(selection.effortOptionsForModel("grok-4.6").map(o=>o.value),["low","medium","high","xhigh"]);
- assert(selection.modelSupportsEffort("gemini-3.8-flash"));
- assert.deepEqual(selection.effortOptionsForModel("gemini-3.8-flash").map(o=>o.value),["low","medium","high"]);
+ for (const m of ["gemini-4-argon","gemini-3.8-flash"]) {
+  assert(selection.modelSupportsEffort(m));
+  assert.deepEqual(selection.effortOptionsForModel(m).map(o=>o.value),["low","medium","high"]);
+ }
 });
 test("Context and price estimates use current cards",()=>{
  assert.equal(context.contextWindowFor("grok-4.6"),500000);
+ assert.equal(context.contextWindowFor("gemini-4-argon"),1048576);
  assert.equal(context.contextWindowFor("gemini-3.8-flash"),1048576);
+ for(const m of ["claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5","us.anthropic.claude-haiku-5-5","au.anthropic.claude-haiku-5-5"]) assert.equal(context.contextWindowFor(m),1000000);
  for(const m of ["gpt-5.4","gpt-5.5"]) assert.equal(context.contextWindowFor(m),1050000);
  assert.equal(context.contextWindowFor("gpt-5.4-mini"),400000);
  assert.equal(pricing.estimateCostUsd("claude-fable-5-1",100000,10000),1.5);
+ assert(Math.abs(pricing.estimateCostUsd("claude-opus-5-5",100000,10000)-.6)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("claude-sonnet-5-5",100000,10000)-.3)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("claude-haiku-5-5",100000,10000)-.015)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("claude-haiku-5-5",200000,10000)-.125)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("gemini-4-argon",100000,10000)-.3)<1e-12);
  assert.equal(pricing.estimateCostUsd("grok-4.6",100000,10000),.26);
  assert.equal(pricing.estimateCostUsd("gpt-5.4",300000,10000),1.725);
  assert(Math.abs(pricing.estimateCostUsd("gemini-3.6-flash",100000,10000)-.1125)<1e-12);
@@ -50,13 +62,15 @@ test("New Mantle vendors survive picker filtering",()=>{
  assert(!catalog.isMantleCatalogModelId("mistral.mistral-large-2407-v1:0"));
 });
 test("Unknown AWS Claude prices do not fall back to direct rates",()=>{
- for(const id of ["anthropic.claude-opus-5","anthropic.claude-sonnet-5","us.anthropic.claude-fable-5-1"]) assert.equal(pricing.estimateCostUsd(id,1000,1000),null);
+ for(const id of ["anthropic.claude-opus-5-5","anthropic.claude-sonnet-5-5","anthropic.claude-haiku-5-5","au.anthropic.claude-haiku-5-5","anthropic.claude-opus-5","anthropic.claude-sonnet-5","us.anthropic.claude-fable-5-1"]) assert.equal(pricing.estimateCostUsd(id,1000,1000),null);
 });
 
 test("Switching models maps stale effort to a supported choice",()=>{
+ assert.equal(selection.compatibleEffortForModel("gemini-4-argon","max"),"high");
  assert.equal(selection.compatibleEffortForModel("gemini-3.8-flash","max"),"high");
  assert.equal(selection.compatibleEffortForModel("grok-4.6","none"),"low");
  assert.equal(selection.compatibleEffortForModel("claude-fable-5-1","minimal"),"low");
+ assert.equal(selection.compatibleEffortForModel("claude-haiku-5-5","minimal"),"low");
  assert.equal(selection.compatibleEffortForModel("gpt-6-astra","max"),"max");
  assert.equal(selection.compatibleEffortForModel("gemini-3.8-flash",""),"");
 });

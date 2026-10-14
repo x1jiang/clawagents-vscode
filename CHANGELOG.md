@@ -1,3 +1,10 @@
+# 1.0.201
+
+- Add **Gemini 4 Argon** (`gemini-4-argon`) and **Claude 5.5** (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) to direct provider, native AWS Bedrock (`us.` and `global.` profiles), and AWS Bedrock Mantle catalogs and offline model pickers.
+- Support reasoning effort controls (`low` / `medium` / `high` for Gemini 4 Argon; `low` through `max` for Claude Haiku 5.5, Sonnet 5.5, and Opus 5.5), 1M–1.05M context windows, direct API token and cache pricing, and Haiku 5.5's >100K long-context multiplier (5×). Keep unverified AWS Claude 5.5 rates unknown.
+- Recognize `au.` and `jp.` AWS Bedrock geographic inference profile prefixes across native Bedrock, Mantle Anthropic routing, provider validation, and spawn secret resolution.
+- Require Python clawagents **6.20.89** in both `src/pythonDeps.ts` and `python/requirements.txt`, fixing a floor drift where `MIN_CLAWAGENTS_VERSION` had remained at `6.20.85`.
+
 # 1.0.200
 
 - Require Python clawagents **6.20.88**, which bridges GPT-6 Astra and GPT-6.1 Sol tool calls to Responses at the library level, so scripts and profiles that pin Chat Completions also work. The extension already routed these chats to Responses.

@@ -224,7 +224,7 @@ def _looks_like_ollama_local_id(model: str) -> bool:
         return False
     if m.startswith(
         ("openai.", "anthropic.", "amazon.", "meta.", "deepseek.", "xai.", "zai.")
-    ) or m.startswith(("us.", "eu.", "apac.", "global.")):
+    ) or m.startswith(("us.", "eu.", "apac.", "au.", "jp.", "global.")):
         return False
     return bool(
         re.match(
@@ -276,7 +276,7 @@ def _model_fits_provider(model: str, provider: str) -> bool:
             return False
         if ml.startswith("claude") or "gemini" in ml or ml.startswith("grok"):
             return False
-        if ml.startswith(("us.", "eu.", "apac.", "global.", "amazon.", "meta.")):
+        if ml.startswith(("us.", "eu.", "apac.", "au.", "jp.", "global.", "amazon.", "meta.")):
             return False
         return True
     if p == "xai":

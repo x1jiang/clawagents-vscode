@@ -49,22 +49,29 @@ PRICES: dict[str, PriceTuple] = {
     # Legacy / still listed
     "gpt-4o": (2.5, 10.0, 1.25, 3.125),
     "gpt-4o-mini": (0.15, 0.6, 0.075, 0.1875),
-    # Anthropic direct API (cache read ~10%, write ~1.25×)
+    # Anthropic direct API (cache read ~5–10%, write ~1.25×)
     "claude-fable-5-1": (10.0, 50.0, 0.25, 12.5),
+    "claude-opus-5-5": (4.0, 20.0, 0.2, 5.0),
     "claude-opus-5": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-5": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-6": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-7": (5.0, 25.0, 0.5, 6.25),
     "claude-opus-4-8": (5.0, 25.0, 0.5, 6.25),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.1, 2.5),
     "claude-sonnet-4": (3.0, 15.0, 0.3, 3.75),
     "claude-sonnet-4-5": (3.0, 15.0, 0.3, 3.75),
     "claude-sonnet-4-6": (3.0, 15.0, 0.3, 3.75),
     "claude-sonnet-5": (2.0, 10.0, 0.2, 2.5),
+    "claude-haiku-5-5": (0.1, 0.5, 0.01, 0.125),
+    "claude-haiku-5": (0.1, 0.5, 0.01, 0.125),
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
     "claude-haiku-4-5-20251001": (1.0, 5.0, 0.1, 1.25),
     # Gemini (approx; standard paid tier — cache rates when reported)
+    # 4 Argon intro $2.00/$10.00 ($0.10 cache read) through 2026-11-30, then $3.00/$15.00.
     # 3.8 / 3.7 / 3.6 Flash intro $0.75/$3.75 through 2026-12-31, then $1.50/$7.50.
+    "gemini-4-argon": (2.0, 10.0, 0.1, 2.5),
+    "gemini-4": (2.0, 10.0, 0.1, 2.5),
     "gemini-3.8-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.7-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.6-flash": (0.75, 3.75, 0.075, 0.9375),
@@ -150,6 +157,8 @@ _GEO_PREFIXES = (
     "us.",
     "eu.",
     "apac.",
+    "au.",
+    "jp.",
     "ap.",
     "af.",
     "me.",
@@ -216,6 +225,8 @@ def normalize_model_id(model_id: str) -> str:
             break
     if ":" in key:
         key = key.split(":", 1)[0]
+    if key.startswith(("claude-fable-", "claude-opus-", "claude-sonnet-", "claude-haiku-")) and "." in key:
+        key = key.replace(".", "-")
     return key
 
 
@@ -272,7 +283,17 @@ def price_for_full(
     prov = (provider or "").strip().lower()
     force_bedrock = prov in ("bedrock", "mantle", "amazon", "aws")
     use_bedrock = force_bedrock or _looks_bedrock(raw)
-    if use_bedrock and key.startswith(("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5")):
+    if use_bedrock and key.startswith(
+        (
+            "gpt-6.1-sol",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "claude-fable-5-1",
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-haiku-5",
+        )
+    ):
         return None  # Current AWS rates unverified; never substitute direct API rates.
     if key.startswith(("gpt-6-astra", "grok-4.6")) and raw.lower().removeprefix("bedrock/").startswith("global."):
         return _lookup_table(PRICES, key)
@@ -287,11 +308,14 @@ def price_for_full(
 # GPT-5.6 family: prompts with >272K input tokens are priced at 2× input
 # (including cached read / cache write) and 1.5× output for the full request.
 # xAI Grok: prompts that reach ≥200K use 2× all token rates (docs.x.ai/pricing).
+# Claude Haiku 5.5: prompts with >100K input tokens are priced at 5× all token rates.
 _LONG_CONTEXT_THRESHOLD_GPT56 = 272_000
 _LONG_CONTEXT_THRESHOLD_GROK = 200_000
+_LONG_CONTEXT_THRESHOLD_HAIKU5 = 100_000
 _LONG_CONTEXT_INPUT_MULT = 2.0
 _LONG_CONTEXT_OUTPUT_MULT_GPT56 = 1.5
 _LONG_CONTEXT_OUTPUT_MULT_GROK = 2.0
+_LONG_CONTEXT_MULT_HAIKU5 = 5.0
 
 
 def _is_gpt56_family(model_id: str) -> bool:
@@ -305,6 +329,11 @@ def _is_grok_family(model_id: str) -> bool:
     return key.startswith("grok")
 
 
+def _is_haiku5_family(model_id: str) -> bool:
+    key = normalize_model_id(model_id)
+    return key.startswith("claude-haiku-5")
+
+
 def long_context_multipliers(
     model_id: str, prompt_tokens: int
 ) -> tuple[float, float] | None:
@@ -314,6 +343,8 @@ def long_context_multipliers(
         return (_LONG_CONTEXT_INPUT_MULT, _LONG_CONTEXT_OUTPUT_MULT_GPT56)
     if _is_grok_family(model_id) and prompt >= _LONG_CONTEXT_THRESHOLD_GROK:
         return (_LONG_CONTEXT_INPUT_MULT, _LONG_CONTEXT_OUTPUT_MULT_GROK)
+    if _is_haiku5_family(model_id) and prompt > _LONG_CONTEXT_THRESHOLD_HAIKU5:
+        return (_LONG_CONTEXT_MULT_HAIKU5, _LONG_CONTEXT_MULT_HAIKU5)
     return None
 
 

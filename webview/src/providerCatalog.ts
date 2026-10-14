@@ -61,6 +61,9 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     models: [
       { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
       { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
+      { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
+      { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
+      { id: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
       { id: "claude-opus-5", label: "Claude Opus 5" },
       { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
       { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
@@ -73,6 +76,7 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     name: "Google Gemini",
     models: [
       { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+      { id: "gemini-4-argon", label: "Gemini 4 Argon" },
       { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
       { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
       { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
@@ -116,6 +120,10 @@ export const FALLBACK_PROVIDERS: Provider[] = [
         id: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         label: "Claude Haiku 4.5 (US)",
       },
+      { id: "us.anthropic.claude-opus-5-5", label: "Claude Opus 5.5 (US)" },
+      { id: "us.anthropic.claude-sonnet-5-5", label: "Claude Sonnet 5.5 (US)" },
+      { id: "us.anthropic.claude-haiku-5-5", label: "Claude Haiku 5.5 (US)" },
+      { id: "global.anthropic.claude-haiku-5-5", label: "Claude Haiku 5.5 (Global)" },
       { id: "us.anthropic.claude-opus-5", label: "Claude Opus 5 (US)" },
       { id: "us.anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (US)" },
       { id: "us.anthropic.claude-fable-5-1", label: "Claude Fable 5.1 · requires AWS review opt-in (US)" },
@@ -143,6 +151,9 @@ export const MANTLE_FALLBACK_MODELS: Array<{ id: string; label: string }> = [
   { id: "nvidia.nemotron-super-3-120b", label: "Nemotron Super 3 120B (Mantle · chat)" },
   { id: "mistral.mistral-large-3-675b-instruct", label: "Mistral Large 3 (Mantle · chat)" },
   { id: "deepseek.v3.2", label: "DeepSeek V3.2 (Mantle · chat)" },
+  { id: "anthropic.claude-opus-5-5", label: "Claude Opus 5.5 (Mantle · messages)" },
+  { id: "anthropic.claude-sonnet-5-5", label: "Claude Sonnet 5.5 (Mantle · messages)" },
+  { id: "anthropic.claude-haiku-5-5", label: "Claude Haiku 5.5 (Mantle · messages)" },
   { id: "anthropic.claude-haiku-4-5", label: "Claude Haiku 4.5 (Mantle · messages)" },
   { id: "anthropic.claude-opus-5", label: "Claude Opus 5 (Mantle · messages · us-east-1 / EU / Melbourne)" },
   { id: "anthropic.claude-sonnet-5", label: "Claude Sonnet 5 (Mantle · messages · us-east-1 / EU / Melbourne)" },
@@ -169,8 +180,8 @@ export function isMantleAnthropicModel(id: string): boolean {
     .trim()
     .toLowerCase();
   if (m.startsWith("bedrock/")) m = m.slice("bedrock/".length);
-  // AWS APAC geo prefix is ``apac.`` (not ``ap.``).
-  for (const p of ["us.", "eu.", "apac.", "global."] as const) {
+  // AWS APAC geo prefix is ``apac.`` (not ``ap.``); newer cards also add ``au.`` / ``jp.``.
+  for (const p of ["us.", "eu.", "apac.", "au.", "jp.", "global."] as const) {
     if (m.startsWith(p)) {
       m = m.slice(p.length);
       break;
@@ -194,7 +205,7 @@ export function isMantleXaiModel(id: string): boolean {
     .trim()
     .toLowerCase();
   if (m.startsWith("bedrock/")) m = m.slice("bedrock/".length);
-  for (const p of ["us.", "eu.", "apac.", "global."] as const) {
+  for (const p of ["us.", "eu.", "apac.", "au.", "jp.", "global."] as const) {
     if (m.startsWith(p)) {
       m = m.slice(p.length);
       break;
@@ -238,7 +249,7 @@ export function providerSelectValue(settings: Record<string, unknown>): string {
 export function isNativeBedrockModelId(id: string): boolean {
   const m = String(id || "").trim();
   if (!m) return false;
-  if (/^(us|eu|apac|global)\./i.test(m)) return true;
+  if (/^(us|eu|apac|au|jp|global)\./i.test(m)) return true;
   if (/^(amazon|meta)\./i.test(m)) return true;
   // Bedrock-hosted OSS (inference profile style)
   if (/gpt-oss/i.test(m) && (m.includes(":") || m.startsWith("openai.gpt-oss"))) {
@@ -249,7 +260,7 @@ export function isNativeBedrockModelId(id: string): boolean {
 
 export function isMantleCatalogModelId(id: string): boolean {
   const m = String(id || "").trim().toLowerCase();
-  if (!m || m.includes(":") || /^(us|eu|apac|global)\./.test(m)) return false;
+  if (!m || m.includes(":") || /^(us|eu|apac|au|jp|global)\./.test(m)) return false;
   return (
     m.startsWith("openai.") ||
     m.startsWith("anthropic.") ||
@@ -272,7 +283,7 @@ export function modelLooksLikeOllamaLocalId(id: string): boolean {
   // Version dots like ``llama3.1`` are still local.
   if (
     /^(openai|anthropic|amazon|meta|deepseek|xai|zai|minimax|mistral|qwen|nvidia|moonshotai)\./.test(m) ||
-    /^(us|eu|apac|global)\./.test(m)
+    /^(us|eu|apac|au|jp|global)\./.test(m)
   ) {
     return false;
   }

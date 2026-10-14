@@ -145,7 +145,7 @@ def resolve_api_key(provider: str, model: str | None = None) -> str | None:
             key = get_secret("BEDROCK_API_KEY")
             return key or None
     except Exception:  # noqa: BLE001
-        if m.startswith(("us.", "eu.", "apac.", "global.", "bedrock/")) or m.startswith(
+        if m.startswith(("us.", "eu.", "apac.", "au.", "jp.", "global.", "bedrock/")) or m.startswith(
             ("anthropic.", "amazon.", "meta.", "openai.")
         ):
             key = get_secret("BEDROCK_API_KEY")

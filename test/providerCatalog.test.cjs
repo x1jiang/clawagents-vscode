@@ -18,13 +18,24 @@ buildSync({
 const mod = require(outputFile);
 test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
-test("apac geo prefix recognized (not ap.)", () => {
+test("apac, au, and jp geo prefixes recognized (not ap.)", () => {
   assert.equal(
     mod.isNativeBedrockModelId("apac.anthropic.claude-sonnet-4-5-20250929-v1:0"),
     true,
   );
+  assert.equal(
+    mod.isNativeBedrockModelId("au.anthropic.claude-haiku-5-5"),
+    true,
+  );
+  assert.equal(
+    mod.isNativeBedrockModelId("jp.anthropic.claude-haiku-5-5"),
+    true,
+  );
   assert.equal(mod.isMantleAnthropicModel("apac.anthropic.claude-sonnet-4-5"), true);
+  assert.equal(mod.isMantleAnthropicModel("au.anthropic.claude-haiku-5-5"), true);
+  assert.equal(mod.isMantleAnthropicModel("jp.anthropic.claude-haiku-5-5"), true);
   assert.equal(mod.isMantleCatalogModelId("apac.anthropic.claude-x"), false);
+  assert.equal(mod.isMantleCatalogModelId("au.anthropic.claude-haiku-5-5"), false);
 });
 
 test("expandBedrockProviderChoices splits IAM vs Mantle availability", () => {

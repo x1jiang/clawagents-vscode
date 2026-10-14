@@ -44,18 +44,24 @@ const PRICES: Record<string, Rates> = {
   "gpt-4o": withCache(2.5, 10, 1.25, 3.125),
   "gpt-4o-mini": withCache(0.15, 0.6, 0.075, 0.1875),
   "claude-fable-5-1": withCache(10, 50, 0.25, 12.5),
+  "claude-opus-5-5": withCache(4, 20, 0.2, 5),
   "claude-opus-5": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-5": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-6": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-7": withCache(5, 25, 0.5, 6.25),
   "claude-opus-4-8": withCache(5, 25, 0.5, 6.25),
+  "claude-sonnet-5-5": withCache(2, 10, 0.1, 2.5),
   "claude-sonnet-4": withCache(3, 15, 0.3, 3.75),
   "claude-sonnet-4-5": withCache(3, 15, 0.3, 3.75),
   "claude-sonnet-4-6": withCache(3, 15, 0.3, 3.75),
   "claude-sonnet-5": withCache(2, 10, 0.2, 2.5),
+  "claude-haiku-5-5": withCache(0.1, 0.5, 0.01, 0.125),
+  "claude-haiku-5": withCache(0.1, 0.5, 0.01, 0.125),
   "claude-haiku-4-5": withCache(1, 5, 0.1, 1.25),
   "claude-haiku-4-5-20251001": withCache(1, 5, 0.1, 1.25),
+  "gemini-4-argon": withCache(2, 10, 0.1, 2.5),
+  "gemini-4": withCache(2, 10, 0.1, 2.5),
   "gemini-3.8-flash": withCache(0.75, 3.75),
   "gemini-3.7-flash": withCache(0.75, 3.75),
   "gemini-3.6-flash": withCache(0.75, 3.75),
@@ -126,7 +132,7 @@ const BEDROCK_PRICES: Record<string, Rates> = {
   "glm-4.6": withCache(0.6, 2.2),
 };
 
-const GEO_PREFIXES = ["global.", "us.", "eu.", "apac.", "ap.", "af.", "me.", "ca.", "sa."] as const;
+const GEO_PREFIXES = ["global.", "us.", "eu.", "apac.", "au.", "jp.", "ap.", "af.", "me.", "ca.", "sa."] as const;
 const PROVIDER_DOT_PREFIXES = [
   "anthropic.",
   "openai.",
@@ -183,6 +189,9 @@ export function normalizeModelId(modelId: string): string {
     }
   }
   if (key.includes(":")) key = key.split(":", 1)[0]!;
+  if (/^claude-(fable|opus|sonnet|haiku)-/.test(key) && key.includes(".")) {
+    key = key.replace(/\./g, "-");
+  }
   return key;
 }
 
@@ -233,7 +242,7 @@ function lookup(
   if ((key.startsWith("gpt-6-astra") || key.startsWith("grok-4.6")) && raw.toLowerCase().replace(/^bedrock\//, "").startsWith("global.")) {
     return lookupTable(PRICES, key);
   }
-  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6\.1-sol|gpt-6-(sol|luna)|claude-fable-5-1|claude-opus-5|claude-sonnet-5)/.test(key)) return null;
+  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6\.1-sol|gpt-6-(sol|luna)|claude-fable-5-1|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(key)) return null;
   const primary = forceBedrock || looksBedrock(raw) ? BEDROCK_PRICES : PRICES;
   const hit = lookupTable(primary, key);
   if (hit) return hit;
@@ -241,12 +250,14 @@ function lookup(
   return lookupTable(other, key);
 }
 
-/** GPT-5.6: >272K → 2× input-side, 1.5× output. xAI Grok: ≥200K → 2× all rates. */
+/** GPT-5.6: >272K → 2× input-side, 1.5× output. xAI Grok: ≥200K → 2× all rates. Claude Haiku 5.5: >100K → 5× all rates. */
 const LONG_CONTEXT_THRESHOLD_GPT56 = 272_000;
 const LONG_CONTEXT_THRESHOLD_GROK = 200_000;
+const LONG_CONTEXT_THRESHOLD_HAIKU5 = 100_000;
 const LONG_CONTEXT_INPUT_MULT = 2;
 const LONG_CONTEXT_OUTPUT_MULT_GPT56 = 1.5;
 const LONG_CONTEXT_OUTPUT_MULT_GROK = 2;
+const LONG_CONTEXT_MULT_HAIKU5 = 5;
 
 function isGpt56Family(modelId: string): boolean {
   const key = normalizeModelId(modelId);
@@ -256,6 +267,10 @@ function isGpt56Family(modelId: string): boolean {
 
 function isGrokFamily(modelId: string): boolean {
   return normalizeModelId(modelId).startsWith("grok");
+}
+
+function isHaiku5Family(modelId: string): boolean {
+  return normalizeModelId(modelId).startsWith("claude-haiku-5");
 }
 
 function longContextMultipliers(
@@ -268,6 +283,9 @@ function longContextMultipliers(
   }
   if (isGrokFamily(modelId) && prompt >= LONG_CONTEXT_THRESHOLD_GROK) {
     return { input: LONG_CONTEXT_INPUT_MULT, output: LONG_CONTEXT_OUTPUT_MULT_GROK };
+  }
+  if (isHaiku5Family(modelId) && prompt > LONG_CONTEXT_THRESHOLD_HAIKU5) {
+    return { input: LONG_CONTEXT_MULT_HAIKU5, output: LONG_CONTEXT_MULT_HAIKU5 };
   }
   return null;
 }

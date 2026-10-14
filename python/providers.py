@@ -38,6 +38,9 @@ _MANTLE_MODELS: list[dict[str, Any]] = [
     {"id": "zai.glm-4.7-flash", "label": "Z.ai GLM-4.7 Flash (Mantle)"},
     {"id": "zai.glm-4.6", "label": "Z.ai GLM-4.6 (Mantle · chat)"},
     # Anthropic Messages path (…/anthropic/v1/messages, Bearer via Mantle client)
+    {"id": "anthropic.claude-opus-5-5", "label": "Claude Opus 5.5 (Mantle · messages)"},
+    {"id": "anthropic.claude-sonnet-5-5", "label": "Claude Sonnet 5.5 (Mantle · messages)"},
+    {"id": "anthropic.claude-haiku-5-5", "label": "Claude Haiku 5.5 (Mantle · messages)"},
     {"id": "anthropic.claude-haiku-4-5", "label": "Claude Haiku 4.5 (Mantle · messages)"},
     {"id": "anthropic.claude-opus-5", "label": "Claude Opus 5 (Mantle · messages · us-east-1 / EU / Melbourne)"},
     {"id": "anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (Mantle · messages · us-east-1 / EU / Melbourne)"},
@@ -127,6 +130,9 @@ _CATALOG: list[dict[str, Any]] = [
         "models": [
             {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"},
             {"id": "claude-fable-5-1", "label": "Claude Fable 5.1"},
+            {"id": "claude-opus-5-5", "label": "Claude Opus 5.5"},
+            {"id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5"},
+            {"id": "claude-haiku-5-5", "label": "Claude Haiku 5.5"},
             {"id": "claude-opus-5", "label": "Claude Opus 5"},
             {"id": "claude-sonnet-5", "label": "Claude Sonnet 5"},
             {"id": "claude-opus-4-8", "label": "Claude Opus 4.8"},
@@ -141,6 +147,7 @@ _CATALOG: list[dict[str, Any]] = [
         "env_key": "GEMINI_API_KEY",
         "models": [
             {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash"},
+            {"id": "gemini-4-argon", "label": "Gemini 4 Argon"},
             {"id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash"},
             {"id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash"},
             {"id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash"},
@@ -203,6 +210,10 @@ _CATALOG: list[dict[str, Any]] = [
                 "id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
                 "label": "Claude 3.5 Sonnet v2",
             },
+            {"id": "us.anthropic.claude-opus-5-5", "label": "Claude Opus 5.5 (US)"},
+            {"id": "us.anthropic.claude-sonnet-5-5", "label": "Claude Sonnet 5.5 (US)"},
+            {"id": "us.anthropic.claude-haiku-5-5", "label": "Claude Haiku 5.5 (US)"},
+            {"id": "global.anthropic.claude-haiku-5-5", "label": "Claude Haiku 5.5 (Global)"},
             {"id": "us.anthropic.claude-opus-5", "label": "Claude Opus 5 (US)"},
             {"id": "us.anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (US)"},
             {"id": "us.anthropic.claude-fable-5-1", "label": "Claude Fable 5.1 · requires AWS review opt-in (US)"},
