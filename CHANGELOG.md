@@ -1,3 +1,13 @@
+# 1.0.203
+
+- Require Python clawagents **6.20.91**, which detects Gemini `prompt_feedback.block_reason` and candidate content blocks in streaming and non-streaming modes, automatically falls back from `gemini-4-argon` to `gemini-3.8-flash` on false-positive prompt blocks (e.g. `BlockedReason.OTHER` on bio-modeling repository names), surfaces explicit block reasons when unrecoverable, and records `finish_reason` on Gemini responses.
+
+# 1.0.202
+
+- Preserve in-flight turn timelines, tool cards, and assistant streaming output across WebSocket and webview reconnections, and restore `+` new-conversation creation while a turn is active or reconnecting.
+- Keep warning status banners (`⚠ …`) visible above the terminal `Done` card when a turn finishes without emitting an assistant response.
+- Require Python clawagents **6.20.90** for per-turn model route credential synchronization.
+
 # 1.0.201
 
 - Add **Gemini 4 Argon** (`gemini-4-argon`) and **Claude 5.5** (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) to direct provider, native AWS Bedrock (`us.` and `global.` profiles), and AWS Bedrock Mantle catalogs and offline model pickers.
