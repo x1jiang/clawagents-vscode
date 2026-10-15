@@ -266,6 +266,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
    *  switching away and back can reconstruct the unfinished response without
    *  retaining one object per streamed token. */
   private liveRunEvents: Map<string, HostToWebview[]> = new Map();
+  /** Conversations whose SSE stream disconnected while the sidecar turn is still running. */
+  private readonly detachedChatPollers = new Set<string>();
   /** Image attachments staged for the next send (base64 stays host-side). */
   private pendingImages: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   /** File attachments (PDF/DOCX) staged for the next send — same contract. */
@@ -567,9 +569,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     const mappedUsage = savedUsage && typeof savedUsage === "object"
       ? mapAgentEvent("usage", savedUsage as Record<string, unknown>)
       : null;
+    const isBusy = this.runs.isActive(chatId) || Boolean(chat.running);
     this.post({
       type: "restore",
-      usage: !this.runs.isActive(chatId) && mappedUsage?.type === "usage" ? mappedUsage : undefined,
+      usage: !isBusy && mappedUsage?.type === "usage" ? mappedUsage : undefined,
       items: eventsToItems(events, this.eventsOffset),
       draft: draft ?? this.draftForChat(chatId),
       mode: (chat.mode as AgentMode) || this.mode,
@@ -580,7 +583,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       interaction: this.interaction,
       caveman: this.caveman,
       goal: this.goalMode,
-      busy: this.runs.isActive(chatId),
+      busy: this.runs.isActive(chatId) || Boolean(chat.running),
       sessionCostUsd: sessionCostFromChat(chat),
       eventsOffset: this.eventsOffset,
       eventsTotal: Number(chat.events_total ?? events.length) || events.length,
@@ -688,6 +691,47 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (event.type === "user_echo" && event.text === lastPersistedUser) continue;
       this.post(event);
     }
+  }
+
+  /** Poll a sidecar turn that survived an SSE disconnect or webview reload. */
+  private watchDetachedChatRun(chatId: string): void {
+    if (!chatId || this.detachedChatPollers.has(chatId) || this.runs.isActive(chatId)) {
+      return;
+    }
+    this.detachedChatPollers.add(chatId);
+    this.post({ type: "thread_run_state", chatId, running: true });
+    let lastEventsTotal = -1;
+    const poll = async (): Promise<void> => {
+      try {
+        if (this.runs.isActive(chatId)) {
+          this.detachedChatPollers.delete(chatId);
+          return;
+        }
+        const chat = await this.gateway.getChat(chatId, { tail: 400 });
+        const stillRunning = Boolean(chat.running);
+        const eventsTotal = Number(chat.events_total ?? 0) || 0;
+        if (this.chatId === chatId && (eventsTotal !== lastEventsTotal || !stillRunning)) {
+          lastEventsTotal = eventsTotal;
+          await this.postChatRestore(chatId, chat);
+        }
+        if (stillRunning) {
+          setTimeout(() => {
+            void poll();
+          }, 1500);
+          return;
+        }
+        this.detachedChatPollers.delete(chatId);
+        this.post({ type: "thread_run_state", chatId, running: false });
+        await this.refreshChats();
+        this.drainQueueIfIdle(chatId);
+      } catch {
+        this.detachedChatPollers.delete(chatId);
+        this.post({ type: "thread_run_state", chatId, running: false });
+      }
+    };
+    setTimeout(() => {
+      void poll();
+    }, 1000);
   }
 
   private async loadOlderChatEvents(): Promise<void> {
@@ -887,6 +931,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               draft: this.draftForChat(startedOn),
               mode: this.mode,
               chatId: startedOn,
+              restoreReason: "new_chat",
               autoApprove: this.autoApprove,
               interaction: this.interaction,
               caveman: this.caveman,
@@ -936,6 +981,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         draft: unassignedDraft,
         mode: this.mode,
         chatId: this.chatId,
+        restoreReason: "new_chat",
         autoApprove: this.autoApprove,
         interaction: this.interaction,
         caveman: this.caveman,
@@ -1086,7 +1132,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     try {
       const chats = ((await this.gateway.listChats(query)) as ChatSummary[]).map((chat) => ({
         ...chat,
-        running: this.runs.isActive(chat.id),
+        running: this.runs.isActive(chat.id) || Boolean(chat.running),
       }));
       for (const chat of chats) {
         const route = modelRouteFromChat(chat);
@@ -1225,8 +1271,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     const chatId = this.chatId;
     if (!chatId) return;
     try {
-      const chat = await this.gateway.getChat(chatId, { tail: 400 });
-      if (this.chatId === chatId) await this.postChatRestore(chatId, chat);
+      const wasRunning = this.runs.isActive(chatId);
+      let chat = await this.gateway.getChat(chatId, { tail: 400 });
+      if (wasRunning && !this.runs.isActive(chatId)) {
+        chat = await this.gateway.getChat(chatId, { tail: 400 });
+      }
+      if (this.chatId === chatId) {
+        await this.postChatRestore(chatId, chat);
+        if (this.runs.isActive(chatId)) {
+          this.replayLiveRun(chatId, chat);
+        } else if (Boolean(chat.running)) {
+          this.watchDetachedChatRun(chatId);
+        }
+        this.flushPendingInteractions(chatId, this.sideChats.get(chatId));
+        this.post({ type: "chat_attention", chatId, clear: true });
+      }
     } catch (error) {
       if (this.chatId === chatId && !this.runs.isActive(chatId) && isChatNotFoundError(error, chatId)) {
         const draft = this.draftForChat(chatId);
@@ -1681,6 +1740,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.postChatRestore(msg.chatId, chat);
           if (this.runs.isActive(msg.chatId)) {
             this.replayLiveRun(msg.chatId, chat);
+          } else if (Boolean(chat.running)) {
+            this.watchDetachedChatRun(msg.chatId);
           }
           // Flush prompts that arrived while this chat — or its side chat —
           // was in the background. Side-chat runs are keyed by the fork id,
@@ -2390,10 +2451,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             "aws_region",
             "wire_api",
           ] as const;
+          const routeKeys = [
+            "provider",
+            "model",
+            "bedrock_mode",
+            "wire_api",
+            "reasoning_effort",
+          ] as const;
           const changed = (keys: readonly string[]) =>
             keys.some((k) => JSON.stringify(previous[k] ?? null) !== JSON.stringify(settings[k] ?? null));
           const skillsChanged = changed(skillKeys);
           const catalogChanged = changed(catalogKeys);
+          const routeChanged = changed(routeKeys);
           // Provider/endpoint changes refresh the local catalog only. A live
           // probe belongs to an explicit check; it cannot be allowed to time
           // out and disrupt an in-flight chat.
@@ -2403,6 +2472,34 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               providers = await this.gateway.getProviders({ probe: false });
             } catch {
               /* catalog refresh is best-effort */
+            }
+          }
+          if (routeChanged && this.chatId) {
+            const activeChatId = this.chatId;
+            const rawBedrockMode = String(settings.bedrock_mode || "iam");
+            const bedrockMode: "iam" | "mantle" | "bag" =
+              rawBedrockMode === "mantle" || rawBedrockMode === "bag" ? rawBedrockMode : "iam";
+            const nextRoute: ModelRoute = {
+              provider: String(settings.provider || "auto"),
+              model: String(settings.model || ""),
+              reasoning_effort: String(settings.reasoning_effort || ""),
+              wire_api: String(settings.wire_api || "auto"),
+              bedrock_mode: bedrockMode,
+              fast_mode: Boolean(settings.fast_mode),
+            };
+            try {
+              const patched = await this.gateway.patchChat(activeChatId, {
+                model_route: nextRoute,
+              });
+              const resolvedRoute = modelRouteFromChat(patched) ?? nextRoute;
+              this.modelRoutes.set(activeChatId, resolvedRoute);
+              this.post({
+                type: "chat_model_route",
+                chatId: activeChatId,
+                modelRoute: resolvedRoute,
+              });
+            } catch {
+              /* best-effort active chat route sync */
             }
           }
           await this.postSettingsWithKeyFlags(settings, providers, "ok", msg.revision);
@@ -3801,18 +3898,34 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       if (!signal.aborted) {
-        const errorEvent = {
-          type: "error",
-          message: err instanceof Error ? err.message : String(err),
-          chatId: runChatId,
-        } as HostToWebview;
-        this.rememberLiveRunEvent(runChatId, errorEvent);
-        this.post(errorEvent);
+        const meta = await this.gateway.getChatMeta(runChatId).catch(() => undefined);
+        if (meta && Boolean(meta.running)) {
+          this.post({
+            type: "status",
+            message: "Stream reconnecting — syncing turn progress…",
+            chatId: runChatId,
+          });
+        } else {
+          const errorEvent = {
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+            chatId: runChatId,
+          } as HostToWebview;
+          this.rememberLiveRunEvent(runChatId, errorEvent);
+          this.post(errorEvent);
+        }
       }
     } finally {
       this.runs.finish(run);
       await this.applyPendingSidecarSettings();
       this.liveRunEvents.delete(runChatId);
+      const meta = !signal.aborted
+        ? await this.gateway.getChatMeta(runChatId).catch(() => undefined)
+        : undefined;
+      if (meta && Boolean(meta.running)) {
+        this.watchDetachedChatRun(runChatId);
+        return;
+      }
       this.post({ type: "thread_run_state", chatId: runChatId, running: false });
       // A job the turn detached is now unattended: the run's event stream is
       // closed, so polling is the only thing that will notice it finishing.

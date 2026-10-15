@@ -212,8 +212,8 @@ export type HostToWebview =
       chatId?: string | null;
       /** Chat title from meta (used for fork banner; may precede chats list refresh). */
       chatTitle?: string;
-      /** Allows an intentional fork restore to replace the currently displayed chat. */
-      restoreReason?: "fork";
+      /** Allows an intentional fork or new-chat restore to replace the currently displayed chat. */
+      restoreReason?: "fork" | "new_chat";
       autoApprove?: AutoApprove;
       interaction?: InteractionStyle;
       caveman?: boolean;

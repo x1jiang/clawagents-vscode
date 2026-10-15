@@ -188,6 +188,13 @@ def _cancel_all_runs() -> list[str]:
     return stranded
 
 
+def _is_chat_running(chat_id: str | None) -> bool:
+    if not chat_id:
+        return False
+    with _run_lock:
+        return any(run.get("chat_id") == chat_id for run in _active_runs.values())
+
+
 def _interject_runs(text: str, chat_id: str | None = None) -> int:
     """Queue a mid-turn user redirect on matching active run(s).
 
@@ -1260,7 +1267,11 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return search_chats(q) if q else list_chats()
+        items = search_chats(q) if q else list_chats()
+        return [
+            {**chat, "running": _is_chat_running(str(chat.get("id") or ""))}
+            for chat in items
+        ]
 
     @app.get("/chat-groups")
     async def chat_groups_list(request: Request):
@@ -1330,7 +1341,7 @@ def create_app() -> FastAPI:
         meta = get_chat_meta(chat_id)
         if not meta:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
-        return meta
+        return {**meta, "running": _is_chat_running(chat_id)}
 
     @app.get("/chats/{chat_id}")
     async def chats_get(chat_id: str, request: Request):
@@ -1340,6 +1351,7 @@ def create_app() -> FastAPI:
         meta = get_chat(chat_id)
         if not meta:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
+        running = _is_chat_running(chat_id)
         # Paginate by default so long sessions do not load megabytes of JSONL.
         # ?all=1 restores the previous full-log behaviour for tooling.
         qs = request.query_params
@@ -1347,6 +1359,7 @@ def create_app() -> FastAPI:
             events = read_ui_events(chat_id)
             return {
                 **meta,
+                "running": running,
                 "events": events,
                 "events_total": len(events),
                 "events_offset": 0,
@@ -1370,6 +1383,7 @@ def create_app() -> FastAPI:
         page = read_ui_events_page(chat_id, tail=tail, before=before, around=around)
         return {
             **meta,
+            "running": running,
             "events": page["events"],
             "events_total": page["total"],
             "events_offset": page["offset"],
@@ -2029,6 +2043,7 @@ def create_app() -> FastAPI:
                     )
             except asyncio.CancelledError:
                 record_turn(error=True)
+                append_ui_event(chat_id, {"kind": "status", "text": "Cancelled"})
                 sse("error", {"error": "cancelled"})
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
@@ -2053,28 +2068,21 @@ def create_app() -> FastAPI:
                     )
                 close_stream()
 
-        run_task = asyncio.create_task(_run())
+        asyncio.create_task(_run())
 
         async def _stream():
-            try:
-                while True:
-                    # Keep-alive comment every 15s of silence so the client
-                    # can tell a quiet long-running tool from a hung sidecar
-                    # (its idle timeout is a multiple of this interval).
-                    try:
-                        msg = await asyncio.wait_for(event_queue.get(), timeout=15.0)
-                    except asyncio.TimeoutError:
-                        yield ": ping\n\n"
-                        continue
-                    if msg is None:
-                        break
-                    yield msg
-            finally:
-                # Client disconnected mid-run: stop *this* agent turn instead
-                # of letting it burn tokens into a closed pipe. Other turns
-                # are unaffected.
-                if not run_task.done():
-                    _cancel_run(run_id)
+            while True:
+                # Keep-alive comment every 15s of silence so the client
+                # can tell a quiet long-running tool from a hung sidecar
+                # (its idle timeout is a multiple of this interval).
+                try:
+                    msg = await asyncio.wait_for(event_queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                if msg is None:
+                    break
+                yield msg
 
         return StreamingResponse(
             _stream(),

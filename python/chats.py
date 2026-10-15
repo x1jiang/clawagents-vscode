@@ -465,7 +465,34 @@ def settings_with_model_route(
     elif target == GEMMA_PROFILE and not merged.get("base_url"):
         merged["base_url"] = gemma_base_url()
         merged["trust_custom_base_url"] = False
+    # Clear leftover local/gateway base_url when switching a thread away from
+    # Bedrock, Ollama, or Gemma to another provider, or when switching Bedrock
+    # from Mantle/BAG to native IAM.
+    cur_base = str(merged.get("base_url") or "").strip().rstrip("/")
+    gemma_default = gemma_base_url().rstrip("/")
+    if target != GEMMA_PROFILE and cur_base and cur_base == gemma_default:
+        merged["base_url"] = ""
+        merged["trust_custom_base_url"] = False
+    if original == "ollama" and target != "ollama" and cur_base in {
+        "http://localhost:11434/v1",
+        "http://127.0.0.1:11434/v1",
+    }:
+        merged["base_url"] = ""
+        merged["trust_custom_base_url"] = False
+    if original == "bedrock" and target not in {"bedrock", "auto"}:
+        if "bedrock-mantle." in cur_base or cur_base.endswith("/api/v1"):
+            merged["base_url"] = ""
+            merged["trust_custom_base_url"] = False
+    if target == "bedrock":
+        t_mode = str(merged.get("bedrock_mode") or "iam").strip().lower()
+        o_mode = str(settings.get("bedrock_mode") or "iam").strip().lower()
+        if t_mode == "iam" and (
+            o_mode in {"mantle", "bag"} or "bedrock-mantle." in cur_base
+        ):
+            merged["base_url"] = ""
+            merged["trust_custom_base_url"] = False
     return merged
+
 
 
 def _migrate_model_route(meta: dict[str, Any], path: Path) -> dict[str, Any]:
@@ -1685,19 +1712,21 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
             "ssl_verify": bool(settings.get("ssl_verify", True)),
         }
     base_url = (settings.get("base_url") or "").strip() or None
-    mode = str(settings.get("bedrock_mode") or "iam").strip().lower()
+    raw_mode = str(settings.get("bedrock_mode") or "").strip().lower()
+    mode = raw_mode or "iam"
     # xAI rides the OpenAI-compatible wire; the engine supplies
     # https://api.x.ai/v1 and the key comes via resolve_api_key below.
     non_bedrock = provider in {"openai", "anthropic", "gemini", "ollama", "xai"}
-    # Stale Mantle/BAG after Provider switch must not ride along.
+    # Stale Mantle/BAG/Gemma after Provider switch must not ride along.
     if base_url and non_bedrock:
         bag_like = (
             base_url.rstrip("/").endswith("/api/v1")
             and "bedrock-mantle." not in base_url
         )
+        gemma_like = base_url.rstrip("/") == gemma_base_url().rstrip("/")
         if "bedrock-mantle." in base_url:
             base_url = None
-        elif provider in {"anthropic", "gemini"} and bag_like:
+        elif provider in {"openai", "anthropic", "gemini", "xai"} and (bag_like or gemma_like):
             base_url = None
     # A workspace OpenAI-compatible proxy is for the OpenAI/Ollama route. Do
     # not leak it into native provider clients after a thread-only switch.
@@ -1707,10 +1736,13 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         mantle_host = "bedrock-mantle." in base_url
         bag_host = base_url.rstrip("/").endswith("/api/v1")
         # Keep recognized gateway URLs for legacy settings that predate the
-        # explicit bedrock_mode field. A normal OpenAI proxy (/v1) is still not
-        # a valid native Bedrock endpoint.
-        if (mode == "mantle" and not mantle_host) or (mode == "bag" and not bag_host) or (
-            mode == "iam" and not (mantle_host or bag_host)
+        # explicit bedrock_mode field. When bedrock_mode is explicitly "iam",
+        # drop a leftover Mantle URL so IAM uses native boto3.
+        if (
+            (mode == "mantle" and not mantle_host)
+            or (mode == "bag" and not bag_host)
+            or (mode == "iam" and not (mantle_host or bag_host))
+            or (raw_mode == "iam" and mantle_host)
         ):
             base_url = None
     if base_url:
@@ -2334,6 +2366,7 @@ async def run_chat_turn(
             "context",
             "warn",
             "error",
+            "retry",
         }:
             on_event(kind, data or {})
             return
@@ -2457,7 +2490,7 @@ async def run_chat_turn(
         # tool_skipped has no typed equivalent; without forwarding it, a
         # Plan-mode / permission denial leaves the UI with no tool card
         # update (or a stuck "running" card if tool_call was shown).
-        if kind in ("warn", "error", "tool_skipped"):
+        if kind in ("warn", "error", "retry", "tool_skipped"):
             payload = data or {}
             if kind == "tool_skipped":
                 payload = {**payload, "success": False}
@@ -2466,6 +2499,27 @@ async def run_chat_turn(
                     "tool_completed",
                     payload,
                 )
+            elif kind == "error":
+                err_text = str(
+                    payload.get("message")
+                    or payload.get("error")
+                    or payload.get("text")
+                    or ""
+                ).strip()
+                if err_text:
+                    append_ui_event(chat_id, {"kind": "error", "text": err_text})
+            elif kind == "warn":
+                warn_text = str(
+                    payload.get("message") or payload.get("text") or ""
+                ).strip()
+                if (
+                    warn_text
+                    and not warn_text.startswith("tool output crushed/stored id=")
+                    and warn_text not in ("cancelled", "interrupted")
+                ):
+                    append_ui_event(
+                        chat_id, {"kind": "status", "text": f"⚠ {warn_text}"}
+                    )
             on_event(kind, payload)
             return
         _forward_legacy(kind, data or {})
@@ -2726,23 +2780,48 @@ async def run_chat_turn(
     # Safety net: if the run produced a final answer but no assistant_message
     # event reached the stream (e.g. older runtime without typed emission),
     # surface it so the turn is never silently blank.
-    if not saw_assistant and out_text.strip() and not cancel_check():
+    is_cancelled_turn = cancel_check() or out_text.strip() in (
+        "[cancelled]",
+        "[interrupted]",
+    )
+    if (
+        not saw_assistant
+        and out_text.strip()
+        and not is_cancelled_turn
+        and status != "error"
+    ):
         tool_stage_started_at = append_ui_event(
             chat_id,
             {"kind": "assistant", "text": out_text},
         )
         on_event("assistant_message", {"content": out_text})
+    elif (
+        not saw_assistant
+        and not out_text.strip()
+        and status != "error"
+        and not is_cancelled_turn
+    ):
+        empty_msg = (
+            "Model finished without emitting a response or tool call "
+            "(output token limit or reasoning budget was exhausted). "
+            "Try sending again or lowering Reasoning Effort."
+        )
+        append_ui_event(chat_id, {"kind": "status", "text": f"⚠ {empty_msg}"})
+        on_event("warn", {"message": empty_msg})
 
-    append_ui_event(
-        chat_id,
-        {
-            "kind": "done",
-            "status": status,
-            "iterations": iterations,
-            "result": out_text,
-            "usage": usage_payload,
-        },
-    )
+    if is_cancelled_turn:
+        append_ui_event(chat_id, {"kind": "status", "text": "Cancelled"})
+    else:
+        append_ui_event(
+            chat_id,
+            {
+                "kind": "done",
+                "status": status,
+                "iterations": iterations,
+                "result": out_text,
+                "usage": usage_payload,
+            },
+        )
     patch_chat(
         chat_id,
         message_count=int(latest.get("message_count") or 0) + 1,

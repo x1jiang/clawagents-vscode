@@ -153,7 +153,23 @@ export function eventsToItems(
           snapshotRel: file?.snapshot_rel ? String(file.snapshot_rel) : undefined,
         });
       }
+    } else if (kind === "error") {
+      const text = String(event.text || event.message || event.error || "").trim();
+      if (text) {
+        items.push({ kind: "error", text });
+      }
+    } else if (kind === "status") {
+      const text = String(event.text || event.message || "").trim();
+      if (text) {
+        items.push({ kind: "status", text });
+      }
     } else if (kind === "done") {
+      const rawStatus = String(event.status || "").trim().toLowerCase();
+      const rawResult = String(event.result || "").trim();
+      if (rawStatus === "cancelled" || rawResult === "[cancelled]" || rawResult === "[interrupted]") {
+        items.push({ kind: "status", text: "Cancelled" });
+        continue;
+      }
       const usage = record(event.usage);
       const runCost = usage?.run_cost_usd;
       items.push({

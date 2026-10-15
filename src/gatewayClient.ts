@@ -290,6 +290,14 @@ export function mapAgentEvent(
         tool: String(data.tool_name ?? data.name ?? data.tool ?? "tool"),
         reason: "Library require_approval",
       };
+    case "retry": {
+      const reason = String(data.reason ?? data.message ?? "transient error");
+      const attempt = num(data.attempt);
+      return {
+        type: "status",
+        message: `⚠ Retrying${attempt ? ` (attempt ${attempt})` : ""}: ${reason}`,
+      };
+    }
     case "warn":
       return { type: "status", message: `⚠ ${String(data.message ?? "warning")}` };
     case "error":
@@ -647,9 +655,9 @@ export class GatewayClient {
             Accept: "text/event-stream",
           },
           // Socket idle timeout (resets on every byte). The sidecar sends a
-          // keep-alive comment every 15s, so 60s of true silence means it is
+          // keep-alive comment every 15s, so 300s of true silence means it is
           // hung/deadlocked — surface an error instead of spinning forever.
-          timeout: 60_000,
+          timeout: 300_000,
         },
         (res) => {
           if (res.statusCode && res.statusCode >= 400) {
@@ -801,7 +809,7 @@ export class GatewayClient {
         emit({
           type: "error",
           message:
-            "No data from the sidecar for 60s (keep-alives stopped) — it looks hung. Try Restart Sidecar.",
+            "No data from the sidecar for 300s (keep-alives stopped) — it looks hung. Try Restart Sidecar.",
         });
         req.destroy();
         resolve();

@@ -249,6 +249,7 @@ import {
   GEMMA_DEFAULT_BASE_URL,
   modelFitsProvider,
   isWeakAutoDefaultModel,
+  inferProviderForModel,
 } from "./providerCatalog";
 
 
@@ -2323,6 +2324,15 @@ export function App() {
     for (const oldRevision of pendingSettingsSaves.current.keys()) {
       if (oldRevision < revision - 32) pendingSettingsSaves.current.delete(oldRevision);
     }
+    if (
+      ["provider", "model", "bedrock_mode", "wire_api", "reasoning_effort"].some((k) =>
+        Object.prototype.hasOwnProperty.call(patch, k),
+      )
+    ) {
+      const nextRoute = modelRouteForSettings(localSettings);
+      threadModelRouteRef.current = nextRoute;
+      setThreadModelRoute(nextRoute);
+    }
     post({ type: "save_settings", revision, settings: patch });
     return revision;
   }, []);
@@ -3173,7 +3183,8 @@ export function App() {
           setStats(msg.data);
           break;
         case "restore": {
-          const pendingNew = pendingNewChatRef.current;
+          const pendingNew =
+            pendingNewChatRef.current || msg.restoreReason === "new_chat";
           pendingNewChatRef.current = false;
           const intentionalForkRestore =
             msg.restoreReason === "fork" && pendingForkRef.current;
@@ -3185,6 +3196,9 @@ export function App() {
             !intentionalForkRestore
           ) {
             break;
+          }
+          if (msg.restoreReason === "new_chat") {
+            setForkNotice(null);
           }
           const restoredChatId =
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
@@ -3314,7 +3328,11 @@ export function App() {
           setItems((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
-            if (last?.kind === "status") {
+            if (
+              last?.kind === "status" &&
+              !last.text.startsWith("⚠") &&
+              !isTurnTerminal("status", last.text)
+            ) {
               next[next.length - 1] = { kind: "status", text: msg.message };
               return next;
             }
@@ -3641,7 +3659,12 @@ export function App() {
               threadModelRouteRef.current?.fast_mode === true,
             );
           setItems((prev) => [
-            ...prev.filter((it) => it.kind !== "status"),
+            ...prev.filter(
+              (it) =>
+                it.kind !== "status" ||
+                it.text.startsWith("⚠") ||
+                isTurnTerminal("status", it.text),
+            ),
             {
               kind: "status",
               text: `${formatCompletionStatus(msg.status)}${msg.iterations != null ? ` · ${msg.iterations} iters` : ""}${
@@ -4622,7 +4645,28 @@ export function App() {
     const region = String(threadSettings.aws_region || settings.aws_region || "").trim()
       || "us-east-1";
     let next: Record<string, unknown> = { ...threadSettings };
-    if (
+    if (choice === "auto") {
+      const savedProv = String(settings.provider || "auto").trim();
+      const savedMod = String(settings.model || "").trim();
+      if (savedProv && savedProv !== "auto" && savedMod) {
+        next = {
+          ...next,
+          provider: savedProv,
+          model: savedMod,
+          bedrock_mode: String(settings.bedrock_mode || "iam"),
+          wire_api: String(settings.wire_api || "auto"),
+          reasoning_effort: String(settings.reasoning_effort || ""),
+        };
+      } else {
+        next = {
+          ...next,
+          provider: ("provider" in preferredPick && preferredPick.provider) || "auto",
+          model: preferredPick.model || savedMod || defaultModelForProvider("openai"),
+          bedrock_mode: "iam",
+          wire_api: "auto",
+        };
+      }
+    } else if (
       choice === BEDROCK_SELECT_IAM ||
       choice === BEDROCK_SELECT_MANTLE ||
       choice === BEDROCK_SELECT_BAG
@@ -4630,9 +4674,10 @@ export function App() {
       const mode = choice === BEDROCK_SELECT_MANTLE
         ? "mantle"
         : choice === BEDROCK_SELECT_BAG ? "bag" : "iam";
+      const catalogFirst = providerCatalog.find((p) => p.id === choice)?.models?.[0]?.id;
       const nextModel = mode === "mantle"
-        ? MANTLE_DEFAULT_MODEL
-        : "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+        ? (catalogFirst || MANTLE_DEFAULT_MODEL)
+        : (catalogFirst || "us.anthropic.claude-sonnet-4-5-20250929-v1:0");
       next = {
         ...next,
         provider: "bedrock",
@@ -4643,7 +4688,10 @@ export function App() {
       };
     } else {
       next.provider = choice;
-      next.model = providers.find((p) => p.id === choice)?.models?.[0]?.id || defaultModelForProvider(choice);
+      next.model =
+        providerCatalog.find((p) => p.id === choice)?.models?.[0]?.id ||
+        providers.find((p) => p.id === choice)?.models?.[0]?.id ||
+        defaultModelForProvider(choice);
       next.bedrock_mode = "iam";
       next.wire_api = "auto";
     }
@@ -4656,21 +4704,74 @@ export function App() {
   };
 
   const selectModel = (next: string) => {
-    const nextThreadSettings: Record<string, unknown> = { ...threadSettings, model: next };
-    if (isMantleSettings(nextThreadSettings) && next) {
-      nextThreadSettings.wire_api = mantleWireApiForModel(next);
+    let resolvedModel = next;
+    if (!resolvedModel) {
+      if (selectedProvider === "bedrock") {
+        resolvedModel =
+          String(threadSettings.bedrock_mode || "iam") === "mantle"
+            ? MANTLE_DEFAULT_MODEL
+            : "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+      } else if (selectedProvider === "auto") {
+        resolvedModel =
+          preferredPick.model ||
+          String(settings.model || "") ||
+          defaultModelForProvider("openai");
+      } else {
+        resolvedModel =
+          providerCatalog.find((p) => p.id === selectedProvider)?.models?.[0]?.id ||
+          defaultModelForProvider(selectedProvider);
+      }
     }
-    nextThreadSettings.wire_api = compatibleWireApiForModel(next,
-      String(nextThreadSettings.provider || "auto"), String(nextThreadSettings.wire_api || "auto"));
-    nextThreadSettings.reasoning_effort = compatibleEffortForModel(next, String(nextThreadSettings.reasoning_effort || ""));
-    if (!modelSupportsFastMode(next, String(nextThreadSettings.provider || "auto"), String(nextThreadSettings.base_url || ""))) {
+    const nextThreadSettings: Record<string, unknown> = {
+      ...threadSettings,
+      model: resolvedModel,
+    };
+    const inferredChoice =
+      typeof inferProviderForModel === "function"
+        ? inferProviderForModel(
+            resolvedModel,
+            typeof providerCatalog !== "undefined" ? providerCatalog : [],
+            typeof threadProviderMenuValue !== "undefined" ? threadProviderMenuValue : "auto",
+          )
+        : null;
+    if (inferredChoice && inferredChoice !== "auto") {
+      if (inferredChoice.startsWith("bedrock:")) {
+        const mode = inferredChoice.slice("bedrock:".length) || "iam";
+        nextThreadSettings.provider = "bedrock";
+        nextThreadSettings.bedrock_mode = mode;
+        nextThreadSettings.wire_api =
+          mode === "mantle" ? mantleWireApiForModel(resolvedModel) : "auto";
+      } else {
+        nextThreadSettings.provider = inferredChoice;
+        nextThreadSettings.bedrock_mode = "iam";
+      }
+    }
+    if (isMantleSettings(nextThreadSettings) && resolvedModel) {
+      nextThreadSettings.wire_api = mantleWireApiForModel(resolvedModel);
+    }
+    nextThreadSettings.wire_api = compatibleWireApiForModel(
+      resolvedModel,
+      String(nextThreadSettings.provider || "auto"),
+      String(nextThreadSettings.wire_api || "auto"),
+    );
+    nextThreadSettings.reasoning_effort = compatibleEffortForModel(
+      resolvedModel,
+      String(nextThreadSettings.reasoning_effort || ""),
+    );
+    if (
+      !modelSupportsFastMode(
+        resolvedModel,
+        String(nextThreadSettings.provider || "auto"),
+        String(nextThreadSettings.base_url || ""),
+      )
+    ) {
       nextThreadSettings.fast_mode = false;
     }
     if (persistThreadModelRoute(modelRouteForSettings(nextThreadSettings))) {
-      setModel(next || "default");
+      setModel(resolvedModel || "default");
       return;
     }
-    selectDefaultModel(next);
+    selectDefaultModel(resolvedModel);
   };
 
   const selectDefaultModel = (next: string) => {

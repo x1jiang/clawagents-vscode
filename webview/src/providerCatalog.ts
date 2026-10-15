@@ -444,8 +444,10 @@ export function modelsForKeys(
     selectedProvider === "auto"
       ? visibleProviders.filter(
           (p) =>
-            !p.id.startsWith("bedrock-") ||
-            p.id === (autoBedrockSelectId || BEDROCK_SELECT_IAM),
+            (!p.id.startsWith("bedrock-") ||
+              p.id === (autoBedrockSelectId || BEDROCK_SELECT_IAM)) &&
+            p.id !== "meta" &&
+            p.id !== "profile:gemma-agentic",
         )
       : visibleProviders.filter((p) => p.id === selectedProvider);
   const seen = new Set<string>();
@@ -602,3 +604,63 @@ export function effectiveProviderLabel(
   }
   return "auto";
 }
+
+/** Infer the provider choice ID (including bedrock-iam / bedrock-mantle / bedrock-bag) that owns a model ID. */
+export function inferProviderForModel(
+  modelId: string,
+  providers: Provider[],
+  currentChoice?: string,
+): string {
+  const mid = String(modelId || "").trim();
+  const cur = String(currentChoice || "auto").trim();
+  if (!mid) {
+    return cur || "auto";
+  }
+  if (cur && cur !== "auto") {
+    const curRow = providers.find((p) => p.id === cur);
+    if (curRow && (curRow.models || []).some((m) => m.id === mid)) {
+      return cur;
+    }
+    const baseProv = cur.startsWith("bedrock-") ? "bedrock" : cur;
+    if (baseProv !== "bedrock" && modelFitsProvider(mid, baseProv)) {
+      return cur;
+    }
+    if (cur === BEDROCK_SELECT_IAM && isNativeBedrockModelId(mid)) {
+      return cur;
+    }
+    if (cur === BEDROCK_SELECT_MANTLE && isMantleCatalogModelId(mid)) {
+      return cur;
+    }
+    if (cur === BEDROCK_SELECT_BAG && isNativeBedrockModelId(mid)) {
+      return cur;
+    }
+  }
+  for (const p of providers) {
+    if (p.available === false) continue;
+    if ((p.models || []).some((m) => m.id === mid)) {
+      return p.id;
+    }
+  }
+  for (const p of providers) {
+    if ((p.models || []).some((m) => m.id === mid)) {
+      return p.id;
+    }
+  }
+  if (isNativeBedrockModelId(mid)) return BEDROCK_SELECT_IAM;
+  if (isMantleCatalogModelId(mid)) return BEDROCK_SELECT_MANTLE;
+  for (const candidate of [
+    "openai",
+    "anthropic",
+    "gemini",
+    "xai",
+    "ollama",
+    "profile:gemma-agentic",
+    "meta",
+  ]) {
+    if (modelFitsProvider(mid, candidate)) {
+      return candidate;
+    }
+  }
+  return cur || "auto";
+}
+
