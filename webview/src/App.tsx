@@ -138,8 +138,12 @@ type ChatItem =
       kind: "ask";
       requestId: string;
       question: string;
+      secret?: boolean;
+      command?: string;
+      revealSecret?: boolean;
       draft?: string;
       resolved?: boolean;
+      skipped?: boolean;
     }
   | {
       kind: "plan_approval";
@@ -492,6 +496,27 @@ function resolvePerm(
   );
 }
 
+const NON_SECRET_ASK_RE =
+  /(?:\(yes\/no(?:\/\[fingerprint\])?\)|continue connecting|authenticity of host|key fingerprint is)/i;
+const SECRET_ASK_RE =
+  /\b(?:password|passphrase|secret|api[_\s-]?key|access[_\s-]?token|auth[_\s-]?token|bearer[_\s-]?token|private[_\s-]?key|pin|otp|verification\s+code|two-factor|2fa|sudo\s+password)\b/i;
+
+function isSecretAskItem(item: { question: string; secret?: boolean }): boolean {
+  if (typeof item.secret === "boolean") {
+    return item.secret;
+  }
+  const q = (item.question || "").trim();
+  if (!q || NON_SECRET_ASK_RE.test(q)) {
+    return false;
+  }
+  return SECRET_ASK_RE.test(q);
+}
+
+function isYesNoAskItem(item: { question: string; secret?: boolean }): boolean {
+  if (isSecretAskItem(item)) return false;
+  return /\(yes\/no/i.test(item.question || "");
+}
+
 function resolveAsk(
   requestId: string,
   answer: string,
@@ -501,7 +526,9 @@ function resolveAsk(
   post({ type: "ask_user_reply", requestId, answer, skip });
   setItems((prev) =>
     prev.map((it) =>
-      it.kind === "ask" && it.requestId === requestId ? { ...it, resolved: true } : it,
+      it.kind === "ask" && it.requestId === requestId
+        ? { ...it, draft: "", revealSecret: false, resolved: true, skipped: skip }
+        : it,
     ),
   );
 }
@@ -1666,42 +1693,132 @@ const TranscriptItem = memo(function TranscriptItem({
           )}
         </div>
       )}
-      {item.kind === "ask" && (
-        <div className="permission ask-user">
-          <div className="label">Agent asks</div>
-          <div className="perm-body">{item.question}</div>
-          {!item.resolved ? (
-            <>
-              <textarea
-                className="ask-input"
-                rows={3}
-                value={item.draft || ""}
-                placeholder="Type your answer…"
-                onChange={(e) => onAskDraftChange(item.requestId, e.target.value)}
-              />
-              <div className="perm-actions">
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={!item.draft?.trim()}
-                  onClick={() => resolveAsk(item.requestId, item.draft || "", false, setItems)}
-                >
-                  Reply
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => resolveAsk(item.requestId, "", true, setItems)}
-                >
-                  Skip
-                </button>
+      {item.kind === "ask" && (() => {
+        const isSecret = isSecretAskItem(item);
+        const isYesNo = isYesNoAskItem(item);
+        const labelText = isSecret
+          ? item.command
+            ? "🔒 Terminal password required"
+            : "🔒 Password / secret required"
+          : item.command
+            ? "Terminal input required"
+            : "Agent asks";
+        return (
+          <div className={isSecret ? "permission ask-user ask-secret" : "permission ask-user"}>
+            <div className="label">{labelText}</div>
+            {item.command && <pre className="cmd">{item.command}</pre>}
+            <div className="perm-body">{item.question}</div>
+            {!item.resolved ? (
+              <>
+                {isSecret ? (
+                  <>
+                    <div className="ask-secret-row">
+                      <input
+                        type={item.revealSecret ? "text" : "password"}
+                        className="ask-input ask-secret-input"
+                        autoFocus
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={item.draft || ""}
+                        placeholder="Enter password or secret… (Enter to submit)"
+                        onChange={(e) => onAskDraftChange(item.requestId, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (item.draft ?? "").length > 0) {
+                            e.preventDefault();
+                            resolveAsk(item.requestId, item.draft || "", false, setItems);
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            resolveAsk(item.requestId, "", true, setItems);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="ghost ask-reveal-btn"
+                        onClick={() =>
+                          setItems((prev) =>
+                            prev.map((it) =>
+                              it.kind === "ask" && it.requestId === item.requestId
+                                ? { ...it, revealSecret: !it.revealSecret }
+                                : it,
+                            ),
+                          )
+                        }
+                      >
+                        {item.revealSecret ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                    <div className="muted tiny ask-secret-note">
+                      Sent directly to the local process — never shared with the model or saved in chat logs.
+                    </div>
+                  </>
+                ) : (
+                  <textarea
+                    className="ask-input"
+                    rows={3}
+                    autoFocus
+                    value={item.draft || ""}
+                    placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
+                    onChange={(e) => onAskDraftChange(item.requestId, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey && item.draft?.trim()) {
+                        e.preventDefault();
+                        resolveAsk(item.requestId, item.draft || "", false, setItems);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        resolveAsk(item.requestId, "", true, setItems);
+                      }
+                    }}
+                  />
+                )}
+                <div className="perm-actions">
+                  {isYesNo && (
+                    <>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={() => resolveAsk(item.requestId, "yes", false, setItems)}
+                      >
+                        Yes
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => resolveAsk(item.requestId, "no", false, setItems)}
+                      >
+                        No
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={isSecret ? !(item.draft ?? "").length : !item.draft?.trim()}
+                    onClick={() => resolveAsk(item.requestId, item.draft || "", false, setItems)}
+                  >
+                    {isSecret ? "Submit" : "Reply"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => resolveAsk(item.requestId, "", true, setItems)}
+                  >
+                    {isSecret ? "Cancel" : "Skip"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="muted tiny">
+                {item.skipped
+                  ? "Cancelled"
+                  : isSecret
+                    ? "Password submitted (hidden)"
+                    : "Answered"}
               </div>
-            </>
-          ) : (
-            <div className="muted tiny">Answered</div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        );
+      })()}
       {item.kind === "status" && (
         <>
           {changedFiles?.length ? <ChangedFilesSummary files={changedFiles} /> : null}
@@ -2718,7 +2835,17 @@ export function App() {
             return append({ kind: "permission", requestId: msg.requestId, tool: msg.tool, filePath: msg.filePath, command: msg.command, reason: msg.reason }, true);
           case "ask_user_required":
             if (hasRequest(msg.requestId)) return current;
-            return append({ kind: "ask", requestId: msg.requestId, question: msg.question }, true);
+            return append(
+              {
+                kind: "ask",
+                requestId: msg.requestId,
+                question: msg.question,
+                secret: msg.secret,
+                command: msg.command,
+                draft: "",
+              },
+              true,
+            );
           case "plan_approval_required":
             if (hasRequest(msg.requestId)) return current;
             return append({ kind: "plan_approval", requestId: msg.requestId, planText: msg.planText }, true);
@@ -3464,6 +3591,8 @@ export function App() {
                 kind: "ask",
                 requestId: msg.requestId,
                 question: msg.question,
+                secret: msg.secret,
+                command: msg.command,
                 draft: "",
               },
             ];

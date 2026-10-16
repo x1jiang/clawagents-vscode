@@ -317,16 +317,22 @@ class AskUserWaiter:
         timeout: float = 600.0,
         *,
         run_id: str | None = None,
+        secret: bool = False,
+        command: str | None = None,
     ) -> str | None:
         request_id = uuid.uuid4().hex
         with _ask_lock:
             _ask_events[request_id] = threading.Event()
             if run_id:
                 _ask_run_ids[request_id] = run_id
-        sse_fn(
-            "ask_user_required",
-            {"request_id": request_id, "question": question},
-        )
+        payload: dict[str, Any] = {
+            "request_id": request_id,
+            "question": question,
+            "secret": bool(secret),
+        }
+        if command:
+            payload["command"] = str(command)
+        sse_fn("ask_user_required", payload)
         with _ask_lock:
             event = _ask_events.get(request_id)
         if event is None:
@@ -502,16 +508,40 @@ def _build_ask_user_tool(ask_fn):
 def make_ask_user_tool(sse_fn, *, run_id: str | None = None):
     """Replace the default stdin ask_user with a webview-backed one."""
 
-    def ask_fn(question: str) -> str | None:
-        return _ask_waiter.ask(question, sse_fn, run_id=run_id)
+    def ask_fn(
+        question: str,
+        *,
+        secret: bool = False,
+        command: str | None = None,
+    ) -> str | None:
+        return _ask_waiter.ask(
+            question,
+            sse_fn,
+            run_id=run_id,
+            secret=secret,
+            command=command,
+        )
 
     return _build_ask_user_tool(ask_fn)
 
 
-def make_auto_ask_user_tool():
-    """Auto interaction: never block on the user — agent decides itself."""
+def make_auto_ask_user_tool(sse_fn=None, *, run_id: str | None = None):
+    """Auto interaction: never block on ordinary ambiguity, but still prompt for secrets."""
 
-    def ask_fn(question: str) -> str | None:
+    def ask_fn(
+        question: str,
+        *,
+        secret: bool = False,
+        command: str | None = None,
+    ) -> str | None:
+        if secret and sse_fn is not None:
+            return _ask_waiter.ask(
+                question,
+                sse_fn,
+                run_id=run_id,
+                secret=True,
+                command=command,
+            )
         return (
             "[auto mode] User is not available to answer. "
             f"Decide yourself based on the task. Original question: {question}"
@@ -1980,8 +2010,32 @@ def create_app() -> FastAPI:
 
                 def ask_factory():
                     if effective_interaction == "auto":
-                        return make_auto_ask_user_tool()
+                        return make_auto_ask_user_tool(sse, run_id=run_id)
                     return make_ask_user_tool(sse, run_id=run_id)
+
+                def ask_prompt_fn(
+                    prompt: str,
+                    *,
+                    secret: bool = True,
+                    command: str | None = None,
+                ) -> str | None:
+                    return _ask_waiter.ask(
+                        prompt,
+                        sse,
+                        run_id=run_id,
+                        secret=secret,
+                        command=command,
+                    )
+
+                def _attach_ctx(rid: str, ctx: Any) -> None:
+                    try:
+                        meta = getattr(ctx, "_metadata", None)
+                        if isinstance(meta, dict):
+                            meta["ask_prompt_fn"] = ask_prompt_fn
+                        setattr(ctx, "ask_prompt_fn", ask_prompt_fn)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    _set_run_context(rid, ctx)
 
                 task = worker_loop.create_task(
                     run_chat_turn(
@@ -2001,7 +2055,7 @@ def create_app() -> FastAPI:
                         images=body.images,
                         files=body.files,
                         run_id=run_id,
-                        attach_run_context=_set_run_context,
+                        attach_run_context=_attach_ctx,
                     )
                 )
                 # Attach the task canceller to the pre-registered run. If

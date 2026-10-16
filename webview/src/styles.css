@@ -4902,3 +4902,29 @@ button.chat-pin.active {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+
+/* Secret / terminal password prompt row inside ask-user card */
+.ask-secret-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.ask-secret-row .ask-secret-input {
+  flex: 1;
+  margin: 0;
+  resize: none;
+  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.ask-reveal-btn {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.ask-secret-note {
+  margin-bottom: 8px;
+}

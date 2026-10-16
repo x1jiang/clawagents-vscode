@@ -131,7 +131,14 @@ export type HostToWebview =
       reason?: string;
       chatId?: string;
     }
-  | { type: "ask_user_required"; requestId: string; question: string; chatId?: string }
+  | {
+      type: "ask_user_required";
+      requestId: string;
+      question: string;
+      secret?: boolean;
+      command?: string;
+      chatId?: string;
+    }
   | {
       type: "plan_approval_required";
       requestId: string;

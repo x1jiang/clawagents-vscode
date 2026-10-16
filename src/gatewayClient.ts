@@ -214,6 +214,8 @@ export function mapAgentEvent(
         type: "ask_user_required",
         requestId: String(data.request_id ?? data.requestId ?? ""),
         question: String(data.question ?? data.prompt ?? ""),
+        secret: typeof data.secret === "boolean" ? data.secret : undefined,
+        command: data.command ? String(data.command) : undefined,
       };
     case "plan_approval_required":
       return {
