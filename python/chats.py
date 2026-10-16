@@ -1338,6 +1338,139 @@ def build_augmented_task(chat_id: str, content: str, settings: dict[str, Any]) -
     return f"<workspace_system_prompt>\n{ws}\n</workspace_system_prompt>\n\n{content}"
 
 
+_STALE_TOOL_STOP_RE = re.compile(
+    r"\n\n\[System\] (?:[^\n]*?(?:failed \d+ times|has now failed twice|"
+    r"shell commands have run since the last file edit|"
+    r"Progress checkpoint after \d+ inspection/planning calls)[\s\S]*)$"
+)
+_STALE_USER_NUDGE_PREFIXES = (
+    "[System] Your last ",
+    "[System] You are re-calling ",
+    "[System] Run deadline approaching",
+    "[System] Output limit reached",
+    "[System] Summarize the tool results",
+    "[System] Groundedness check",
+)
+_STALE_LOCK_CLAIM_RE = re.compile(
+    r"(?:tool execution (?:is )?locked|entered\s+[\"']?answer-only[\"']?\s+mode|"
+    r"stopped allowing shell or file tool calls|"
+    r"start a new chat session[^\n]*resets the tool budget)",
+    re.IGNORECASE,
+)
+_SESSION_UNLOCK_NOTE = (
+    "\n\n[System Note: Tool execution is NOT locked across turns in this session. "
+    "Each new user message starts a fresh turn with an unlocked tool budget "
+    "(`execute`, file tools, etc. are active). Execute the user's request directly.]"
+)
+
+
+def sanitize_session_memory_file(chat_id: str) -> int:
+    """Scrub prior-turn [System] stop/rethink directives and tool-lock claims from session JSONL."""
+    from paths import safe_id
+
+    ensure_dirs()
+    cid = safe_id(chat_id, kind="chat_id")
+    mem = SESSIONS_MEMORY_DIR / f"{cid}.jsonl"
+    if not mem.exists():
+        return 0
+    try:
+        raw = mem.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
+    if not lines:
+        return 0
+    changed = 0
+    out_lines: list[str] = []
+    for ln in lines:
+        try:
+            obj = json.loads(ln)
+        except json.JSONDecodeError:
+            out_lines.append(ln)
+            continue
+        if not isinstance(obj, dict):
+            out_lines.append(ln)
+            continue
+        role = str(obj.get("role") or "")
+        content = obj.get("content")
+        if isinstance(content, str):
+            new_content = content
+            if role in ("tool", "user") and "\n\n[System] " in new_content:
+                new_content = _STALE_TOOL_STOP_RE.sub("", new_content)
+            if role == "user" and new_content.startswith(_STALE_USER_NUDGE_PREFIXES):
+                new_content = (
+                    "[System] (Prior turn checkpoint resolved — "
+                    "new user turn has a fresh, unlocked tool budget.)"
+                )
+            elif (
+                role == "assistant"
+                and not obj.get("tool_calls_meta")
+                and _STALE_LOCK_CLAIM_RE.search(new_content)
+                and "[System Note: Tool execution is NOT locked" not in new_content
+            ):
+                new_content = new_content + _SESSION_UNLOCK_NOTE
+            if new_content != content:
+                obj = {**obj, "content": new_content}
+                changed += 1
+                out_lines.append(json.dumps(obj, ensure_ascii=False))
+                continue
+        out_lines.append(ln)
+    if changed:
+        try:
+            mem.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+        except OSError:
+            return 0
+    return changed
+
+
+async def unlock_chat(chat_id: str) -> dict[str, Any]:
+    """Reset any persisted tool/invariant gates and scrub prior-turn stop directives."""
+    from paths import safe_id
+
+    ensure_dirs()
+    cid = safe_id(chat_id, kind="chat_id")
+    cleared_contract = False
+    invariant_path = WORKSPACE / ".clawagents" / "act-invariants.json"
+    if invariant_path.exists():
+        try:
+            invariant_path.unlink()
+            cleared_contract = True
+        except OSError:
+            pass
+    try:
+        from clawagents.permissions.act_invariants import clear_contract
+
+        clear_contract(None, WORKSPACE)
+    except Exception:  # noqa: BLE001
+        pass
+
+    paused_goal = False
+    try:
+        from clawagents.goal import GoalPauseReason, GoalTracker
+
+        gt = GoalTracker(WORKSPACE)
+        if gt.is_active():
+            gt.pause(GoalPauseReason.USER, "Unlocked via /unlock")
+            paused_goal = True
+    except Exception:  # noqa: BLE001
+        pass
+
+    scrubbed = sanitize_session_memory_file(cid)
+    msg = (
+        "🔓 Tool execution unlocked for this session — tool budget, loop counters, "
+        "and invariant gates reset. You can continue in this chat."
+    )
+    append_ui_event(cid, {"kind": "status", "text": msg})
+    return {
+        "ok": True,
+        "unlocked": True,
+        "scrubbed_messages": scrubbed,
+        "cleared_contract": cleared_contract,
+        "paused_goal": paused_goal,
+        "message": msg,
+    }
+
+
 async def compact_chat(chat_id: str) -> dict[str, Any]:
     """Manually compact session memory so the next turn starts lighter.
 
@@ -2077,6 +2210,7 @@ async def run_chat_turn(
     )
 
     augmented = build_augmented_task(chat_id, content, settings)
+    sanitize_session_memory_file(chat_id)
     session = JsonlFileSession(chat_id, dir_path=SESSIONS_MEMORY_DIR)
 
     kwargs: dict[str, Any] = {"streaming": True}
@@ -2087,6 +2221,16 @@ async def run_chat_turn(
             "You are in ask mode. Prefer explaining and proposing changes "
             "over writing files or running shell commands unless explicitly asked."
         )
+    instructions.append(
+        "Turn-scoped tool budget: every new user message starts a fresh turn with "
+        "an unlocked tool budget (`execute`, file tools, etc. are active). Any "
+        "`[System]` stop/rethink/timeout warnings in earlier turns applied only to "
+        "that earlier turn — never tell the user that tool execution is locked for "
+        "this chat session or that they must start a new chat session. For long-running "
+        "commands (e.g. `docker save | ssh | docker load`), pass `is_background=true` "
+        "to `execute` and call `task_wait` on the returned `job_id` so the command "
+        "is never cut off by the foreground timeout."
+    )
     # Cut tool-loop churn: named paths → read once → answer (Luna cost driver).
     instructions.append(
         "Tool efficiency: when the user names exact file paths, read those files "

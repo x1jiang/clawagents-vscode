@@ -589,6 +589,15 @@ export class GatewayClient {
     );
   }
 
+  unlockChat(chatId: string) {
+    return requestJson<Record<string, unknown>>(
+      this.requireHandle(),
+      "POST",
+      `/chats/${encodeURIComponent(chatId)}/unlock`,
+      {},
+    );
+  }
+
   pauseActiveGoal() {
     return requestJson<Record<string, unknown>>(this.requireHandle(), "POST", "/goal/pause", {});
   }

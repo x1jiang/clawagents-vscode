@@ -1255,6 +1255,15 @@ def create_app() -> FastAPI:
 
         return await compact_chat(chat_id)
 
+    @app.post("/chats/{chat_id}/unlock")
+    async def chats_unlock(chat_id: str, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        from chats import unlock_chat
+
+        return await unlock_chat(chat_id)
+
     @app.post("/goal/pause")
     async def goal_pause(request: Request):
         """Pause disk-backed Goal when UI leaves Goal mode (Act/Plan)."""

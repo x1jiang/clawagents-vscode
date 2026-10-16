@@ -2141,6 +2141,30 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           });
         }
         break;
+      case "unlock_chat":
+        try {
+          if (!this.chatId) {
+            this.post({
+              type: "status",
+              message: "🔓 Tool execution unlocked — ready for your next message.",
+            });
+            break;
+          }
+          const res = await this.gateway.unlockChat(this.chatId);
+          this.post({
+            type: "status",
+            message:
+              typeof res.message === "string" && res.message
+                ? res.message
+                : "🔓 Tool execution unlocked for this session — tool budget, loop counters, and invariant gates reset.",
+          });
+        } catch (err) {
+          this.post({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+        break;
       case "list_checkpoints":
         try {
           const rows = await this.gateway.listCheckpoints(20);

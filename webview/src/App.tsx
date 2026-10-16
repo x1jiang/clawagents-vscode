@@ -5132,6 +5132,8 @@ export function App() {
     const isSlash =
       value === "/help" ||
       value === "/compact" ||
+      value === "/unlock" ||
+      value === "/reset-tools" ||
       value === "/checkpoints" ||
       value === "/hunks" ||
       value === "/review" ||
@@ -5153,9 +5155,14 @@ export function App() {
         ...previous,
         {
           kind: "status",
-          text: "Keyboard shortcuts\nPlain text: Enter — send\nRich Markdown: Enter — new paragraph\nRich Markdown: Ctrl/⌘ + Enter — send\nCtrl/⌘ + Space or F8 — dictate\nPaste or Shift-drop — attach files\nEsc — stop",
+          text: "Slash commands: /unlock (reset tool lock in session) · /compact (compact context)\nKeyboard shortcuts\nPlain text: Enter — send\nRich Markdown: Enter — new paragraph\nRich Markdown: Ctrl/⌘ + Enter — send\nCtrl/⌘ + Space or F8 — dictate\nPaste or Shift-drop — attach files\nEsc — stop",
         },
       ]);
+      return;
+    }
+    if (value === "/unlock" || value === "/reset-tools") {
+      clearDraft();
+      post({ type: "unlock_chat" });
       return;
     }
     if (value === "/compact") {

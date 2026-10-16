@@ -156,3 +156,57 @@ def test_compact_rejects_growth(tmp_path, monkeypatch):
     assert res.get("compact_cost_usd") is not None
     assert res["compact_cost_usd"] > 0
     assert patched.get("session_cost_usd", 0) > 0
+
+
+def test_unlock_chat_scrubs_lock_directives_and_invariants(tmp_path, monkeypatch):
+    """Regression: /unlock (unlock_chat) and sanitize_session_memory_file must
+    clear persisted [System] STOP directives, annotate prior 'Tool execution is
+    locked' assistant replies, and remove stale act-invariants.json.
+    """
+    monkeypatch.setattr(chats, "SESSIONS_MEMORY_DIR", tmp_path)
+    monkeypatch.setattr(chats, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(chats, "ensure_dirs", lambda: None)
+    events: list[dict] = []
+    monkeypatch.setattr(chats, "append_ui_event", lambda _cid, ev: events.append(ev))
+
+    inv = tmp_path / ".clawagents" / "act-invariants.json"
+    inv.parent.mkdir(parents=True, exist_ok=True)
+    inv.write_text('{"commands": []}', encoding="utf-8")
+
+    mem = tmp_path / "c_lock.jsonl"
+    _write_session(
+        mem,
+        [
+            {"role": "user", "content": "push docker image"},
+            {
+                "role": "tool",
+                "content": "Error: timed out\n\n[System] This tool has failed 3 times in a row. STOP retrying it.",
+                "tool_call_id": "call_1",
+            },
+            {
+                "role": "user",
+                "content": "[System] Your last 3 tool calls all failed. Stop and reconsider your approach.",
+            },
+            {
+                "role": "assistant",
+                "content": "Tool execution is locked in this chat session. The session harness entered answer-only mode.",
+            },
+        ],
+    )
+
+    res = asyncio.run(chats.unlock_chat("c_lock"))
+    assert res["unlocked"] is True
+    assert res["scrubbed_messages"] >= 2
+    assert res["cleared_contract"] is True
+    assert not inv.exists()
+    assert any(e.get("kind") == "status" for e in events)
+
+    after = [
+        json.loads(ln)
+        for ln in mem.read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
+    assert len(after) == 4
+    assert "STOP retrying" not in after[1]["content"]
+    assert "fresh, unlocked tool budget" in after[2]["content"]
+    assert "Tool execution is NOT locked across turns" in after[3]["content"]
