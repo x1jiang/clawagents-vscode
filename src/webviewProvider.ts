@@ -22,9 +22,11 @@ import {
 import { GatewayClient, isChatNotFoundError, isSidecarTransportError } from "./gatewayClient";
 import { eventsToItems } from "./chatItems";
 import {
+  TEXT_ATTACHMENT_MIME_BY_EXT,
   decodeLocalAttachment,
   detectDocumentMediaType,
   detectImageMediaType,
+  detectTextDocumentMediaType,
   safeLocalAttachmentName,
 } from "./localAttachments";
 import { captureBugScreenshot, sendBugReportEmail } from "./bugReport";
@@ -2022,13 +2024,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           canSelectFolders: false,
           canSelectMany: true,
           openLabel: "Attach",
-          title: "Attach workspace files to chat",
+          title: "Attach files to chat",
           defaultUri: workspaceRoot()
             ? vscode.Uri.file(workspaceRoot()!)
             : undefined,
         });
         if (uris?.length) {
-          await this.attachUris(uris.map((u) => u.toString()));
+          await this.attachUris(uris.map((u) => u.toString()), true);
         }
         break;
       }
@@ -3005,7 +3007,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async attachUris(uris: string[]): Promise<void> {
+  private async attachUris(uris: string[], allowExternal = false): Promise<void> {
     const refs: string[] = [];
     const skipped: string[] = [];
     let imagesStaged = 0;
@@ -3033,32 +3035,39 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           continue;
         }
         const rel = this.workspaceRelative(uri);
+        const ext = path.extname(uri.fsPath).toLowerCase();
         // Images resolve to actual pixels (base64 content block) rather than a
-        // text @path ref, but stay workspace-confined like every other attach.
-        const mime = IMAGE_MIME[path.extname(uri.fsPath).toLowerCase()];
-        if (mime && rel) {
+        // text @path ref, staying workspace-confined unless explicitly picked via host dialog.
+        const mime = IMAGE_MIME[ext];
+        if (mime && (rel || allowExternal)) {
           const staged = await this.stageImage(uri, mime);
           if (staged) {
             imagesStaged++;
           } else {
-            skipped.push(rel);
+            skipped.push(rel || path.basename(uri.fsPath));
           }
           continue;
         }
-        // PDFs/DOCX resolve to document content the model can read directly,
-        // same workspace-confined staging as images.
-        const docMime = DOC_MIME[path.extname(uri.fsPath).toLowerCase()];
-        if (docMime && rel) {
+        // PDFs/DOCX resolve to document content the model can read directly.
+        const docMime = DOC_MIME[ext];
+        if (docMime && (rel || allowExternal)) {
           const staged = await this.stageFile(uri, docMime);
           if (staged) {
             filesStaged++;
           } else {
-            skipped.push(rel);
+            skipped.push(rel || path.basename(uri.fsPath));
           }
           continue;
         }
         if (rel) {
           refs.push(formatFileRef(rel).trimEnd());
+        } else if (allowExternal && TEXT_ATTACHMENT_MIME_BY_EXT[ext]) {
+          const staged = await this.stageFile(uri, TEXT_ATTACHMENT_MIME_BY_EXT[ext]);
+          if (staged) {
+            filesStaged++;
+          } else {
+            skipped.push(path.basename(uri.fsPath));
+          }
         } else {
           skipped.push(vscode.workspace.asRelativePath(uri, false) || trimmed);
         }
@@ -3171,6 +3180,22 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           name,
           data: data.base64,
           mediaType: documentType,
+        });
+        filesStaged++;
+        continue;
+      }
+
+      const textDocumentType = detectTextDocumentMediaType(data.bytes, name);
+      if (textDocumentType) {
+        if (this.pendingFiles.length >= MAX_PENDING_FILES) {
+          rejected.push(`${name} (document limit ${MAX_PENDING_FILES})`);
+          continue;
+        }
+        this.pendingFiles.push({
+          id: crypto.randomBytes(6).toString("hex"),
+          name,
+          data: data.base64,
+          mediaType: textDocumentType,
         });
         filesStaged++;
         continue;

@@ -20,6 +20,7 @@ const {
   decodeLocalAttachment,
   detectDocumentMediaType,
   detectImageMediaType,
+  detectTextDocumentMediaType,
   safeLocalAttachmentName,
 } = require(outputFile);
 
@@ -58,8 +59,18 @@ test("requires document container signatures instead of filename claims", () => 
   assert.equal(detectDocumentMediaType(Buffer.from("PK\u0003\u0004 ordinary.zip")), undefined);
 });
 
+test("detects markdown, plain text, and structured text attachments while rejecting binary bytes", () => {
+  assert.equal(detectTextDocumentMediaType(Buffer.from("# Title\n\nBody\n"), "notes.md"), "text/markdown");
+  assert.equal(detectTextDocumentMediaType(Buffer.from("hello world\n"), "readme.txt"), "text/plain");
+  assert.equal(detectTextDocumentMediaType(Buffer.from('{"a":1}'), "config.json"), "application/json");
+  assert.equal(detectTextDocumentMediaType(Buffer.from("a,b\n1,2\n"), "data.csv"), "text/csv");
+  assert.equal(detectTextDocumentMediaType(Buffer.from([0x00, 0x01, 0x02]), "fake.md"), undefined);
+  assert.equal(detectTextDocumentMediaType(Buffer.from("hello"), "archive.exe"), undefined);
+});
+
 test("normalizes local filenames without retaining client paths or controls", () => {
   assert.equal(safeLocalAttachmentName("C:\\Users\\me\\shot\u0000.png"), "shot.png");
   assert.equal(safeLocalAttachmentName("/tmp/report.pdf"), "report.pdf");
   assert.equal(safeLocalAttachmentName("\u0000"), "attachment");
 });
+

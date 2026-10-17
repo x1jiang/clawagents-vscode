@@ -67,3 +67,71 @@ export function detectDocumentMediaType(bytes: Buffer): string | undefined {
   }
   return undefined;
 }
+
+export const TEXT_ATTACHMENT_MIME_BY_EXT: Record<string, string> = {
+  ".md": "text/markdown",
+  ".markdown": "text/markdown",
+  ".mdx": "text/markdown",
+  ".txt": "text/plain",
+  ".text": "text/plain",
+  ".log": "text/plain",
+  ".csv": "text/csv",
+  ".tsv": "text/tab-separated-values",
+  ".json": "application/json",
+  ".jsonl": "application/jsonl",
+  ".ndjson": "application/x-ndjson",
+  ".yaml": "application/yaml",
+  ".yml": "application/yaml",
+  ".toml": "application/toml",
+  ".ini": "text/plain",
+  ".cfg": "text/plain",
+  ".conf": "text/plain",
+  ".xml": "application/xml",
+  ".html": "text/html",
+  ".htm": "text/html",
+  ".sql": "text/x-sql",
+  ".sh": "text/x-sh",
+  ".bash": "text/x-sh",
+  ".zsh": "text/x-sh",
+  ".py": "text/x-python",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".cjs": "text/javascript",
+  ".ts": "application/typescript",
+  ".tsx": "application/typescript",
+  ".jsx": "text/javascript",
+  ".css": "text/css",
+  ".scss": "text/css",
+  ".r": "text/plain",
+  ".rmd": "text/markdown",
+  ".tex": "text/x-tex",
+  ".bib": "text/plain",
+  ".rst": "text/x-rst",
+};
+
+export function detectTextDocumentMediaType(
+  bytes: Buffer,
+  filename?: string,
+): string | undefined {
+  if (bytes.length === 0) {
+    return undefined;
+  }
+  const ext = path.extname((filename || "").trim()).toLowerCase();
+  const mime = TEXT_ATTACHMENT_MIME_BY_EXT[ext];
+  if (!mime) {
+    return undefined;
+  }
+  if (detectImageMediaType(bytes) || detectDocumentMediaType(bytes)) {
+    return undefined;
+  }
+  // Reject binary payloads containing NUL bytes or ZIP/ELF/Mach-O headers.
+  const sample = bytes.subarray(0, Math.min(bytes.length, 8192));
+  if (sample.includes(0x00)) {
+    return undefined;
+  }
+  if (sample.length >= 4 && sample[0] === 0x50 && sample[1] === 0x4b) {
+    return undefined;
+  }
+  return mime;
+}
+

@@ -8490,7 +8490,7 @@ export function App() {
               <input
                 ref={localAttachInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx"
+                accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.docx,.md,.markdown,.mdx,.txt,.text,.log,.csv,.tsv,.json,.jsonl,.ndjson,.yaml,.yml,.toml,.ini,.cfg,.conf,.xml,.html,.htm,.sql,.sh,.bash,.zsh,.py,.js,.mjs,.cjs,.ts,.tsx,.jsx,.css,.scss,.r,.rmd,.tex,.bib,.rst,text/plain,text/markdown,text/csv,application/json"
                 multiple
                 hidden
                 onChange={(e) => {
@@ -9405,7 +9405,7 @@ async function readLocalAttachment(
   const fallbackName = `pasted-file-${index + 1}${extensionForMediaType(mediaType)}`;
   const name = (file.name || fallbackName).replace(/^.*[\\/]/, "").slice(0, 120);
   if (!mediaType) {
-    return `${name || "file"} (use PNG, JPEG, GIF, WebP, PDF, or DOCX)`;
+    return `${name || "file"} (use PNG, JPEG, GIF, WebP, PDF, DOCX, MD, TXT, CSV, JSON, YAML, or code/text files)`;
   }
   if (file.size === 0) {
     return `${name} (empty)`;
@@ -9420,12 +9420,58 @@ async function readLocalAttachment(
   }
 }
 
+const LOCAL_TEXT_EXT_MIME: Record<string, string> = {
+  ".md": "text/markdown",
+  ".markdown": "text/markdown",
+  ".mdx": "text/markdown",
+  ".txt": "text/plain",
+  ".text": "text/plain",
+  ".log": "text/plain",
+  ".csv": "text/csv",
+  ".tsv": "text/tab-separated-values",
+  ".json": "application/json",
+  ".jsonl": "application/jsonl",
+  ".ndjson": "application/x-ndjson",
+  ".yaml": "application/yaml",
+  ".yml": "application/yaml",
+  ".toml": "application/toml",
+  ".ini": "text/plain",
+  ".cfg": "text/plain",
+  ".conf": "text/plain",
+  ".xml": "application/xml",
+  ".html": "text/html",
+  ".htm": "text/html",
+  ".sql": "text/x-sql",
+  ".sh": "text/x-sh",
+  ".bash": "text/x-sh",
+  ".zsh": "text/x-sh",
+  ".py": "text/x-python",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".cjs": "text/javascript",
+  ".ts": "application/typescript",
+  ".tsx": "application/typescript",
+  ".jsx": "text/javascript",
+  ".css": "text/css",
+  ".scss": "text/css",
+  ".r": "text/plain",
+  ".rmd": "text/markdown",
+  ".tex": "text/x-tex",
+  ".bib": "text/plain",
+  ".rst": "text/x-rst",
+};
+
 function localAttachmentMediaType(file: File): string {
-  const declared = (file.type || "").toLowerCase();
+  const lowerName = (file.name || "").toLowerCase();
+  const dotIdx = lowerName.lastIndexOf(".");
+  const ext = dotIdx >= 0 ? lowerName.slice(dotIdx) : "";
+  if (ext && LOCAL_TEXT_EXT_MIME[ext]) {
+    return LOCAL_TEXT_EXT_MIME[ext];
+  }
+  const declared = (file.type || "").toLowerCase().split(";")[0].trim();
   if (LOCAL_IMAGE_TYPES.has(declared) || LOCAL_DOCUMENT_TYPES.has(declared)) {
     return declared;
   }
-  const lowerName = file.name.toLowerCase();
   if (lowerName.endsWith(".png")) return "image/png";
   if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) return "image/jpeg";
   if (lowerName.endsWith(".gif")) return "image/gif";
@@ -9443,6 +9489,10 @@ function extensionForMediaType(mediaType: string): string {
   if (mediaType === "image/webp") return ".webp";
   if (mediaType === "application/pdf") return ".pdf";
   if (mediaType.includes("wordprocessingml")) return ".docx";
+  if (mediaType === "text/markdown" || mediaType === "text/x-markdown") return ".md";
+  if (mediaType === "text/csv") return ".csv";
+  if (mediaType === "application/json") return ".json";
+  if (mediaType.startsWith("text/")) return ".txt";
   return ".png";
 }
 
