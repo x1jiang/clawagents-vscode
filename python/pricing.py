@@ -31,6 +31,7 @@ PRICES: dict[str, PriceTuple] = {
     "gpt-6-astra": (10.0, 50.0, 1.0, 12.5),
     # https://developers.openai.com/api/docs/models/gpt-6.1-sol
     "gpt-6.1-sol": (2.0, 10.0, 0.1, 2.5),
+    "gpt-6.1-terra": (1.0, 5.0, 0.05, 1.25),
     "gpt-6-sol": (2.0, 10.0, 0.2, 2.5),
     "gpt-6-luna": (0.1, 0.5, 0.01, 0.125),
     # OpenAI GPT-5.6 family (Sol / Terra / Luna) — cached read = 10%, write = 1.25×
@@ -285,7 +286,7 @@ def price_for_full(
     use_bedrock = force_bedrock or _looks_bedrock(raw)
     if use_bedrock and key.startswith(
         (
-            "gpt-6.1-sol",
+            "gpt-6.1-sol", "gpt-6.1-terra",
             "gpt-6-sol",
             "gpt-6-luna",
             "claude-fable-5-1",
@@ -320,7 +321,7 @@ _LONG_CONTEXT_MULT_HAIKU5 = 5.0
 
 def _is_gpt56_family(model_id: str) -> bool:
     key = normalize_model_id(model_id)
-    return (key.startswith(("gpt-5.6", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5"))
+    return (key.startswith(("gpt-5.6", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5"))
             or (key.startswith("gpt-5.4") and not key.startswith(("gpt-5.4-mini", "gpt-5.4-nano"))))
 
 

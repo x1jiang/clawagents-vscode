@@ -1,3 +1,5 @@
+import { copyText } from "./clipboard";
+import { installTranscriptSelection } from "./transcriptSelection";
 import { collectDropUris, hasVsCodeUriPayload } from "./dropPaths";
 import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel, modelRequiresResponsesForTools, compatibleWireApiForModel, modelSupportsFastMode } from "./modelSelection";
 import { normalizeEfficiency, efficiencyLabel, type Efficiency } from "../../src/efficiency";
@@ -575,15 +577,6 @@ function markStalePlanApprovals(setItems: Dispatch<SetStateAction<ChatItem[]>>) 
   });
 }
 
-async function copyText(text: string): Promise<boolean> {
-  if (!navigator.clipboard?.writeText) return false;
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function messageTimestamp(): string {
   return new Date().toISOString();
@@ -1389,7 +1382,8 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
 });
 
 function CopyMessageButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">("idle");
+  const copied = copyState === "copied";
   const resetTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => () => {
@@ -1397,11 +1391,11 @@ function CopyMessageButton({ text }: { text: string }) {
   }, []);
 
   const handleCopy = useCallback(async () => {
-    if (!await copyText(text)) return;
-    setCopied(true);
+    setCopyState("copying");
+    setCopyState(await copyText(text) ? "copied" : "failed");
     if (resetTimer.current) clearTimeout(resetTimer.current);
     resetTimer.current = setTimeout(() => {
-      setCopied(false);
+      setCopyState("idle");
       resetTimer.current = undefined;
     }, 2_500);
   }, [text]);
@@ -1410,11 +1404,12 @@ function CopyMessageButton({ text }: { text: string }) {
     <button
       type="button"
       className={`copy-message${copied ? " copied" : ""}`}
-      title={copied ? "Copied" : "Copy message"}
-      aria-label={copied ? "Message copied" : "Copy message"}
+      disabled={copyState === "copying"}
+      title={copied ? "Copied" : copyState === "failed" ? "Copy failed — try again" : "Copy message"}
+      aria-label={copied ? "Message copied" : copyState === "failed" ? "Copy failed — try again" : "Copy message"}
       onClick={() => void handleCopy()}
     >
-      {copied ? <IconCheck /> : <IconCopy />}
+      {copied ? <IconCheck /> : copyState === "failed" ? <span role="status">!</span> : <IconCopy />}
     </button>
   );
 }
@@ -2117,6 +2112,7 @@ function SideChatOverlay({
 }
 
 export function App() {
+  useEffect(() => installTranscriptSelection(document), []);
   const [items, setItems] = useState<ChatItem[]>([]);
   const [queryIndex, setQueryIndex] = useState<QueryIndexEntry[]>([]);
   const [activeQueryEventIndex, setActiveQueryEventIndex] = useState<number>();
@@ -7374,7 +7370,7 @@ export function App() {
                     </select>
                     <span className="settings-hint">
                       {modelRequiresResponsesForTools(String(settings.model || ""), settingsProvider)
-                        ? `${/astra/i.test(String(settings.model || "")) ? "GPT-6 Astra" : "GPT-6.1 Sol"} requires Responses for ClawAgents tool use. Chat Completions is supported without tools.`
+                        ? `${/astra/i.test(String(settings.model || "")) ? "GPT-6 Astra" : /terra/i.test(String(settings.model || "")) ? "GPT-6.1 Terra" : "GPT-6.1 Sol"} requires Responses for ClawAgents tool use. Chat Completions is supported without tools.`
                         : String(settings.bedrock_mode || "") === "mantle"
                         ? "Mantle chooses the route by model; Claude Haiku/Sonnet use Mantle Messages."
                         : "Use Responses for Codex or gateways that do not expose chat/completions."}

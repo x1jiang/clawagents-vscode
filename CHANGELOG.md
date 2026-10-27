@@ -1,3 +1,10 @@
+# Unreleased
+
+- Copy selected transcript text through a dedicated VS Code command for Ctrl/Cmd+C and the right-click menu, preserving the selection snapshot while the menu takes focus.
+
+- Copy messages, background job output, and diagnostic reports through the VS Code clipboard bridge, with acknowledged results and visible message-copy failures.
+- Add direct OpenAI GPT-6.1 Terra selection, Responses tool routing, reasoning and Fast controls, context limits, and token/cache pricing.
+
 # 1.0.203
 
 - Require Python clawagents **6.20.91**, which detects Gemini `prompt_feedback.block_reason` and candidate content blocks in streaming and non-streaming modes, automatically falls back from `gemini-4-argon` to `gemini-3.8-flash` on false-positive prompt blocks (e.g. `BlockedReason.OTHER` on bio-modeling repository names), surfaces explicit block reasons when unrecoverable, and records `finish_reason` on Gemini responses.

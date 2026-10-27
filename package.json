@@ -186,6 +186,10 @@
       {
         "command": "clawagents.stopLocalGemma",
         "title": "ClawAgents: Stop Local Gemma"
+      },
+      {
+        "command": "clawagents.copySelection",
+        "title": "Copy"
       }
     ],
     "keybindings": [
@@ -204,6 +208,12 @@
         "key": "ctrl+shift+l",
         "mac": "cmd+shift+l",
         "when": "editorHasSelection"
+      },
+      {
+        "command": "clawagents.copySelection",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "clawagents:hasTranscriptSelection && (focusedView == 'clawagents.sidebar' || focusedView == 'clawagents.sidebarActivity')"
       }
     ],
     "menus": {
@@ -244,6 +254,19 @@
         {
           "command": "clawagents.addFileToChat",
           "group": "clawagents@3"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "clawagents.copySelection",
+          "when": "(webviewId == 'clawagents.sidebar' || webviewId == 'clawagents.sidebarActivity') && webviewSection == 'transcript-selection'",
+          "group": "clipboard@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "clawagents.copySelection",
+          "when": "false"
         }
       ]
     },

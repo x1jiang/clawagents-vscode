@@ -5,6 +5,7 @@ import pricing
 
 @pytest.mark.parametrize("model,rates", [
     ("gpt-6.1-sol", (2, 10, .1, 2.5)),
+    ("gpt-6.1-terra", (1, 5, .05, 1.25)),
     ("gpt-6-sol", (2, 10, .2, 2.5)),
     ("gpt-6-luna", (.1, .5, .01, .125)),
 ])

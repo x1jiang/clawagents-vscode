@@ -26,6 +26,10 @@ declare function acquireVsCodeApi(): VsCodeApi;
 
 let api: VsCodeApi | undefined;
 
+export function hasVsCodeHost(): boolean {
+  return typeof acquireVsCodeApi === "function";
+}
+
 /**
  * Vite/browser preview does not inject VS Code's webview bridge. Keep a tiny
  * in-memory substitute so the UI can render for local visual checks without

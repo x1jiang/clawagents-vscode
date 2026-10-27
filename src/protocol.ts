@@ -78,6 +78,7 @@ export type QueryIndexEntry = {
 };
 
 export type HostToWebview =
+  | { type: "clipboard_result"; requestId: string; ok: boolean }
   | { type: "gemma_local_status"; phase: string; message: string; endpoint?: string }
   | {
       type: "ready";
@@ -416,6 +417,8 @@ export type JobSummary = {
 };
 
 export type WebviewToHost =
+  | { type: "transcript_selection"; text: string }
+  | { type: "copy_text"; requestId: string; text: string }
   | { type: "ready" }
   | {
       type: "send";
@@ -667,6 +670,11 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
   const type = value.type;
   if (NO_PAYLOAD_MESSAGES.has(type)) return value as WebviewToHost;
   switch (type) {
+    case "transcript_selection":
+      return text(value.text) ? value as WebviewToHost : undefined;
+    case "copy_text":
+      return opaqueId(value.requestId) && text(value.text)
+        ? value as WebviewToHost : undefined;
     case "send":
       return text(value.text) && AGENT_MODES.has(String(value.mode))
         && typeof value.includeContext === "boolean" && optionalOpaqueId(value.chatId)
