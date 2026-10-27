@@ -120,6 +120,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const webviewOpts = { webviewOptions: { retainContextWhenHidden: true } };
   context.subscriptions.push(
+    vscode.commands.registerCommand("clawagents.copySelection", (context?: unknown) =>
+      provider?.copyTranscriptSelection(context)),
     vscode.window.registerWebviewViewProvider("clawagents.sidebar", provider, webviewOpts),
     vscode.window.registerWebviewViewProvider("clawagents.sidebarActivity", provider, webviewOpts),
   );

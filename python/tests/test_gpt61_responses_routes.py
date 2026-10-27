@@ -7,7 +7,7 @@ import chats
 import spawn_secrets
 
 
-@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6-astra"])
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra"])
 @pytest.mark.parametrize("provider", ["openai", "auto", "profile:openai"])
 @pytest.mark.parametrize("wire", ["", "auto", "chat_completions", "responses"])
 def test_gpt61_saved_model_routes_require_responses(model, provider, wire):
@@ -15,7 +15,7 @@ def test_gpt61_saved_model_routes_require_responses(model, provider, wire):
     assert route["wire_api"] == "responses"
 
 
-@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6-astra"])
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra"])
 @pytest.mark.parametrize("wire", ["", "auto", "chat_completions", "responses"])
 def test_gpt61_settings_kwargs_require_responses(model, wire, monkeypatch):
     monkeypatch.setattr(spawn_secrets, "resolve_api_key", lambda *args: "test")

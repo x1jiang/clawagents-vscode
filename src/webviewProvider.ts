@@ -282,6 +282,26 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   /** Jobs already announced in the transcript, so a finish is reported once. */
   private readonly announcedJobs = new Set<string>();
   private lastRunningJobs = 0;
+  private transcriptSelection = "";
+
+  private setTranscriptSelection(text: string): void {
+    this.transcriptSelection = text;
+    void vscode.commands.executeCommand("setContext", "clawagents:hasTranscriptSelection", Boolean(text));
+  }
+
+  async copyTranscriptSelection(context?: unknown): Promise<void> {
+    // Context-menu arguments snapshot the selection before the native menu
+    // takes focus away from the webview. Keyboard copies use the latest selection.
+    const selected = (context as { clawagentsSelectionText?: unknown } | undefined)?.clawagentsSelectionText;
+    const text = typeof selected === "string" && selected.length <= 1_000_000
+      ? selected : this.transcriptSelection;
+    if (!text) return;
+    try {
+      await vscode.env.clipboard.writeText(text);
+    } catch {
+      void vscode.window.showErrorMessage("Could not copy selected chat text. Please try again.");
+    }
+  }
   /** Serialize settings saves — concurrent autosaves + live /providers probes
    *  stampeded the sidecar (root cause of ETIMEDOUT / EADDRNOTAVAIL). */
   private readonly localGemma: LocalGemmaManager;
@@ -389,6 +409,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
+    this.setTranscriptSelection("");
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
@@ -407,6 +428,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     });
     webviewView.onDidChangeVisibility(() => {
       if (!webviewView.visible) {
+        this.setTranscriptSelection("");
         this.post({ type: "view_hidden" } as HostToWebview);
       }
     });
@@ -1400,6 +1422,18 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
     switch (msg.type) {
+      case "transcript_selection":
+        this.setTranscriptSelection(msg.text);
+        break;
+      case "copy_text": {
+        try {
+          await vscode.env.clipboard.writeText(msg.text);
+          this.post({ type: "clipboard_result", requestId: msg.requestId, ok: true });
+        } catch {
+          this.post({ type: "clipboard_result", requestId: msg.requestId, ok: false });
+        }
+        break;
+      }
       case "ready":
         // Show the webview immediately; never block the first paint on a
         // slow/hung Python sidecar (that left the CLAWAGENTS tab spinning).
@@ -3536,6 +3570,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   stopLocalGemma(): void { this.localGemma.stop(); }
 
   dispose(): void {
+    this.setTranscriptSelection("");
     this.localGemma.dispose();
     this.autoOpen.dispose();
     this.stopJobPolling();

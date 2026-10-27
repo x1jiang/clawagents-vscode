@@ -164,3 +164,21 @@ test("Wire API control cannot reintroduce incompatible GPT-6.1 Sol chat tools", 
   assert.match(app, /<option value="chat_completions"\s+disabled=\{modelRequiresResponsesForTools\(/);
   assert.match(app, /Chat Completions is supported without tools/);
 });
+
+test("GPT-6.1 Terra catalog, reasoning, Responses routing, context, and price contract", () => {
+  const id = "gpt-6.1-terra";
+  assert(catalog.FALLBACK_PROVIDERS.find(p => p.id === "openai").models.some(m => m.id === id));
+  assert.deepEqual(selection.effortOptionsForModel(id).map(o => o.value), ["low", "medium", "high", "xhigh", "none", "max"]);
+  assert(selection.modelSupportsEffort(id));
+  assert.equal(selection.compatibleEffortForModel(id, "none"), "none");
+  assert.equal(selection.compatibleEffortForModel(id, "minimal"), "low");
+  for (const provider of ["openai", "auto", "profile:openai"]) {
+    assert(selection.modelSupportsFastMode(id, provider, ""));
+    assert.equal(selection.compatibleWireApiForModel(id, provider, "chat_completions"), "responses");
+  }
+  assert.equal(context.contextWindowFor(id), 1050000);
+  assert(Math.abs(pricing.estimateCostUsd(id, 100000, 10000, undefined, "openai", 50000) - .1025) < 1e-12);
+  assert(Math.abs(pricing.estimateCostUsd(id, 300000, 10000, undefined, "openai", 100000) - .485) < 1e-12);
+  assert.equal(pricing.estimateCostUsd(id, 100000, 10000, undefined, "bedrock"), null);
+  assert.equal(pricing.estimateCostUsd("openai." + id, 100000, 10000), null);
+});

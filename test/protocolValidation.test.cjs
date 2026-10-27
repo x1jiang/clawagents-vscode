@@ -161,3 +161,11 @@ test("accepts Meta per-thread routes", () => {
     modelRoute: { provider: "meta", model: "Muse-Glimmer-30B", wire_api: "chat_completions" } };
   assert.deepEqual(parseWebviewToHost(message), message);
 });
+
+test("clipboard writes require a request id and bounded text", () => {
+  const msg = { type: "copy_text", requestId: "copy-1", text: "你好\nclipboard" };
+  assert.deepEqual(parseWebviewToHost(msg), msg);
+  assert.equal(parseWebviewToHost({ ...msg, requestId: "../bad" }), undefined);
+  assert.equal(parseWebviewToHost({ ...msg, text: {} }), undefined);
+  assert.equal(parseWebviewToHost({ ...msg, text: "x".repeat(1_000_001) }), undefined);
+});

@@ -1,3 +1,4 @@
+import { copyText } from "./clipboard";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   redactDiagnosticText,
@@ -118,15 +119,6 @@ function primaryDetail(check: DiagnosticCheck | undefined, reportedWorkspace?: s
   return check.detail || checkStatus(check);
 }
 
-async function copyReport(text: string): Promise<boolean> {
-  if (!navigator.clipboard?.writeText) return false;
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function DiagnosticsPanel({
   diagnostics,
@@ -214,7 +206,7 @@ export function DiagnosticsPanel({
       generated_at: new Date().toISOString(),
       ...asRecord(redactedPayload),
     });
-    setCopyState(await copyReport(report) ? "copied" : "failed");
+    setCopyState(await copyText(report) ? "copied" : "failed");
     if (copyTimer.current) clearTimeout(copyTimer.current);
     copyTimer.current = setTimeout(() => setCopyState("idle"), 2_500);
   };
