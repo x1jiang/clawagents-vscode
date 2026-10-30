@@ -783,6 +783,7 @@ def apply_scoped_pinned_context(agent: Any, chat_id: str) -> None:
 
 def delete_chat(chat_id: str) -> None:
     try:
+        chat_meta_path(chat_id).with_suffix(".timing.json").unlink(missing_ok=True)
         chat_meta_path(chat_id).unlink(missing_ok=True)
         chat_ui_log_path(chat_id).unlink(missing_ok=True)
     except ValueError:

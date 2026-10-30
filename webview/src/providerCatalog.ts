@@ -58,7 +58,7 @@ export const GEMMA_DEFAULT_BASE_URL = "http://127.0.0.1:18080/v1";
 export const META_DEFAULT_MODEL = "Muse-Glimmer-30B";
 export const META_DEFAULT_BASE_URL = "";
 
-export const PREFERRED_OPENAI_MODEL = "gpt-5.6-terra";
+export const PREFERRED_OPENAI_MODEL = "gpt-6.1-terra";
 export const PREFERRED_GEMINI_MODEL = "gemini-3.7-flash";
 export const PREFERRED_ANTHROPIC_MODEL = "claude-sonnet-4-5";
 export const PREFERRED_XAI_MODEL = "grok-4.5";
@@ -70,10 +70,10 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     id: "openai",
     name: "OpenAI",
     models: [
-      { id: PREFERRED_OPENAI_MODEL, label: "GPT-5.6 Terra" },
+      { id: PREFERRED_OPENAI_MODEL, label: "GPT-6.1 Terra" },
       { id: "gpt-6-astra", label: "GPT-6 Astra" },
       { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
-      { id: "gpt-6.1-terra", label: "GPT-6.1 Terra" },
+      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
       { id: "gpt-6-sol", label: "GPT-6 Sol" },
       { id: "gpt-6-luna", label: "GPT-6 Luna" },
       { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },

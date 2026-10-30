@@ -20,7 +20,7 @@ export function normalizeSettingsForSave(
 }
 
 const SETTINGS_SAVE_KEYS = [
-  "model", "provider", "base_url", "default_mode", "telemetry", "trajectory",
+  "model", "provider", "base_url", "default_mode", "telemetry", "skill_usage", "trajectory",
   "learn", "browser_tools", "mcp_enabled", "mcp_trust_workspace", "context_mode",
   "context_observatory", "enable_context_observatory",
   "graphify", "graphify_corpus", "graphify_graph_path",
@@ -32,6 +32,9 @@ const SETTINGS_SAVE_KEYS = [
 ] as const;
 
 export function settingsSaveKey(settings: Record<string, unknown>): string {
+  // The initial draft is not a user edit. Normalizing it adds empty skill
+  // arrays, which otherwise makes the first host snapshot look stale/dirty.
+  if (Object.keys(settings).length === 0) return "";
   try {
     const norm = normalizeSettingsForSave(settings);
     const slim: Record<string, unknown> = {};

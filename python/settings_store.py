@@ -28,6 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "base_url": "",
     "default_mode": "auto",
     "telemetry": False,
+    "skill_usage": False,
     "trajectory": False,
     "learn": False,
     "context_observatory": False,
@@ -243,7 +244,7 @@ def _default_model_for_provider(provider: str) -> str:
         from meta_provider import meta_model
         return meta_model()
     if p == "openai":
-        return "gpt-5.6-terra"
+        return "gpt-6.1-terra"
     if p == "gemini":
         return "gemini-3.7-flash"
     if p == "anthropic":
@@ -254,7 +255,7 @@ def _default_model_for_provider(provider: str) -> str:
         return "grok-4.5"
     if p == "bedrock":
         return "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-    return "gpt-5.6-terra"
+    return "gpt-6.1-terra"
 
 
 def _model_fits_provider(model: str, provider: str) -> bool:

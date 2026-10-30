@@ -40,6 +40,7 @@ from chats import (
     _decide_by_mode,
 )
 from diagnostics import run_diagnostics
+from conversation_timing import ConversationTimingStore
 from grants import GrantStore
 from mcp_loader import GRAPHIFY_READ_TOOLS, list_mcp_config
 from paths import GATEWAY_API_KEY, MODEL, WORKSPACE, ensure_dirs, safe_id
@@ -54,6 +55,7 @@ from snapshots import (
     restore_shadow_checkpoint,
     shadow_checkpoint_diff,
 )
+from skill_usage import SkillUsageTracker, get_skill_usage, clear_skill_usage
 from stats import get_stats, record_turn
 
 Decision = Literal["allow_once", "allow_always", "deny"]
@@ -69,6 +71,7 @@ _permission_meta: dict[str, dict[str, Any]] = {}
 # cancellation of — a concurrent one) plus a canceller that cancels the
 # asyncio task, which the agent loop converts into a clean "[cancelled]"
 # state.
+_conversation_timing = ConversationTimingStore()
 _run_lock = threading.Lock()
 _active_runs: dict[str, dict[str, Any]] = {}
 # After exit_plan_mode is Approved, Plan (read_only) unlocks write gates for
@@ -1167,6 +1170,20 @@ def create_app() -> FastAPI:
             return denied
         return get_stats()
 
+    @app.get("/skills/usage")
+    async def skill_usage(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return get_skill_usage()
+
+    @app.post("/skills/usage/clear")
+    async def skill_usage_clear(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return clear_skill_usage()
+
     @app.get("/snapshots")
     async def snapshots(request: Request):
         denied = _auth_or_401(request)
@@ -1380,7 +1397,7 @@ def create_app() -> FastAPI:
         meta = get_chat_meta(chat_id)
         if not meta:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
-        return {**meta, "running": _is_chat_running(chat_id)}
+        return {**meta, "running": _is_chat_running(chat_id), "timing": _conversation_timing.snapshot(meta)}
 
     @app.get("/chats/{chat_id}")
     async def chats_get(chat_id: str, request: Request):
@@ -1391,6 +1408,7 @@ def create_app() -> FastAPI:
         if not meta:
             return Response(status_code=404, content=json.dumps({"error": "not found"}))
         running = _is_chat_running(chat_id)
+        meta = {**meta, "timing": _conversation_timing.snapshot(meta)}
         # Paginate by default so long sessions do not load megabytes of JSONL.
         # ?all=1 restores the previous full-log behaviour for tooling.
         qs = request.query_params
@@ -1906,6 +1924,7 @@ def create_app() -> FastAPI:
 
         # tool_started args by call id, so tool_completed can resolve which
         # file changed even though the result event carries no args.
+        skill_usage_tracker = SkillUsageTracker(chat_id)
         pending_tool_args: dict[str, dict[str, Any]] = {}
         changed_files: dict[str, dict[str, Any]] = {}
         try:
@@ -1925,6 +1944,7 @@ def create_app() -> FastAPI:
             if kind == "stranded_interject":
                 sse("stranded_interject", payload)
                 return
+            skill_usage_tracker.on_event(kind, payload)
             sse("agent", {"kind": kind, "data": payload})
             if kind == "tool_started":
                 call_id = str(payload.get("call_id") or "")
@@ -2082,9 +2102,14 @@ def create_app() -> FastAPI:
                 worker_loop.close()
 
         async def _run() -> None:
+            _conversation_timing.start(chat_id, run_id)
             sse("queued", {"lane": body.lane, "chat_id": chat_id})
             sse("started", {"lane": body.lane, "chat_id": chat_id, "mode": effective_mode})
             try:
+                on_event(
+                    "conversation_timing",
+                    _conversation_timing.snapshot(get_chat_meta(chat_id) or {"id": chat_id}),
+                )
                 result = await asyncio.to_thread(run_agent)
                 if cancel_ev.is_set():
                     sse("error", {"error": "cancelled"})
@@ -2116,6 +2141,14 @@ def create_app() -> FastAPI:
                 else:
                     sse("error", {"error": str(exc)})
             finally:
+                try:
+                    _conversation_timing.finish(run_id)
+                    on_event(
+                        "conversation_timing",
+                        _conversation_timing.snapshot(get_chat_meta(chat_id) or {"id": chat_id}),
+                    )
+                except Exception:  # noqa: BLE001
+                    traceback.print_exc()
                 if changed_files:
                     # One turn-level event survives thread switches
                     # without filling the paginated UI log with every rewrite.

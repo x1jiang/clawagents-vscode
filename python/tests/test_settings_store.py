@@ -102,6 +102,24 @@ class TestSettingsRoundTrip(unittest.TestCase):
         for key in DEFAULTS:
             self.assertEqual(reloaded[key], patch[key], msg=f"disk reload failed for {key}")
 
+    def test_new_chat_default_survives_a_fresh_process(self):
+        import os
+        import subprocess
+
+        workspace_settings = Path(self._tmp.name) / ".clawagents" / "vscode_settings.json"
+        with patch.object(settings_store, "SETTINGS_FILE", workspace_settings):
+            save_settings({"provider": "openai", "model": "gpt-6.1-terra", "reasoning_effort": "medium"})
+        # A fresh interpreter reads only disk state, like reopening VS Code.
+        result = subprocess.run(
+            [sys.executable, "-c", "import json; from settings_store import load_settings; print(json.dumps(load_settings()))"],
+            env={**os.environ, "PYTHONPATH": str(_HERE), "CLAW_WORKSPACE": self._tmp.name},
+            check=True, capture_output=True, text=True,
+        )
+        restored = json.loads(result.stdout)
+        self.assertEqual(restored["model"], "gpt-6.1-terra")
+        self.assertEqual(restored["reasoning_effort"], "medium")
+        self.assertEqual(restored["provider"], "openai")
+
     def test_partial_wire_api_preserves_base_url_and_trust(self):
         save_settings(
             {
@@ -248,7 +266,7 @@ class TestDefaultModelForProvider(unittest.TestCase):
 
     def test_openai_defaults_to_terra(self):
         self.assertEqual(
-            settings_store._default_model_for_provider("openai"), "gpt-5.6-terra"
+            settings_store._default_model_for_provider("openai"), "gpt-6.1-terra"
         )
 
     def test_the_unknown_provider_fallback_matches_openai(self):
@@ -270,7 +288,7 @@ class TestDefaultModelForProvider(unittest.TestCase):
             {"provider": "openai", "model": "llama3.1"}
         )
         self.assertTrue(changed)
-        self.assertEqual(healed["model"], "gpt-5.6-terra")
+        self.assertEqual(healed["model"], "gpt-6.1-terra")
 
 
 if __name__ == "__main__":

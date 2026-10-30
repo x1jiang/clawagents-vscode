@@ -1,3 +1,6 @@
+import { SkillUsageRanking } from "./SkillUsageRanking";
+import type { SkillUsageStats } from "../../src/protocol";
+import { HeaderInfoPanel } from "./HeaderInfoPanel";
 import { copyText } from "./clipboard";
 import { installTranscriptSelection } from "./transcriptSelection";
 import { collectDropUris, hasVsCodeUriPayload } from "./dropPaths";
@@ -35,6 +38,7 @@ import {
   type QueryIndexEntry,
 } from "./vscodeApi";
 import { parseInlinePathReference } from "../../src/pathReferences";
+import { markdownFileReference, markdownUrlTransform } from "./markdownLinks";
 import { ADVANCED_RESTORE_FEATURES_AVAILABLE } from "../../src/protocol";
 import {
   collectPendingTurnChangedFiles,
@@ -44,6 +48,8 @@ import {
 } from "./changedFiles";
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
+import { ConversationTimeStats } from "./ConversationTimeStats";
+import type { ConversationTiming } from "../../src/protocol";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
 import {
   asStringList,
@@ -91,6 +97,7 @@ const MODE_HELP = {
 // one conversation. Keep the guard centralized so newly handled run events do
 // not accidentally leak into a chat opened while the old run is finishing.
 const RUN_SCOPED_EVENT_TYPES = new Set<HostToWebview["type"]>([
+  "conversation_timing",
   "stranded_interject",
   "status",
   "user_echo",
@@ -973,6 +980,17 @@ type TranscriptItemProps = {
 
 /** Make unambiguous inline-code file references openable without changing agent output. */
 const assistantMarkdownComponents: Components = {
+  a({ href, children, node: _node, ...props }) {
+    const reference = href ? markdownFileReference(href) : undefined;
+    return (
+      <a {...props} href={href} onClick={reference ? (event) => {
+        event.preventDefault();
+        post({ type: "open_file", ...reference });
+      } : undefined}>
+        {children}
+      </a>
+    );
+  },
   table({ children, node: _node, ...props }) {
     return (
       <div className="md-table-scroll">
@@ -1439,7 +1457,7 @@ const CollapsibleUserMessage = memo(function CollapsibleUserMessage({ text }: { 
     <div className={`user-message${isLong ? " has-overflow" : ""}${expanded ? " is-expanded" : ""}`}>
       <div ref={contentRef} className={`user-text${preview ? " is-preview" : ""}`}>
         <div className="md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents} urlTransform={markdownUrlTransform}>
             {text}
           </ReactMarkdown>
         </div>
@@ -1492,7 +1510,7 @@ const TranscriptItem = memo(function TranscriptItem({
         <>
           <div className="assistant-message">
             <div className="md">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents} urlTransform={markdownUrlTransform}>
                 {item.text}
               </ReactMarkdown>
               {showStreamingCursor && <span className="cursor" />}
@@ -1576,7 +1594,7 @@ const TranscriptItem = memo(function TranscriptItem({
           <div className="perm-body plan-document-shell">
             {(item.planText || "").trim() ? (
               <div className="md plan-document">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={assistantMarkdownComponents} urlTransform={markdownUrlTransform}>
                   {item.planText.trim()}
                 </ReactMarkdown>
               </div>
@@ -2145,6 +2163,8 @@ export function App() {
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [conversationMenuPinned, setConversationMenuPinned] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [conversationTiming, setConversationTiming] = useState<ConversationTiming>();
+  const [infoOpen, setInfoOpen] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [hasTavilyKey, setHasTavilyKey] = useState(false);
   const [hasBedrockKey, setHasBedrockKey] = useState(false);
@@ -2248,6 +2268,10 @@ export function App() {
     null,
   );
   const [stats, setStats] = useState<unknown>();
+  const [skillUsage, setSkillUsage] = useState<SkillUsageStats | null>(null);
+  useEffect(() => {
+    if (panel === "settings") post({ type: "load_skill_usage" });
+  }, [panel]);
   const [usage, setUsage] = useState<{
     promptTokens?: number;
     completionTokens?: number;
@@ -2902,6 +2926,9 @@ export function App() {
         return;
       }
       switch (msg.type) {
+        case "conversation_timing":
+          if (!isStaleEvent(msg)) setConversationTiming(msg.timing);
+          break;
         case "side_chat_open":
           {
             const nextSideChat: SideChat = {
@@ -3302,6 +3329,9 @@ export function App() {
         case "graphify_status":
           setGraphifyStatus(msg.data || null);
           break;
+        case "skill_usage":
+          setSkillUsage(msg.data);
+          break;
         case "stats":
           setStats(msg.data);
           break;
@@ -3379,6 +3409,7 @@ export function App() {
           setUsage(msg.usage ?? {});
           runUsageRef.current = msg.usage ?? {};
           setBusy(Boolean(msg.busy));
+          setConversationTiming(msg.timing);
           streamingRef.current = false;
           if (pendingForkRef.current) {
             pendingForkRef.current = false;
@@ -4631,7 +4662,9 @@ export function App() {
   // Fill a default model only when unset (or a weak race-time auto pick). Wait
   // until host key flags arrive so xAI/Ollama cannot win before OpenAI is known.
   useEffect(() => {
-    if (!providerKeysHydrated) return;
+    // Credentials may arrive before persisted settings (or after a failed
+    // startup read). Never fill a default until the real snapshot is loaded.
+    if (!providerKeysHydrated || typeof settings.model !== "string") return;
     if (preferredModelFilled.current) return;
     const savedModel =
       typeof settings.model === "string" ? settings.model.trim() : "";
@@ -5214,7 +5247,7 @@ export function App() {
     ) {
       sendModel = defaultModelForProvider(prov);
     }
-    // Empty model + OpenAI key → GPT-5.6 Terra (matches library get_default_model).
+    // Empty model + OpenAI key → the preferred OpenAI model.
     if (!sendModel && hasOpenAIKey) {
       sendModel = PREFERRED_OPENAI_MODEL;
     }
@@ -5613,89 +5646,36 @@ export function App() {
             onFastModeChange={selectFastMode}
             onReset={resetThreadModelRoute}
           />
-          <details className="header-info-capsule">
-            <summary title="Show token, cache, and cost information">Info</summary>
-            <div className="header-info-popover">
-          {compactPhase && (
-            <span className="compact-chip" title="Compaction in progress">
-              compact · {compactPhase}
-            </span>
-          )}
-          {(contextTok > 0 || totalTok > 0) && (
-            <span
-              className="meta-stat"
-              title={
-                (contextTok > 0
-                  ? `Latest request ${contextTok.toLocaleString()} in`
-                  : "Latest request input unavailable") +
-                ` · Run ${promptTok.toLocaleString()} in / ${completionTok.toLocaleString()} out` +
-                (usage.requestCount
-                  ? ` across ${usage.requestCount} request(s)`
-                  : "") +
-                (usage.maxInputTokens
-                  ? ` · max ${usage.maxInputTokens.toLocaleString()}`
-                  : "") +
-                (usage.longContextRequestCount
-                  ? ` · ${usage.longContextRequestCount} long-context (>272K)`
-                  : "") +
-                (usage.nextPromptEstTokens
-                  ? ` · next prompt est. ${usage.nextPromptEstTokens.toLocaleString()}`
-                  : "") +
-                (cachedTok
-                  ? ` · ${cachedTok.toLocaleString()} cache read`
-                  : "")
-              }
-            >
-              {contextTok > 0
-                ? `${(contextTok / 1000).toFixed(contextTok >= 10_000 ? 0 : 1)}K`
-                : "—"}
-              {" · "}
-              {(promptTok / 1000).toFixed(promptTok >= 10_000 ? 0 : 1)}K
-              {cacheHitPct != null ? ` · ${cacheHitPct}% cached` : ""}
-              {usage.nextPromptEstTokens
-                ? ` · next ~${(usage.nextPromptEstTokens / 1000).toFixed(
-                    usage.nextPromptEstTokens >= 10_000 ? 0 : 1,
-                  )}K`
-                : ""}
-            </span>
-          )}
-          {(cacheHitPct != null || cacheCreateTok > 0) && (
-            <span
-              className="meta-stat cache-hit"
-              title={`${cachedTok.toLocaleString()} of ${promptTok.toLocaleString()} run-cumulative prompt tokens hit the provider cache${
-                cacheCreateTok
-                  ? ` · ${cacheCreateTok.toLocaleString()} written to cache`
-                  : ""
-              }`}
-            >
-              {cacheHitPct != null ? `cache ${cacheHitPct}%` : `cache write ${cacheCreateTok.toLocaleString()}`}
-            </span>
-          )}
-          {efficiencyLabel(usage.efficiency) && (
-            <span className="meta-stat" title={efficiencyLabel(usage.efficiency)}>
-              efficiency
-            </span>
-          )}
-          {runCost != null && totalTok > 0 && (
-            <span
-              className="cost"
-              title={
-                cachedTok
-                  ? "Estimated API cost for this run with prompt-cache discount applied. List price — not a bill."
-                  : "Estimated API cost for this run (last/current turn). List price — not a bill. Cache hits appear here when the provider reports them."
-              }
-            >
-              run ~{formatUsd(runCost)}
-            </span>
-          )}
-          {sessionCostShown > 0 && (
-            <span
-              className="cost session"
-              title="Estimated total for this chat (all runs, cache-aware when reported). Persisted with the chat — survives reload."
-            >
-              session ~{formatUsd(sessionCostShown)}
-            </span>
-          )}
+          <HeaderInfoPanel open={infoOpen} onOpenChange={setInfoOpen}
+            context={ctxPct != null ? `${ctxPct}%` : "—"}
+            cost={sessionCostShown > 0 ? `~${formatUsd(sessionCostShown)}` : "—"}>
+            <section className="info-context-section" aria-label="Context window">
+              <div className="info-section-label"><span>Context window</span><strong>{ctxPct != null ? `${ctxPct}% used` : "No usage yet"}</strong></div>
+              <div className="info-context-track"><span className={ctxPct != null && ctxPct >= 80 ? "is-high" : ""} style={{ width: `${Math.min(100, Math.max(0, ctxPct ?? 0))}%` }} /></div>
+              <div className="info-context-caption"><span>{contextTok > 0 ? `${contextTok.toLocaleString()} tokens` : "Awaiting first request"}</span><span>{ctx ? `${ctx.window.toLocaleString()} limit` : ""}</span></div>
+              {compactPhase && <span className="compact-chip">Compacting · {compactPhase}</span>}
+            </section>
+            <div className="info-cost-grid">
+              <div className="info-metric"><span>Current run</span><strong>{runCost != null && totalTok > 0 ? `~${formatUsd(runCost)}` : "—"}</strong></div>
+              <div className="info-metric info-metric-accent"><span>Session total</span><strong>{sessionCostShown > 0 ? `~${formatUsd(sessionCostShown)}` : "—"}</strong></div>
+              <div className="info-metric"><span>Requests</span><strong>{usage.requestCount ?? "—"}</strong></div>
+            </div>
+            <section className="info-token-section" aria-label="Token usage">
+              <h3>Tokens & cache</h3>
+              <dl className="info-data-rows">
+                <div><dt>Run input</dt><dd>{promptTok.toLocaleString()}</dd></div>
+                <div><dt>Run output</dt><dd>{completionTok.toLocaleString()}</dd></div>
+                <div><dt>Next prompt</dt><dd>{usage.nextPromptEstTokens ? `~${usage.nextPromptEstTokens.toLocaleString()}` : "—"}</dd></div>
+                <div><dt>Cache read</dt><dd className="info-cache-value">{cachedTok.toLocaleString()}</dd></div>
+                <div><dt>Cache write</dt><dd>{cacheCreateTok.toLocaleString()}</dd></div>
+                <div><dt>Cache hit rate</dt><dd className="info-cache-value">{cacheHitPct != null ? `${cacheHitPct}%` : "—"}</dd></div>
+                {usage.maxInputTokens ? <div><dt>Largest input</dt><dd>{usage.maxInputTokens.toLocaleString()}</dd></div> : null}
+                {usage.longContextRequestCount ? <div><dt>Long-context requests</dt><dd>{usage.longContextRequestCount}</dd></div> : null}
+                {efficiencyLabel(usage.efficiency) && <div><dt>Efficiency</dt><dd>{efficiencyLabel(usage.efficiency)}</dd></div>}
+              </dl>
+            </section>
+            <ConversationTimeStats timing={conversationTiming} chatId={chatId} open={infoOpen} />
+            <div className="info-panel-footer"><p>Estimated API costs · cache-aware</p>
           <div className="meta-actions">
             {ADVANCED_RESTORE_FEATURES_AVAILABLE && <>
               <button
@@ -5783,7 +5763,7 @@ export function App() {
             </button>
           </div>
             </div>
-          </details>
+          </HeaderInfoPanel>
         </div>
           <div className={`pill sidecar-${sidecar}`} title={sidecarDetail || sidecar}>
             <span className="pill-dot" />
@@ -7450,6 +7430,17 @@ export function App() {
 
           <section className="settings-section" id="settings-skills">
             <h3 className="settings-heading">Skills</h3>
+            <label className="check">
+              <input type="checkbox" checked={Boolean(settings.skill_usage)}
+                onChange={(e) => setSettings((s) => ({ ...s, skill_usage: e.target.checked }))} />
+              Record skill usage
+            </label>
+            <p className="settings-hint">
+              Off by default. Store successful load counts, distinct chat counts, and last-used times
+              locally for this workspace. Turning this off keeps existing statistics.
+              Independent of local telemetry.
+            </p>
+            <SkillUsageRanking data={skillUsage} enabled={Boolean(settings.skill_usage)} />
             <p className="settings-hint">
               Register folders that contain skills. A folder with{" "}
               <code>SKILL.md</code> registers as one skill; a parent folder registers each

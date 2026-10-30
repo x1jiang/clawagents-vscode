@@ -109,13 +109,13 @@ test("modelFitsProvider rejects ollama leftovers on OpenAI", () => {
   assert.equal(mod.defaultModelForProvider("xai"), mod.PREFERRED_XAI_MODEL);
 });
 
-test("OpenAI defaults to GPT-5.6 Terra", () => {
+test("OpenAI defaults to GPT-6.1 Terra", () => {
   // Must stay in step with settings_store._default_model_for_provider on the
   // sidecar; if they disagree, the healer rewrites what the UI just picked.
-  assert.equal(mod.PREFERRED_OPENAI_MODEL, "gpt-5.6-terra");
-  assert.equal(mod.defaultModelForProvider("openai"), "gpt-5.6-terra");
+  assert.equal(mod.PREFERRED_OPENAI_MODEL, "gpt-6.1-terra");
+  assert.equal(mod.defaultModelForProvider("openai"), "gpt-6.1-terra");
   // The unknown-provider fallback is an OpenAI id, so it moves too.
-  assert.equal(mod.defaultModelForProvider("nonesuch"), "gpt-5.6-terra");
+  assert.equal(mod.defaultModelForProvider("nonesuch"), "gpt-6.1-terra");
 });
 
 test("pickPreferredModel pins OpenAI + Terra when the OpenAI key is available", () => {
@@ -127,7 +127,7 @@ test("pickPreferredModel pins OpenAI + Terra when the OpenAI key is available", 
     xai: true,
   });
   const pick = mod.pickPreferredModel(keyed);
-  assert.equal(pick.model, "gpt-5.6-terra");
+  assert.equal(pick.model, "gpt-6.1-terra");
   assert.equal(pick.provider, "openai");
   assert.equal(pick.effort, "medium");
 
@@ -140,7 +140,7 @@ test("pickPreferredModel pins OpenAI + Terra when the OpenAI key is available", 
     xai: true,
   });
   assert.deepEqual(mod.pickPreferredModel(both), {
-    model: "gpt-5.6-terra",
+    model: "gpt-6.1-terra",
     effort: "medium",
     provider: "openai",
   });
@@ -176,7 +176,7 @@ test("isWeakAutoDefaultModel flags race-time Grok/Ollama picks", () => {
   assert.equal(mod.isWeakAutoDefaultModel(""), true);
   assert.equal(mod.isWeakAutoDefaultModel("grok-4.5"), true);
   assert.equal(mod.isWeakAutoDefaultModel("llama3.1"), true);
-  assert.equal(mod.isWeakAutoDefaultModel("gpt-5.6-terra"), false);
+  assert.equal(mod.isWeakAutoDefaultModel("gpt-6.1-terra"), false);
   assert.equal(mod.isWeakAutoDefaultModel("claude-sonnet-4-5"), false);
 });
 
@@ -195,7 +195,7 @@ test("the default OpenAI model is offered and correctly labelled", () => {
   const openai = mod.FALLBACK_PROVIDERS.find((p) => p.id === "openai");
   const hit = openai.models.filter((m) => m.id === mod.PREFERRED_OPENAI_MODEL);
   assert.equal(hit.length, 1, "default must appear exactly once");
-  assert.equal(hit[0].label, "GPT-5.6 Terra");
+  assert.equal(hit[0].label, "GPT-6.1 Terra");
   assert.equal(mod.modelFitsProvider(mod.PREFERRED_OPENAI_MODEL, "openai"), true);
   // Luna stays selectable, just no longer the default.
   assert.ok(openai.models.some((m) => m.id === "gpt-5.6-luna"));
