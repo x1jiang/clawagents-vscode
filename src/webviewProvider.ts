@@ -46,6 +46,7 @@ import type {
   AutoApprove,
   ChatSummary,
   ChatGroup,
+  ConversationTiming,
   HostToWebview,
   InteractionStyle,
   JobSummary,
@@ -597,6 +598,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({
       type: "restore",
       usage: !isBusy && mappedUsage?.type === "usage" ? mappedUsage : undefined,
+      timing: chat.timing as ConversationTiming | undefined,
       items: eventsToItems(events, this.eventsOffset),
       draft: draft ?? this.draftForChat(chatId),
       mode: (chat.mode as AgentMode) || this.mode,
@@ -1757,6 +1759,13 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
         }
         break;
+      case "get_conversation_timing": {
+        const meta = await this.gateway.getChatMeta(msg.chatId).catch(() => undefined);
+        if (meta?.timing) {
+          this.post({ type: "conversation_timing", chatId: msg.chatId, timing: meta.timing as ConversationTiming });
+        }
+        break;
+      }
       case "select_chat":
         this.chatId = msg.chatId;
         await this.persistLocal(this.persistState());
@@ -2925,6 +2934,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "graphify_action":
         await this.handleGraphifyAction(msg.action);
+        break;
+      case "load_skill_usage":
+      case "clear_skill_usage":
+        try {
+          const data = msg.type === "clear_skill_usage"
+            ? await this.gateway.clearSkillUsage()
+            : await this.gateway.getSkillUsage();
+          this.post({ type: "skill_usage", data });
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
         break;
       case "load_stats":
         try {

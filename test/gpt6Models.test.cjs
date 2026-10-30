@@ -29,7 +29,7 @@ test("Fast toggle is available only for supported direct OpenAI models", () => {
 });
 test("GPT-6 Sol and Luna are OpenAI-only additions without changing defaults", () => {
   const openai = catalog.FALLBACK_PROVIDERS.find(p => p.id === "openai");
-  assert.equal(openai.models[0].id, "gpt-5.6-terra");
+  assert.equal(openai.models[0].id, "gpt-6.1-terra");
   for (const id of ["gpt-6-sol", "gpt-6-luna"]) {
     assert(openai.models.some(m => m.id === id));
     const rows = catalog.expandBedrockProviderChoices(catalog.FALLBACK_PROVIDERS, {iam: false, mantle: true, bag: false});

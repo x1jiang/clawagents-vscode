@@ -8,6 +8,11 @@ import type { Efficiency } from "./efficiency";
  */
 export const ADVANCED_RESTORE_FEATURES_AVAILABLE = false;
 
+export type SkillUsageStats = {
+  enabled: boolean;
+  skills: Array<{ name: string; loads: number; chats: number; last_used: number }>;
+};
+
 export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
 
 /** How the agent talks to you during a turn. */
@@ -45,6 +50,17 @@ export type ModelRoute = {
   fast_mode?: boolean;
 };
 
+export type ConversationTiming = {
+  created_at?: number;
+  last_activity_at?: number;
+  tracked_since?: number | null;
+  cumulative_ms: number;
+  last_run_ms?: number | null;
+  run_count: number;
+  active_runs: number;
+  sampled_at: number;
+};
+
 export type ChatSummary = {
   id: string;
   title: string;
@@ -78,6 +94,7 @@ export type QueryIndexEntry = {
 };
 
 export type HostToWebview =
+  | { type: "conversation_timing"; timing: ConversationTiming; chatId?: string }
   | { type: "clipboard_result"; requestId: string; ok: boolean }
   | { type: "gemma_local_status"; phase: string; message: string; endpoint?: string }
   | {
@@ -213,6 +230,7 @@ export type HostToWebview =
   | { type: "prepend"; text: string }
   | {
       type: "restore";
+      timing?: ConversationTiming;
       usage?: Extract<HostToWebview, { type: "usage" }>;
       items: unknown[];
       draft?: string;
@@ -332,6 +350,7 @@ export type HostToWebview =
   | { type: "diagnostics"; data: unknown }
   | { type: "graphify_status"; data: Record<string, unknown> }
   | { type: "stats"; data: unknown }
+  | { type: "skill_usage"; data: SkillUsageStats }
   | {
       type: "bug_report_result";
       ok: boolean;
@@ -417,6 +436,7 @@ export type JobSummary = {
 };
 
 export type WebviewToHost =
+  | { type: "get_conversation_timing"; chatId: string }
   | { type: "transcript_selection"; text: string }
   | { type: "copy_text"; requestId: string; text: string }
   | { type: "ready" }
@@ -544,6 +564,8 @@ export type WebviewToHost =
         | "open_folder";
     }
   | { type: "load_stats" }
+  | { type: "load_skill_usage" }
+  | { type: "clear_skill_usage" }
   | {
       type: "persist";
       draft: string;
@@ -585,7 +607,7 @@ const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "unlock_chat", "restart_sidecar", "select_python", "install_python_deps", "load_settings", "setup_local_gemma", "stop_local_gemma",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
-  "load_stats", "bug_report_capture_screenshot", "load_older_chat", "load_query_index",
+  "load_stats", "load_skill_usage", "clear_skill_usage", "bug_report_capture_screenshot", "load_older_chat", "load_query_index",
   "list_jobs", "load_pinned",
 ]);
 
@@ -727,7 +749,7 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return GRAPHIFY_ACTIONS.has(String(value.action))
         ? value as WebviewToHost
         : undefined;
-    case "select_chat": case "delete_chat":
+    case "get_conversation_timing": case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
     case "jump_to_query":
       return Number.isInteger(value.eventIndex) && Number(value.eventIndex) >= 0

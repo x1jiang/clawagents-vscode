@@ -7,6 +7,7 @@ import type {
   AutoApprove,
   ChatSummary,
   ChatGroup,
+  ConversationTiming,
   HostToWebview,
   InteractionStyle,
   JobSummary,
@@ -158,6 +159,8 @@ export function mapAgentEvent(
   data: Record<string, unknown>,
 ): HostToWebview | null {
   switch (kind) {
+    case "conversation_timing":
+      return { type: "conversation_timing", timing: data as ConversationTiming };
     case "assistant_delta":
       return { type: "assistant_delta", delta: String(data.delta ?? data.text ?? "") };
     case "assistant_message":
@@ -520,6 +523,14 @@ export class GatewayClient {
       "GET",
       "/graphify/status",
     );
+  }
+
+  getSkillUsage() {
+    return requestJson<import("./protocol").SkillUsageStats>(this.requireHandle(), "GET", "/skills/usage");
+  }
+
+  clearSkillUsage() {
+    return requestJson<import("./protocol").SkillUsageStats>(this.requireHandle(), "POST", "/skills/usage/clear", {});
   }
 
   getStats() {

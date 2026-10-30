@@ -11,7 +11,7 @@ import pricing
 ])
 def test_gpt6_catalog_and_prices(model, rates):
     openai = next(p for p in providers._CATALOG if p["id"] == "openai")
-    assert openai["models"][0]["id"] == "gpt-5.6-terra"
+    assert openai["models"][0]["id"] == "gpt-6.1-terra"
     assert any(m["id"] == model for m in openai["models"])
     assert pricing.price_for_full(model) == rates
     assert pricing.price_for_full(model + "-2026-09-22") == rates
