@@ -1,16 +1,12 @@
-# 1.0.208
-
-- Fix Windows Markdown file URLs resolving with an extra slash before the drive letter; preserve encoded paths and line references.
-
-- Add opt-in, workspace-local skill usage tracking with successful load counts, distinct chat counts, last-used times, and a clearable ranking in Settings → Skills.
-
-- Restore saved new-chat model settings on startup without mistaking the empty initial draft for unsaved edits; wait for persisted settings before selecting a default, and default OpenAI to GPT-6.1 Terra with Medium effort.
-
-- Redesign Info as a floating session card with a hover preview, grouped context, cost, token/cache and timing statistics, responsive positioning, and Escape/outside-click dismissal.
+# 1.0.209
 
 - Show per-conversation cumulative agent time, current/last run duration, conversation span, tracked run count, and activity dates in Info; persist completed-run timing across reloads.
+- Redesign Info as a floating session card with a hover preview, grouped context, cost, token/cache and timing statistics, responsive positioning, and Escape/outside-click dismissal.
+- Add opt-in, workspace-local skill usage tracking with successful load counts, distinct chat counts, last-used times, and a clearable ranking in Settings → Skills.
+- Restore saved new-chat model settings on startup without mistaking the empty initial draft for unsaved edits; wait for persisted settings before selecting a default, and default OpenAI to GPT-6.1 Terra with Medium effort.
+- Open Markdown report and file links through the VS Code workspace file handler, preserving local file URLs, encoded paths, and line references, and fix Windows Markdown file URLs resolving with an extra slash before the drive letter.
 
-- Open Markdown report and file links through the VS Code workspace file handler, preserving local file URLs, encoded paths, and line references.
+# 1.0.208
 
 - Copy selected transcript text through a dedicated VS Code command for Ctrl/Cmd+C and the right-click menu, preserving the selection snapshot while the menu takes focus.
 - Copy messages, background job output, and diagnostic reports through the VS Code clipboard bridge, with acknowledged results and visible message-copy failures.
