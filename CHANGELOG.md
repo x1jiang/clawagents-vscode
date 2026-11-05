@@ -1,3 +1,7 @@
+# Unreleased
+
+- Estimate per-conversation message preparation and file viewing time in Info, with one-minute resume windows and overlapping time counted once. Add a workspace setting to turn tracking off.
+
 # 1.0.209
 
 - Show per-conversation cumulative agent time, current/last run duration, conversation span, tracked run count, and activity dates in Info; persist completed-run timing across reloads.

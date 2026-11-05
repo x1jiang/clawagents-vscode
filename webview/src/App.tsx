@@ -49,6 +49,7 @@ import {
 import { estimateCostUsd, formatUsd, type ModelPrice } from "./pricing";
 import { contextUsage } from "./contextWindow";
 import { ConversationTimeStats } from "./ConversationTimeStats";
+import { HumanTimeStats } from "./HumanTimeStats";
 import type { ConversationTiming } from "../../src/protocol";
 import { checkpointTs, formatCheckpointWhen } from "./formatTime";
 import {
@@ -1259,6 +1260,7 @@ type RichMarkdownEditorProps = {
   onChange: (markdown: string) => void;
   /** Called when an in-place edit removes the final Markdown construct. */
   onExitToPlain: (text: string) => void;
+  onEdit: (text: string) => void;
   onSend: () => void;
   onPasteFiles: (files: File[]) => void;
   /** Only set for a live textarea → rich-editor transition, never a restore. */
@@ -1274,6 +1276,7 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
   syncKey,
   onChange,
   onExitToPlain,
+  onEdit,
   onSend,
   onPasteFiles,
   restoreFocus,
@@ -1317,6 +1320,7 @@ const RichMarkdownEditor = memo(function RichMarkdownEditor({
   }, [onFocusRestored, restoreFocus]);
 
   const syncEditedMarkdown = (next: string) => {
+    onEdit(next);
     lastEditedMarkdownRef.current = next;
     if (hasMarkdownFormatting(next)) onChange(next);
     else onExitToPlain(next);
@@ -2165,6 +2169,45 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [conversationTiming, setConversationTiming] = useState<ConversationTiming>();
   const [infoOpen, setInfoOpen] = useState(false);
+  const [humanTimingEnabled, setHumanTimingEnabled] = useState(true);
+  const humanTimingEnabledRef = useRef(true);
+  const inputPulse = useRef<{ chatId?: string; at: number }>();
+  const endHumanInput = useCallback(() => {
+    inputPulse.current = undefined;
+    post({ type: "human_input", active: false });
+  }, []);
+  const recordHumanInput = useCallback((text: string, chatId?: string) => {
+    if (!humanTimingEnabledRef.current) return;
+    if (!text) {
+      endHumanInput();
+      return;
+    }
+    const now = performance.now();
+    const previous = inputPulse.current;
+    if (previous && previous.chatId === chatId && now - previous.at < 1000) return;
+    inputPulse.current = { chatId, at: now };
+    post({ type: "human_input", active: true, chatId });
+  }, [endHumanInput]);
+  useEffect(() => {
+    const focus = () => post({ type: "human_view_focus", focused: document.hasFocus() && !document.hidden });
+    const blur = () => {
+      inputPulse.current = undefined;
+      post({ type: "human_view_focus", focused: false });
+    };
+    window.addEventListener("focus", focus);
+    window.addEventListener("blur", blur);
+    document.addEventListener("visibilitychange", documentFocus);
+    function documentFocus() {
+      if (document.hidden) blur();
+      else focus();
+    }
+    focus();
+    return () => {
+      window.removeEventListener("focus", focus);
+      window.removeEventListener("blur", blur);
+      document.removeEventListener("visibilitychange", documentFocus);
+    };
+  }, []);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [hasTavilyKey, setHasTavilyKey] = useState(false);
   const [hasBedrockKey, setHasBedrockKey] = useState(false);
@@ -2609,7 +2652,8 @@ export function App() {
     panelRef.current = next;
     setPanel(next);
     if (next === "chat") acknowledgeUnread(chatIdRef.current);
-  }, [acknowledgeUnread]);
+    else endHumanInput();
+  }, [acknowledgeUnread, endHumanInput]);
 
   // Keep chatIdRef in sync so the onMessage closure (which never
   // re-creates thanks to the [] deps array) can read the latest value.
@@ -2926,6 +2970,11 @@ export function App() {
         return;
       }
       switch (msg.type) {
+        case "human_timing_enabled":
+          humanTimingEnabledRef.current = msg.enabled;
+          setHumanTimingEnabled(msg.enabled);
+          if (!msg.enabled) endHumanInput();
+          break;
         case "conversation_timing":
           if (!isStaleEvent(msg)) setConversationTiming(msg.timing);
           break;
@@ -3355,6 +3404,7 @@ export function App() {
           }
           const restoredChatId =
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
+          if (restoredChatId !== chatIdRef.current) endHumanInput();
           setPinnedEditing(false);
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
@@ -3910,6 +3960,7 @@ export function App() {
             });
             setBugReportStatus("Transcribed");
           } else {
+            recordHumanInput(piece, chatIdRef.current);
             setDraft((prev) => {
               const sep = prev && !/\s$/.test(prev) ? " " : "";
               return `${prev}${sep}${piece}${piece.endsWith(" ") ? "" : " "}`;
@@ -4240,6 +4291,7 @@ export function App() {
 
   /** Flush the current composer, then drop ownership until restore (or error) lands. */
   const beginDraftHandoff = () => {
+    endHumanInput();
     persistDraftNow();
     draftOwnerBeforeNavRef.current = draftOwnerRef.current;
     draftOwnerRef.current = undefined;
@@ -4249,6 +4301,7 @@ export function App() {
   const clearDraft = () => {
     setDraft("");
     persistDraftNow("");
+    endHumanInput();
     setComposerPreviewCollapsed(false);
   };
 
@@ -5675,6 +5728,9 @@ export function App() {
               </dl>
             </section>
             <ConversationTimeStats timing={conversationTiming} chatId={chatId} open={infoOpen} />
+            {humanTimingEnabled && infoOpen && chatId && panel === "chat" && (
+              <HumanTimeStats key={chatId} chatId={chatId} />
+            )}
             <div className="info-panel-footer"><p>Estimated API costs · cache-aware</p>
           <div className="meta-actions">
             {ADVANCED_RESTORE_FEATURES_AVAILABLE && <>
@@ -8004,6 +8060,18 @@ export function App() {
 
           <section className="settings-section" id="settings-advanced">
             <h3 className="settings-heading">Advanced</h3>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={humanTimingEnabled}
+                onChange={(e) => post({ type: "set_human_timing", enabled: e.target.checked })}
+              />
+              Estimate human time
+            </label>
+            <p className="settings-hint">
+              Track message preparation and time spent viewing files linked to a conversation.
+              Totals are saved in this workspace.
+            </p>
             <p className="muted tiny" style={{ marginTop: 0 }}>
               Changes autosave after a short pause. API keys live under the Provider card
               above (and Tavily under Browser / web). Command Palette still has Set/Clear
@@ -8689,6 +8757,7 @@ export function App() {
                     syncKey={chatId ?? "new"}
                     markdown={draft}
                     onChange={setDraft}
+                    onEdit={(text) => recordHumanInput(text, chatIdRef.current)}
                     onExitToPlain={(text) => {
                       composerFocusTargetRef.current = "plain";
                       setDraft(text);
@@ -8715,6 +8784,7 @@ export function App() {
                     value={draft}
                     onChange={(e) => {
                       const next = e.target.value;
+                      recordHumanInput(next, chatIdRef.current);
                       if (hasMarkdownFormatting(next)) composerFocusTargetRef.current = "rich";
                       setDraft(next);
                     }}
@@ -8740,6 +8810,7 @@ export function App() {
                             target.value.slice(0, target.selectionStart) +
                             pastedText +
                             target.value.slice(target.selectionEnd);
+                          recordHumanInput(next, chatIdRef.current);
                           if (hasMarkdownFormatting(next)) composerFocusTargetRef.current = "rich";
                           setDraft(next);
                           setComposerPreviewCollapsed(
@@ -9009,14 +9080,14 @@ export function App() {
               goal: goalMode,
             });
           }}
-          onDraftChange={(draft) => replaceSideChat(
-            sideChat.parentChatId,
-            (current) => ({ ...current, draft }),
-          )}
-          onMinimize={() => replaceSideChat(
-            sideChat.parentChatId,
-            (current) => ({ ...current, minimized: !current.minimized }),
-          )}
+          onDraftChange={(draft) => {
+            recordHumanInput(draft, sideChat.chatId);
+            replaceSideChat(sideChat.parentChatId, (current) => ({ ...current, draft }));
+          }}
+          onMinimize={() => {
+            endHumanInput();
+            replaceSideChat(sideChat.parentChatId, (current) => ({ ...current, minimized: !current.minimized }));
+          }}
           onPeekYChange={(peekY) => replaceSideChat(
             sideChat.parentChatId,
             (current) => ({ ...current, peekY }),
@@ -9030,6 +9101,7 @@ export function App() {
             (current) => ({ ...current, maximized: !current.maximized }),
           )}
           onClose={() => {
+            endHumanInput();
             post({ type: "close_side_chat", chatId: sideChat.chatId });
             replaceSideChat(sideChat.parentChatId, null);
           }}
