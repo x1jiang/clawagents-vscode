@@ -1,3 +1,4 @@
+import type { HumanTimingTotals } from "./humanTiming";
 import type { Efficiency } from "./efficiency";
 /** Typed messages between the extension host and the webview. */
 
@@ -94,6 +95,8 @@ export type QueryIndexEntry = {
 };
 
 export type HostToWebview =
+  | { type: "human_timing_enabled"; enabled: boolean }
+  | { type: "human_timing"; chatId: string; totals: HumanTimingTotals }
   | { type: "conversation_timing"; timing: ConversationTiming; chatId?: string }
   | { type: "clipboard_result"; requestId: string; ok: boolean }
   | { type: "gemma_local_status"; phase: string; message: string; endpoint?: string }
@@ -436,6 +439,10 @@ export type JobSummary = {
 };
 
 export type WebviewToHost =
+  | { type: "set_human_timing"; enabled: boolean }
+  | { type: "get_human_timing"; chatId: string }
+  | { type: "human_view_focus"; focused: boolean }
+  | { type: "human_input"; active: boolean; chatId?: string }
   | { type: "get_conversation_timing"; chatId: string }
   | { type: "transcript_selection"; text: string }
   | { type: "copy_text"; requestId: string; text: string }
@@ -749,7 +756,14 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return GRAPHIFY_ACTIONS.has(String(value.action))
         ? value as WebviewToHost
         : undefined;
-    case "get_conversation_timing": case "select_chat": case "delete_chat":
+    case "set_human_timing":
+      return typeof value.enabled === "boolean" ? value as WebviewToHost : undefined;
+    case "human_view_focus":
+      return typeof value.focused === "boolean" ? value as WebviewToHost : undefined;
+    case "human_input":
+      return typeof value.active === "boolean" && optionalOpaqueId(value.chatId)
+        ? value as WebviewToHost : undefined;
+    case "get_human_timing": case "get_conversation_timing": case "select_chat": case "delete_chat":
       return opaqueId(value.chatId) ? value as WebviewToHost : undefined;
     case "jump_to_query":
       return Number.isInteger(value.eventIndex) && Number(value.eventIndex) >= 0

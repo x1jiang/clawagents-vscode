@@ -15,6 +15,7 @@ export type {
 export { PINNED_CONTEXT_MAX_CHARS, PLAN_FEEDBACK_MAX_CHARS } from "../../src/protocol";
 
 import type { HostToWebview, WebviewToHost } from "../../src/protocol";
+import { HumanTiming } from "../../src/humanTiming";
 
 interface VsCodeApi {
   postMessage(message: WebviewToHost): void;
@@ -37,6 +38,8 @@ export function hasVsCodeHost(): boolean {
  */
 function previewApi(): VsCodeApi {
   let state: unknown;
+  let humanTimingEnabled = true;
+  const humanTiming = new HumanTiming();
   const emit = (message: HostToWebview) => {
     window.setTimeout(() => {
       window.dispatchEvent(new MessageEvent("message", { data: message }));
@@ -78,6 +81,17 @@ function previewApi(): VsCodeApi {
             telemetry_enabled: false,
           },
         });
+      } else if (message.type === "set_human_timing") {
+        humanTimingEnabled = message.enabled;
+        if (!humanTimingEnabled) humanTiming.stop();
+        emit({ type: "human_timing_enabled", enabled: humanTimingEnabled });
+      } else if (message.type === "human_view_focus" && !message.focused && humanTimingEnabled) {
+        humanTiming.suspendInput();
+      } else if (message.type === "human_input" && humanTimingEnabled) {
+        if (message.active) humanTiming.pulse(message.chatId || "preview-main", "input");
+        else humanTiming.stop("input");
+      } else if (message.type === "get_human_timing" && humanTimingEnabled) {
+        emit({ type: "human_timing", chatId: message.chatId, totals: humanTiming.snapshot(message.chatId) });
       } else if (message.type === "open_side_chat") {
         emit({
           type: "side_chat_open",

@@ -1,3 +1,4 @@
+import { HumanTimingMonitor } from "./humanTimingMonitor";
 import { mapAgentEvent } from "./gatewayClient";
 import * as crypto from "crypto";
 import * as fs from "fs";
@@ -276,6 +277,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   /** File attachments (PDF/DOCX) staged for the next send — same contract. */
   private pendingFiles: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
   private readonly gateway: GatewayClient;
+  private readonly humanTiming: HumanTimingMonitor;
   /** Background jobs are polled, not pushed: they outlive the run whose SSE
    *  stream would have carried them, so there is no stream to listen on once
    *  the turn that started them has ended. */
@@ -334,6 +336,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     );
     hostDictation.configure(context.extensionPath, context.globalState);
     this.gateway = new GatewayClient(() => this.sidecar.current);
+    this.humanTiming = new HumanTimingMonitor(
+      context.workspaceState,
+      () => this.chatId,
+      (message) => this.sidecar.output.appendLine(`[Human timing] ${message}`),
+    );
     this.mode = this.config.defaultMode;
     // Chats live under the workspace's .clawagents dir, so the pointer to
     // the active chat must be workspace-scoped too.
@@ -410,6 +417,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
+    this.humanTiming.setViewFocused(false);
+    this.humanTiming.listen();
     this.setTranscriptSelection("");
     webviewView.webview.options = {
       enableScripts: true,
@@ -428,7 +437,8 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       void this.handleMessage(msg);
     });
     webviewView.onDidChangeVisibility(() => {
-      if (!webviewView.visible) {
+      if (this.view === webviewView && !webviewView.visible) {
+        this.humanTiming.setViewFocused(false);
         this.setTranscriptSelection("");
         this.post({ type: "view_hidden" } as HostToWebview);
       }
@@ -565,6 +575,17 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private rememberTimedFile(chatId: string, file: string): void {
+    if (!this.humanTiming.enabled) return;
+    const root = workspaceRoot();
+    if (!root) return;
+    const resolved = path.resolve(root, file);
+    const relative = path.relative(root, resolved);
+    if (relative && relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative)) {
+      this.humanTiming.rememberFile(chatId, resolved);
+    }
+  }
+
   private async postChatRestore(
     chatId: string,
     chat: Record<string, unknown>,
@@ -589,6 +610,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     const title =
       (typeof chatTitle === "string" && chatTitle.trim()) ||
       (typeof chat.title === "string" ? chat.title : undefined);
+    const items = eventsToItems(events, this.eventsOffset);
+    for (const item of items as Array<{ kind: string; path?: string }>) {
+      if (item.kind === "file" && item.path) this.rememberTimedFile(chatId, item.path);
+    }
+    this.humanTiming.refreshFile();
     const lastDone = [...events].reverse().find((event) => event.kind === "done");
     const savedUsage = lastDone?.usage;
     const mappedUsage = savedUsage && typeof savedUsage === "object"
@@ -599,7 +625,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       type: "restore",
       usage: !isBusy && mappedUsage?.type === "usage" ? mappedUsage : undefined,
       timing: chat.timing as ConversationTiming | undefined,
-      items: eventsToItems(events, this.eventsOffset),
+      items,
       draft: draft ?? this.draftForChat(chatId),
       mode: (chat.mode as AgentMode) || this.mode,
       chatId,
@@ -1195,7 +1221,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   private clearCurrentChat(draft = ""): void {
+    this.humanTiming.endInput();
     this.chatId = undefined;
+    this.humanTiming.refreshFile();
     this.rememberDraft(undefined, draft);
     this.eventsOffset = 0;
     this.eventsHasMore = false;
@@ -1437,12 +1465,36 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "ready":
+        this.post({ type: "human_timing_enabled", enabled: this.humanTiming.enabled });
         // Show the webview immediately; never block the first paint on a
         // slow/hung Python sidecar (that left the CLAWAGENTS tab spinning).
         this.post({ type: "sidecar", state: "starting" });
         void this.bootstrapAfterReady();
         break;
-      case "send":
+      case "human_view_focus":
+        this.humanTiming.setViewFocused(msg.focused && Boolean(this.view?.visible));
+        break;
+      case "human_input":
+        if (!msg.active) {
+          this.humanTiming.endInput();
+        } else if (this.view?.visible && (msg.chatId === this.chatId ||
+            (msg.chatId && this.sideChats.get(this.chatId || "") === msg.chatId))) {
+          this.humanTiming.input(msg.chatId ?? "");
+        }
+        break;
+      case "set_human_timing":
+        this.humanTiming.setEnabled(msg.enabled);
+        this.post({ type: "human_timing_enabled", enabled: this.humanTiming.enabled });
+        break;
+      case "get_human_timing":
+        if (this.humanTiming.enabled && msg.chatId === this.chatId) {
+          this.post({ type: "human_timing", chatId: msg.chatId, totals: this.humanTiming.timer.snapshot(msg.chatId) });
+        }
+        break;
+      case "send": {
+        this.humanTiming.endInput();
+        const unassignedInputMs = !msg.chatId && !this.chatId
+          ? this.humanTiming.timer.takeUnassignedInput() : 0;
         this.mode = msg.mode;
         if (msg.autoApprove) {
           this.autoApprove = { ...DEFAULT_AUTO_APPROVE, ...msg.autoApprove };
@@ -1469,8 +1521,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           msg.model,
           turnSettings,
           msg.modelRoute,
+          unassignedInputMs,
         );
         break;
+      }
       case "queue_send": {
         // Prefer mid-turn redirect when a run is active; else queue for next turn.
         const targetChatId = msg.chatId || this.chatId;
@@ -1753,6 +1807,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             await this.cancelTask(msg.chatId);
           }
           await this.gateway.deleteChat(msg.chatId);
+          this.humanTiming.forgetChat(msg.chatId);
           this.pendingInteractions.delete(msg.chatId);
           await this.refreshChats();
         } catch (err) {
@@ -1767,7 +1822,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "select_chat":
+        this.humanTiming.endInput();
         this.chatId = msg.chatId;
+        this.humanTiming.refreshFile();
         await this.persistLocal(this.persistState());
         try {
           const wasRunning = this.runs.isActive(msg.chatId);
@@ -1865,7 +1922,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.applyChatBatch(
             chatIds,
             "deleted",
-            (chatId) => this.gateway.deleteChat(chatId),
+            async (chatId) => {
+              await this.gateway.deleteChat(chatId);
+              this.humanTiming.forgetChat(chatId);
+            },
             true,
           );
         } catch (err) {
@@ -3591,6 +3651,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this.setTranscriptSelection("");
+    this.humanTiming.dispose();
     this.localGemma.dispose();
     this.autoOpen.dispose();
     this.stopJobPolling();
@@ -3776,6 +3837,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     modelOverride?: string,
     settingsOverride?: TurnSettings,
     modelRouteOverride?: ModelRoute,
+    unassignedInputMs = 0,
   ): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -3832,6 +3894,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     let runChatId: string;
     try {
       runChatId = await this.resolveRunChatId(requestedChatId, turnSettings.mode);
+      if (unassignedInputMs > 0) {
+        this.humanTiming.timer.addInput(runChatId, unassignedInputMs);
+        this.humanTiming.scheduleSave();
+      }
     } catch (err) {
       this.post({
         type: "error",
@@ -3969,6 +4035,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             }
 
             if (ev.type === "file_changed" && ev.path) {
+              this.rememberTimedFile(runChatId, ev.path);
               this.post(tagged);
               if (
                 vscode.workspace
