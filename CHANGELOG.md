@@ -1,4 +1,4 @@
-# Unreleased
+# 1.0.210
 
 - Estimate per-conversation message preparation and file viewing time in Info, with one-minute resume windows and overlapping time counted once. Add a workspace setting to turn tracking off.
 
