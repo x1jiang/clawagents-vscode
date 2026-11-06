@@ -1222,6 +1222,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
 
   private clearCurrentChat(draft = ""): void {
     this.humanTiming.endInput();
+    this.humanTiming.pauseReading();
     this.chatId = undefined;
     this.humanTiming.refreshFile();
     this.rememberDraft(undefined, draft);
@@ -1473,6 +1474,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         break;
       case "human_view_focus":
         this.humanTiming.setViewFocused(msg.focused && Boolean(this.view?.visible));
+        break;
+      case "human_reading":
+        if (msg.chatId === this.chatId) {
+          if (!msg.active) this.humanTiming.pauseReading();
+          else if (this.view?.visible) this.humanTiming.reading(msg.chatId, msg.background);
+        }
         break;
       case "human_input":
         if (!msg.active) {
@@ -1823,6 +1830,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       }
       case "select_chat":
         this.humanTiming.endInput();
+        this.humanTiming.pauseReading();
         this.chatId = msg.chatId;
         this.humanTiming.refreshFile();
         await this.persistLocal(this.persistState());

@@ -24,6 +24,14 @@ test("accepts a legitimate send request", () => {
   assert.deepEqual(parseWebviewToHost(message), message);
 });
 
+test("thread reading requires a chat owner and typed activity and background flags", () => {
+  const message = { type: "human_reading", chatId: "chat-123", active: true, background: true };
+  assert.deepEqual(parseWebviewToHost(message), message);
+  for (const patch of [{ chatId: undefined }, { chatId: "" }, { active: "true" }, { background: 1 }]) {
+    assert.equal(parseWebviewToHost({ ...message, ...patch }), undefined);
+  }
+});
+
 test("accepts bounded thread model routes and rejects malformed providers", () => {
   const modelRoute = {
     provider: "anthropic",

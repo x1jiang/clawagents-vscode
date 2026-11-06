@@ -1,12 +1,13 @@
-export type HumanActivity = "input" | "file";
+export type HumanActivity = "input" | "file" | "reading";
 
 export type HumanTimingTotals = {
   inputMs: number;
   fileMs: number;
+  readingMs: number;
 };
 
 export type HumanTimingState = {
-  totals: Array<[string, HumanTimingTotals]>;
+  totals: Array<[string, Omit<HumanTimingTotals, "readingMs"> & { readingMs?: number }]>;
   files: Array<[string, string[]]>;
 };
 
@@ -17,7 +18,7 @@ export interface HumanTimingPolicy {
 }
 
 export const defaultHumanTimingPolicy: HumanTimingPolicy = {
-  idleLimitMs: (activity) => activity === "input" ? 120_000 : 180_000,
+  idleLimitMs: (activity) => activity === "input" ? 120_000 : activity === "reading" ? 90_000 : 180_000,
   resumeGraceMs: () => 60_000,
   fileOwner(owners, selectedChat) {
     if (selectedChat && owners.has(selectedChat)) return selectedChat;
@@ -33,7 +34,8 @@ type Segment = {
   idleAt: number;
 };
 
-const totalKey = { input: "inputMs", file: "fileMs" } as const;
+const totalKey = { input: "inputMs", file: "fileMs", reading: "readingMs" } as const;
+const activities = Object.keys(totalKey) as HumanActivity[];
 
 type Pause = {
   chatId: string;
@@ -45,7 +47,7 @@ type Pause = {
 type Interval = { start: number; end: number };
 
 /** One active segment per window. Keep credited intervals only while a pause
- * may be filled, so either activity can resume without double counting. */
+ * may be filled, so any activity can resume without double counting. */
 export class HumanTiming {
   private segment?: Segment;
   private readonly pauses: Partial<Record<HumanActivity, Pause>> = {};
@@ -58,12 +60,16 @@ export class HumanTiming {
     private readonly policy = defaultHumanTimingPolicy,
     private readonly now = () => performance.now(),
   ) {
-    this.totals = new Map(state?.totals);
+    this.totals = new Map(state?.totals.map(([id, totals]) => [id, { ...totals, readingMs: totals.readingMs ?? 0 }]));
     this.files = new Map(state?.files.map(([file, chats]) => [file, new Set(chats)]));
   }
 
   pulse(chatId: string, kind: HumanActivity): void {
     this.resume(chatId, kind, chatId);
+  }
+
+  suspendReading(): void {
+    this.suspend("reading");
   }
 
   suspendInput(): void {
@@ -119,7 +125,7 @@ export class HumanTiming {
   private credit(chatId: string, kind: HumanActivity, start: number, end: number): void {
     if (end <= start) return;
     this.addElapsed(chatId, kind, end - start);
-    if (!this.pauses.input && !this.pauses.file) return;
+    if (!activities.some((kind) => this.pauses[kind])) return;
     const merged: Interval[] = [];
     let inserted = false;
     for (const interval of this.occupied) {
@@ -139,11 +145,11 @@ export class HumanTiming {
   }
 
   private pruneIntervals(now: number): void {
-    for (const kind of ["input", "file"] as const) {
+    for (const kind of activities) {
       const pause = this.pauses[kind];
       if (pause && now > pause.expiresAt) delete this.pauses[kind];
     }
-    const earliest = Math.min(this.pauses.input?.startedAt ?? Infinity, this.pauses.file?.startedAt ?? Infinity);
+    const earliest = Math.min(...activities.map((kind) => this.pauses[kind]?.startedAt ?? Infinity));
     if (this.occupied.length && this.occupied[0].end <= earliest) {
       this.occupied = this.occupied.filter((interval) => interval.end > earliest);
     }
@@ -157,8 +163,9 @@ export class HumanTiming {
     const now = this.now();
     this.advance(now);
     if (!kind || this.segment?.kind === kind) this.segment = undefined;
-    if (!kind || kind === "input") delete this.pauses.input;
-    if (!kind || kind === "file") delete this.pauses.file;
+    for (const activity of activities) {
+      if (!kind || kind === activity) delete this.pauses[activity];
+    }
     this.pruneIntervals(now);
   }
 
@@ -179,7 +186,7 @@ export class HumanTiming {
   }
 
   private snapshotSaved(chatId: string): HumanTimingTotals {
-    return this.totals.get(chatId) ?? { inputMs: 0, fileMs: 0 };
+    return this.totals.get(chatId) ?? { inputMs: 0, fileMs: 0, readingMs: 0 };
   }
 
   snapshot(chatId: string): HumanTimingTotals {
@@ -225,7 +232,7 @@ export class HumanTiming {
 
   forgetChat(chatId: string): void {
     if (this.segment?.chatId === chatId) this.segment = undefined;
-    for (const kind of ["input", "file"] as const) {
+    for (const kind of activities) {
       if (this.pauses[kind]?.chatId === chatId) delete this.pauses[kind];
     }
     this.pruneIntervals(this.now());

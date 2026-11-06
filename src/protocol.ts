@@ -442,6 +442,7 @@ export type WebviewToHost =
   | { type: "set_human_timing"; enabled: boolean }
   | { type: "get_human_timing"; chatId: string }
   | { type: "human_view_focus"; focused: boolean }
+  | { type: "human_reading"; active: boolean; chatId: string; background?: boolean }
   | { type: "human_input"; active: boolean; chatId?: string }
   | { type: "get_conversation_timing"; chatId: string }
   | { type: "transcript_selection"; text: string }
@@ -760,6 +761,10 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
       return typeof value.enabled === "boolean" ? value as WebviewToHost : undefined;
     case "human_view_focus":
       return typeof value.focused === "boolean" ? value as WebviewToHost : undefined;
+    case "human_reading":
+      return typeof value.active === "boolean" && opaqueId(value.chatId)
+        && (value.background === undefined || typeof value.background === "boolean")
+        ? value as WebviewToHost : undefined;
     case "human_input":
       return typeof value.active === "boolean" && optionalOpaqueId(value.chatId)
         ? value as WebviewToHost : undefined;

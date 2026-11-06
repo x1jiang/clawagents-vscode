@@ -7,7 +7,7 @@ const CHECKPOINT_MS = 15_000;
 
 type StoredTiming = { enabled: boolean; timing: HumanTimingState };
 
-/** Routes VS Code and composer events to the policy-independent timer. */
+/** Routes VS Code, composer, and transcript events to the policy-independent timer. */
 export class HumanTimingMonitor {
   readonly timer: HumanTiming;
   enabled: boolean;
@@ -71,9 +71,12 @@ export class HumanTimingMonitor {
   }
 
   setViewFocused(focused: boolean): void {
+    if (!focused) {
+      this.timer.suspendInput();
+      this.timer.suspendReading();
+    }
     if (focused === this.viewFocused) return;
     this.viewFocused = focused;
-    if (!focused) this.timer.suspendInput();
     this.focusChanged();
   }
 
@@ -81,8 +84,22 @@ export class HumanTimingMonitor {
     if (!this.enabled || !vscode.window.state.focused) return;
     this.setViewFocused(true);
     this.pauseFile();
+    this.timer.suspendReading();
     this.timer.pulse(chatId, "input");
     this.scheduleSave();
+  }
+
+  reading(chatId: string, background = false): void {
+    if (!this.enabled || (!vscode.window.state.focused && !background)) return;
+    if (!background) this.setViewFocused(true);
+    this.pauseFile();
+    this.timer.suspendInput();
+    this.timer.pulse(chatId, "reading");
+    this.scheduleSave();
+  }
+
+  pauseReading(): void {
+    this.timer.suspendReading();
   }
 
   endInput(): void {
@@ -109,7 +126,10 @@ export class HumanTimingMonitor {
   refreshFile(signal?: "focus" | "selection" | "scroll"): void {
     if (!this.enabled) return;
     const windowFocused = vscode.window.state.focused;
-    if (!windowFocused) this.timer.suspendInput();
+    if (!windowFocused) {
+      this.timer.suspendInput();
+      if (signal === "focus") this.timer.suspendReading();
+    }
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
     const input = tab?.input as { uri?: vscode.Uri; modified?: vscode.Uri } | undefined;
     const uri = input?.uri ?? input?.modified;
@@ -134,6 +154,7 @@ export class HumanTimingMonitor {
       return;
     }
     if (sameTarget && (signal === undefined || (!foreground && signal !== "scroll"))) return;
+    this.timer.suspendReading();
     this.fileTarget = { file, chatId, background: Boolean(background) };
     this.timer.resumeFile(chatId, file);
     this.lastFilePulse = performance.now();

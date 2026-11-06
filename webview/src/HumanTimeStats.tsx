@@ -23,12 +23,13 @@ export function HumanTimeStats({ chatId }: { chatId: string }) {
 
   return (
     <section className="conversation-time-stats" aria-label="Human time estimate">
-      <strong title="Estimates message preparation and file viewing. Continuing the same draft or file within a minute can fill a gap, excluding time already counted.">
+      <strong title="Estimates message preparation, thread reading, and file viewing. Continuing the same draft, thread, or file within a minute can fill a gap, excluding time already counted.">
         Human time (estimated)
       </strong>
       <dl>
-        <div><dt>Total</dt><dd>{duration(totals && totals.inputMs + totals.fileMs)}</dd></div>
+        <div><dt>Total</dt><dd>{duration(totals && totals.inputMs + totals.fileMs + totals.readingMs)}</dd></div>
         <div><dt>Message preparation</dt><dd>{duration(totals?.inputMs)}</dd></div>
+        <div><dt>Thread reading</dt><dd>{duration(totals?.readingMs)}</dd></div>
         <div><dt>File viewing</dt><dd>{duration(totals?.fileMs)}</dd></div>
       </dl>
     </section>

@@ -1,3 +1,7 @@
+# Unreleased
+
+- Include deliberate thread reading in human time estimates, with a 90-second idle limit, one-minute confirmed resume, and shared deduplication across reading, drafting, and file viewing. Ignore streaming output and automatic scrolling; document the rules in English.
+
 # 1.0.210
 
 - Estimate per-conversation message preparation and file viewing time in Info, with one-minute resume windows and overlapping time counted once. Add a workspace setting to turn tracking off.

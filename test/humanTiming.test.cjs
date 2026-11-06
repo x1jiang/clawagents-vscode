@@ -25,7 +25,7 @@ test("clips each idle gap while counting continued input and file browsing", () 
   now += 170_000;
   timer.pulse("chat-a", "file");
   now += 250_000;
-  assert.deepEqual(timer.snapshot("chat-a"), { inputMs: 170_000, fileMs: 350_000 });
+  assert.deepEqual(timer.snapshot("chat-a"), { inputMs: 170_000, fileMs: 350_000, readingMs: 0 });
   assert.equal(timer.checkpoint().active, false);
 });
 
@@ -41,8 +41,8 @@ test("switching sources or chats counts each instant once and saves only elapsed
   const { state } = timer.checkpoint();
   now = 900_000;
   const restored = new HumanTiming(state, defaultHumanTimingPolicy, () => now);
-  assert.deepEqual(restored.snapshot("chat-a"), { inputMs: 20_000, fileMs: 10_000 });
-  assert.deepEqual(restored.snapshot("chat-b"), { inputMs: 5_000, fileMs: 0 });
+  assert.deepEqual(restored.snapshot("chat-a"), { inputMs: 20_000, fileMs: 10_000, readingMs: 0 });
+  assert.deepEqual(restored.snapshot("chat-b"), { inputMs: 5_000, fileMs: 0, readingMs: 0 });
 });
 
 test("allows replacement policies and uses the selected chat for shared files", () => {
@@ -89,8 +89,8 @@ test("resuming the same file within one minute fills only time not already count
   timer.stop("input");
   now = 120_000;
   timer.resumeFile("chat-a", "/report.md");
-  assert.deepEqual(timer.snapshot("chat-a"), { inputMs: 0, fileMs: 90_000 });
-  assert.deepEqual(timer.snapshot("chat-b"), { inputMs: 30_000, fileMs: 0 });
+  assert.deepEqual(timer.snapshot("chat-a"), { inputMs: 0, fileMs: 90_000, readingMs: 0 });
+  assert.deepEqual(timer.snapshot("chat-b"), { inputMs: 30_000, fileMs: 0, readingMs: 0 });
 });
 
 test("a pause is only filled for the same file and owner within grace and idle limits", () => {
@@ -131,7 +131,7 @@ test("resuming a draft and a file can fill intersecting gaps without double cred
   now = 110_000;
   timer.suspendFile("/report.md");
   timer.pulse("chat-a", "input");
-  assert.deepEqual(timer.snapshot("chat-a"), { inputMs: 70_000, fileMs: 40_000 });
+  assert.deepEqual(timer.snapshot("chat-a"), { inputMs: 70_000, fileMs: 40_000, readingMs: 0 });
 });
 
 test("a sent or cleared draft, a different chat, and an expired pause do not fill a draft gap", () => {
@@ -151,6 +151,92 @@ test("a sent or cleared draft, a different chat, and an expired pause do not fil
     assert.equal(timer.snapshot("chat-a").inputMs, 40_000);
     assert.equal(timer.snapshot("chat-b").inputMs, 0);
   }
+});
+
+test("thread reading clips at 90 seconds and new signals restart the reading window", () => {
+  let now = 0;
+  const timer = new HumanTiming(undefined, defaultHumanTimingPolicy, () => now);
+  timer.pulse("a", "reading");
+  now = 200_000;
+  assert.equal(timer.snapshot("a").readingMs, 90_000);
+  timer.pulse("a", "reading");
+  now = 260_000;
+  timer.pulse("a", "reading");
+  now = 400_000;
+  assert.equal(timer.snapshot("a").readingMs, 240_000);
+});
+
+test("reading, input, and file resume gaps share a single credited interval union", () => {
+  let now = 0;
+  const timer = new HumanTiming(undefined, defaultHumanTimingPolicy, () => now);
+  timer.pulse("a", "reading");
+  now = 10_000;
+  timer.suspendReading();
+  now = 20_000;
+  timer.pulse("a", "input");
+  now = 30_000;
+  timer.suspendInput();
+  now = 40_000;
+  timer.resumeFile("b", "/file");
+  now = 50_000;
+  timer.suspendFile("/file");
+  now = 60_000;
+  timer.pulse("a", "reading");
+  now = 70_000;
+  timer.suspendReading();
+  timer.pulse("a", "input");
+  now = 80_000;
+  timer.suspendInput();
+  timer.resumeFile("b", "/file");
+  now = 90_000;
+  timer.suspendFile("/file");
+  timer.pulse("a", "reading");
+  assert.deepEqual(timer.snapshot("a"), { inputMs: 20_000, fileMs: 0, readingMs: 50_000 });
+  assert.deepEqual(timer.snapshot("b"), { inputMs: 0, fileMs: 20_000, readingMs: 0 });
+});
+
+test("reading resumes only the same thread within both grace and the previous idle deadline", () => {
+  for (const [resumeAt, chat, expected] of [
+    [70_000, "a", 70_000], // Inclusive 60-second grace boundary.
+    [70_001, "a", 10_000],
+    [50_000, "b", 10_000],
+  ]) {
+    let now = 0;
+    const timer = new HumanTiming(undefined, defaultHumanTimingPolicy, () => now);
+    timer.pulse("a", "reading");
+    now = 10_000;
+    timer.suspendReading();
+    now = resumeAt;
+    timer.pulse(chat, "reading");
+    assert.equal(timer.snapshot("a").readingMs, expected);
+  }
+  let now = 0;
+  const timer = new HumanTiming(undefined, defaultHumanTimingPolicy, () => now);
+  timer.pulse("a", "reading");
+  now = 80_000;
+  timer.suspendReading();
+  now = 95_000;
+  timer.pulse("a", "reading");
+  assert.equal(timer.snapshot("a").readingMs, 80_000);
+});
+
+test("legacy totals load with zero reading; checkpoints never restore live or paused sessions", () => {
+  let now = 0;
+  const timer = new HumanTiming({ totals: [["a", { inputMs: 12, fileMs: 34 }]], files: [] },
+    defaultHumanTimingPolicy, () => now);
+  assert.deepEqual(timer.snapshot("a"), { inputMs: 12, fileMs: 34, readingMs: 0 });
+  timer.pulse("a", "reading");
+  now = 1000;
+  timer.suspendReading();
+  const saved = timer.checkpoint().state;
+  now = 2000;
+  const restored = new HumanTiming(saved, defaultHumanTimingPolicy, () => now);
+  restored.pulse("a", "reading");
+  assert.equal(restored.snapshot("a").readingMs, 1000);
+  restored.stop();
+  now = 3000;
+  restored.pulse("a", "reading");
+  assert.equal(restored.snapshot("a").readingMs, 1000);
 });
 
 test("background scrolling and returning from file browsing resume their timers", () => {
@@ -209,7 +295,26 @@ test("background scrolling and returning from file browsing resume their timers"
     monitor.setViewFocused(false);
     now = 220_000;
     monitor.input("chat-a");
-    assert.deepEqual(monitor.timer.snapshot("chat-a"), { inputMs: 40_000, fileMs: 180_000 });
+    assert.deepEqual(monitor.timer.snapshot("chat-a"), { inputMs: 40_000, fileMs: 180_000, readingMs: 0 });
+    now = 230_000;
+    monitor.reading("chat-a");
+    now = 240_000;
+    window.state.focused = false;
+    events.focus();
+    now = 250_000;
+    monitor.reading("chat-a"); // A foreground-only signal cannot resume in the background.
+    assert.equal(monitor.timer.snapshot("chat-a").readingMs, 10_000);
+    monitor.reading("chat-a", true); // An actual wheel/drag can.
+    now = 260_000;
+    assert.equal(monitor.timer.snapshot("chat-a").readingMs, 30_000);
+    monitor.setEnabled(false);
+    now = 300_000;
+    monitor.reading("chat-a", true);
+    assert.equal(monitor.timer.snapshot("chat-a").readingMs, 30_000);
+    monitor.setEnabled(true);
+    now = 310_000;
+    monitor.reading("chat-a", true);
+    assert.equal(monitor.timer.snapshot("chat-a").readingMs, 30_000);
   } finally {
     monitor.dispose();
   }
