@@ -87,8 +87,17 @@ function previewApi(): VsCodeApi {
         emit({ type: "human_timing_enabled", enabled: humanTimingEnabled });
       } else if (message.type === "human_view_focus" && !message.focused && humanTimingEnabled) {
         humanTiming.suspendInput();
+        humanTiming.suspendReading();
+      } else if (message.type === "human_reading" && humanTimingEnabled) {
+        if (message.active) {
+          humanTiming.suspendInput();
+          humanTiming.pulse(message.chatId, "reading");
+        } else humanTiming.suspendReading();
       } else if (message.type === "human_input" && humanTimingEnabled) {
-        if (message.active) humanTiming.pulse(message.chatId || "preview-main", "input");
+        if (message.active) {
+          humanTiming.suspendReading();
+          humanTiming.pulse(message.chatId || "preview-main", "input");
+        }
         else humanTiming.stop("input");
       } else if (message.type === "get_human_timing" && humanTimingEnabled) {
         emit({ type: "human_timing", chatId: message.chatId, totals: humanTiming.snapshot(message.chatId) });

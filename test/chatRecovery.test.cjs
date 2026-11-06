@@ -45,7 +45,7 @@ function fixture(error) {
   const provider = Object.create(ClawAgentsWebviewProvider.prototype);
   Object.assign(provider, {
     chatId: "chat_saved", drafts: { chat_saved: "unsent draft" }, modelRoutes: new Map(),
-    humanTiming: { endInput: () => {}, refreshFile: () => {} },
+    humanTiming: { pauseReading: () => {}, endInput: () => {}, refreshFile: () => {} },
     runs: { isActive: () => false }, chatRouteSaveChain: Promise.resolve(),
     sidecar: { ensureStarted: async () => {}, output: { appendLine: () => {} } },
     gateway: {

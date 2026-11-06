@@ -2,6 +2,7 @@ import { SkillUsageRanking } from "./SkillUsageRanking";
 import type { SkillUsageStats } from "../../src/protocol";
 import { HeaderInfoPanel } from "./HeaderInfoPanel";
 import { copyText } from "./clipboard";
+import { installThreadReading, type ReadingContext } from "./threadReading";
 import { installTranscriptSelection } from "./transcriptSelection";
 import { collectDropUris, hasVsCodeUriPayload } from "./dropPaths";
 import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel, modelRequiresResponsesForTools, compatibleWireApiForModel, modelSupportsFastMode } from "./modelSelection";
@@ -2171,6 +2172,7 @@ export function App() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [humanTimingEnabled, setHumanTimingEnabled] = useState(true);
   const humanTimingEnabledRef = useRef(true);
+  const [readingRequest, setReadingRequest] = useState<{ chatId: string }>();
   const inputPulse = useRef<{ chatId?: string; at: number }>();
   const endHumanInput = useCallback(() => {
     inputPulse.current = undefined;
@@ -2192,6 +2194,7 @@ export function App() {
     const focus = () => post({ type: "human_view_focus", focused: document.hasFocus() && !document.hidden });
     const blur = () => {
       inputPulse.current = undefined;
+      setReadingRequest(undefined);
       post({ type: "human_view_focus", focused: false });
     };
     window.addEventListener("focus", focus);
@@ -2231,6 +2234,7 @@ export function App() {
   const [sidecarDetail, setSidecarDetail] = useState<string | undefined>();
   const [chatId, setChatId] = useState<string | undefined>();
   const chatIdRef = useRef<string | undefined>();
+  const transcriptLoadingRef = useRef(false);
   /** Draft ownership is cleared while a different conversation is loading,
    *  so the old text cannot be persisted under the newly selected chat ID. */
   const draftOwnerRef = useRef<string | undefined>();
@@ -2384,6 +2388,13 @@ export function App() {
   const [verifyMsg, setVerifyMsg] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
+  const readingTrackerRef = useRef<ReturnType<typeof installThreadReading>>();
+  const readingContextRef = useRef<ReadingContext>({ enabled: false, hasContent: false });
+  readingContextRef.current = {
+    chatId: transcriptLoadingRef.current ? undefined : chatId,
+    enabled: humanTimingEnabled && panel === "chat",
+    hasContent: items.length > 0,
+  };
   const queryNodesRef = useRef(new Map<number, HTMLDivElement>());
   const queryJumpAnimationTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const autoApproveRef = useRef<HTMLDivElement>(null);
@@ -2652,7 +2663,11 @@ export function App() {
     panelRef.current = next;
     setPanel(next);
     if (next === "chat") acknowledgeUnread(chatIdRef.current);
-    else endHumanInput();
+    else {
+      endHumanInput();
+      readingTrackerRef.current?.pause();
+      setReadingRequest(undefined);
+    }
   }, [acknowledgeUnread, endHumanInput]);
 
   // Keep chatIdRef in sync so the onMessage closure (which never
@@ -3406,6 +3421,7 @@ export function App() {
             msg.chatId !== undefined ? msg.chatId || undefined : chatIdRef.current;
           if (restoredChatId !== chatIdRef.current) endHumanInput();
           setPinnedEditing(false);
+          transcriptLoadingRef.current = false;
           draftOwnerRef.current = restoredChatId;
           draftOwnerBeforeNavRef.current = undefined;
           setQueryIndex([]);
@@ -3885,6 +3901,9 @@ export function App() {
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
+          // Keep stale transcript content ineligible after a failed switch.
+          transcriptLoadingRef.current = transcriptLoadingRef.current &&
+            chatIdRef.current !== draftOwnerBeforeNavRef.current;
           if (draftOwnerRef.current === undefined && draftOwnerBeforeNavRef.current) {
             draftOwnerRef.current = draftOwnerBeforeNavRef.current;
           }
@@ -3909,6 +3928,9 @@ export function App() {
           setBusy(false);
           streamingRef.current = false;
           pendingForkRef.current = false;
+          // Keep stale transcript content ineligible after a failed switch.
+          transcriptLoadingRef.current = transcriptLoadingRef.current &&
+            chatIdRef.current !== draftOwnerBeforeNavRef.current;
           if (draftOwnerRef.current === undefined && draftOwnerBeforeNavRef.current) {
             draftOwnerRef.current = draftOwnerBeforeNavRef.current;
           }
@@ -4007,6 +4029,26 @@ export function App() {
   useEffect(() => {
     threadModelRouteRef.current = threadModelRoute;
   }, [threadModelRoute]);
+
+  useEffect(() => {
+    const root = messagesRef.current;
+    if (!root || panel !== "chat" || !humanTimingEnabled) return;
+    const tracker = installThreadReading(root, () => readingContextRef.current,
+      (id, active, background) => post({ type: "human_reading", chatId: id, active, background }));
+    readingTrackerRef.current = tracker;
+    return () => {
+      tracker.dispose();
+      readingTrackerRef.current = undefined;
+    };
+  }, [panel, chatId, humanTimingEnabled]);
+
+  useEffect(() => {
+    if (!readingRequest || readingRequest.chatId !== chatId || panel !== "chat" ||
+        transcriptLoadingRef.current) return;
+    // A restore, first streamed message, or focus return alone is not evidence of reading.
+    if (items.length && humanTimingEnabled) readingTrackerRef.current?.open();
+    setReadingRequest(undefined);
+  }, [readingRequest, chatId, panel, items, humanTimingEnabled]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -4292,6 +4334,9 @@ export function App() {
   /** Flush the current composer, then drop ownership until restore (or error) lands. */
   const beginDraftHandoff = () => {
     endHumanInput();
+    readingTrackerRef.current?.pause();
+    setReadingRequest(undefined);
+    transcriptLoadingRef.current = true;
     persistDraftNow();
     draftOwnerBeforeNavRef.current = draftOwnerRef.current;
     draftOwnerRef.current = undefined;
@@ -4352,6 +4397,7 @@ export function App() {
     setOpenConversationTabs((previous) => upsertConversationTab(previous, c.id, chats));
     showPanel("chat");
     beginDraftHandoff();
+    setReadingRequest({ chatId: c.id });
     chatIdRef.current = c.id;
     setChatId(c.id);
     setBusy(Boolean(c.running));
@@ -4367,8 +4413,12 @@ export function App() {
     setOpenConversationTabs((previous) =>
       upsertConversationTab(previous, tab.id, chats, tab.title),
     );
-    if (tab.id === chatIdRef.current) return;
+    if (tab.id === chatIdRef.current) {
+      setReadingRequest({ chatId: tab.id });
+      return;
+    }
     beginDraftHandoff();
+    setReadingRequest({ chatId: tab.id });
     chatIdRef.current = tab.id;
     setChatId(tab.id);
     setBusy(Boolean(tab.running));
@@ -4393,6 +4443,7 @@ export function App() {
       setChatId(replacement.id);
       setBusy(Boolean(replacement.running));
       showPanel("chat");
+      setReadingRequest({ chatId: replacement.id });
       post({ type: "select_chat", chatId: replacement.id });
     } else {
       persistDraftNow();
@@ -5844,6 +5895,7 @@ export function App() {
                 onClick={() => {
                   showPanel(p);
                   if (p === "chat" && chatIdRef.current) {
+                    setReadingRequest({ chatId: chatIdRef.current });
                     setOpenConversationTabs((previous) =>
                       upsertConversationTab(previous, chatIdRef.current!, chats),
                     );
@@ -8069,7 +8121,7 @@ export function App() {
               Estimate human time
             </label>
             <p className="settings-hint">
-              Track message preparation and time spent viewing files linked to a conversation.
+              Track message preparation, thread reading, and time spent viewing files linked to a conversation.
               Totals are saved in this workspace.
             </p>
             <p className="muted tiny" style={{ marginTop: 0 }}>
