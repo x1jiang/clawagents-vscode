@@ -1,6 +1,7 @@
-# Unreleased
+# 1.0.211
 
 - Include deliberate thread reading in human time estimates, with a 90-second idle limit, one-minute confirmed resume, and shared deduplication across reading, drafting, and file viewing. Ignore streaming output and automatic scrolling; document the rules in English.
+- Require Python clawagents **6.20.97**, which adopts **Harness²** (*Recursive Agent Harnessing for an Open World*, arXiv:2610.14224) recursive harness tree validation (`SurfaceSpec`, `validate_harness_tree`, `accept_or_repair_tree`), `.clawagents/skill-triggers.md` autotrigger enforcement, causal `<edits>` attribution (`EditAttribution`, `ExperienceEntry`) with non-confounded evidence gating, per-domain `ExperienceLibrary`, `[INV]` / `[DOM]` / `[WORKSPACE_FACT]` reflection separation, and blind anonymized `compare_samples` / `best_of_n` deliverable selection.
 
 # 1.0.210
 
