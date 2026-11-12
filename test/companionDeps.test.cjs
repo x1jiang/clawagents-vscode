@@ -19,7 +19,7 @@ fs.writeFileSync(
     showWarningMessage: async () => "Skip",
   },
   workspace: {
-    getConfiguration: () => ({ get: (_k, d) => d }),
+    getConfiguration: () => ({ get: (_k, d) => d, inspect: () => undefined }),
   },
 };`,
 );

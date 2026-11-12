@@ -56,6 +56,9 @@ import type {
   WebviewToHost,
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
+import { DETACHED_POLL_INTERVAL_MS, detachedPollRetryDelay } from "./detachedPoll";
+import { PendingAttachments } from "./pendingAttachments";
+import type { ClaimedAttachments, StagedAttachment } from "./pendingAttachments";
 import { isBareFileName, isWorkspaceSearchCandidate } from "./pathReferences";
 import { LocalGemmaManager } from "./localGemma";
 import { SidecarManager } from "./sidecar";
@@ -155,6 +158,11 @@ type PersistedState = {
   goal?: boolean;
 };
 
+const CREDENTIAL_RESTART_DONE = "sidecar restarted";
+const CREDENTIAL_RESTART_DEFERRED =
+  "it takes effect when the running turn finishes (the sidecar restarts then)";
+type CredentialRestart = typeof CREDENTIAL_RESTART_DONE | typeof CREDENTIAL_RESTART_DEFERRED;
+
 type QueuedTurn = {
   text: string;
   chatId: string;
@@ -162,6 +170,10 @@ type QueuedTurn = {
   modelOverride?: string;
   modelRoute?: ModelRoute;
   settings?: TurnSettings;
+  /** Attachments staged in this conversation's composer when the turn was
+   *  queued. Captured at enqueue so they travel with this turn rather than
+   *  with whichever run happens to start next. */
+  attachments?: ClaimedAttachments;
 };
 
 function modelRouteFromChat(chat: Record<string, unknown> | undefined): ModelRoute | undefined {
@@ -236,7 +248,20 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = SIDEBAR_ID;
 
   private view?: vscode.WebviewView;
-  private chatId: string | undefined;
+  private activeChatId: string | undefined;
+  /** The conversation shown in the composer. Staged attachments are scoped to
+   *  it, so changing it re-syncs the attachment chips to the new composer. */
+  private get chatId(): string | undefined {
+    return this.activeChatId;
+  }
+  private set chatId(next: string | undefined) {
+    if (next === this.activeChatId) {
+      return;
+    }
+    this.activeChatId = next;
+    this.postImagesPending();
+    this.postFilesPending();
+  }
   /** One temporary fork per parent conversation. Hidden overlays keep running. */
   private readonly sideChats = new Map<string, string>();
   private readonly sideChatIds = new Set<string>();
@@ -272,10 +297,25 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   private liveRunEvents: Map<string, HostToWebview[]> = new Map();
   /** Conversations whose SSE stream disconnected while the sidecar turn is still running. */
   private readonly detachedChatPollers = new Set<string>();
-  /** Image attachments staged for the next send (base64 stays host-side). */
-  private pendingImages: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
-  /** File attachments (PDF/DOCX) staged for the next send — same contract. */
-  private pendingFiles: Array<{ id: string; name: string; data: string; mediaType: string }> = [];
+  private disposed = false;
+  /** Pending poll timers, so dispose() can stop them. */
+  private readonly detachedPollTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Attachments staged per conversation (base64 stays host-side). */
+  private readonly attachments = new PendingAttachments();
+  /** Images staged in the visible composer for its next send. */
+  private get pendingImages(): StagedAttachment[] {
+    return this.attachments.images(this.chatId);
+  }
+  private set pendingImages(next: StagedAttachment[]) {
+    this.attachments.setImages(this.chatId, next);
+  }
+  /** Files (PDF/DOCX/text) staged in the visible composer — same contract. */
+  private get pendingFiles(): StagedAttachment[] {
+    return this.attachments.files(this.chatId);
+  }
+  private set pendingFiles(next: StagedAttachment[]) {
+    this.attachments.setFiles(this.chatId, next);
+  }
   private readonly gateway: GatewayClient;
   private readonly humanTiming: HumanTimingMonitor;
   /** Background jobs are polled, not pushed: they outlive the run whose SSE
@@ -434,7 +474,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.post({ type: "error", message: "Rejected an invalid webview request." });
         return;
       }
-      void this.handleMessage(msg);
+      // Not every message case has its own try/catch; without this a throw
+      // becomes an unhandled rejection and the webview waits on no reply.
+      this.handleMessage(msg).catch((err: unknown) => {
+        this.post({
+          type: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
     });
     webviewView.onDidChangeVisibility(() => {
       if (this.view === webviewView && !webviewView.visible) {
@@ -687,6 +734,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       events[events.length - 1] = { ...last, delta: last.delta + event.delta };
       return;
     }
+    if (event.type === "assistant_reset") {
+      // The coalesced partial answer is void. Dropping it here means a
+      // replay after switching conversations never shows the stale text.
+      if (last?.type === "assistant_delta") {
+        events.pop();
+      }
+      return;
+    }
     events.push(event);
   }
 
@@ -753,13 +808,28 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.detachedChatPollers.add(chatId);
     this.post({ type: "thread_run_state", chatId, running: true });
     let lastEventsTotal = -1;
+    let failures = 0;
+    const schedule = (delayMs: number): void => {
+      this.detachedPollTimers.set(
+        chatId,
+        setTimeout(() => {
+          this.detachedPollTimers.delete(chatId);
+          void poll();
+        }, delayMs),
+      );
+    };
     const poll = async (): Promise<void> => {
+      if (this.disposed) {
+        this.detachedChatPollers.delete(chatId);
+        return;
+      }
       try {
         if (this.runs.isActive(chatId)) {
           this.detachedChatPollers.delete(chatId);
           return;
         }
         const chat = await this.gateway.getChat(chatId, { tail: 400 });
+        failures = 0;
         const stillRunning = Boolean(chat.running);
         const eventsTotal = Number(chat.events_total ?? 0) || 0;
         if (this.chatId === chatId && (eventsTotal !== lastEventsTotal || !stillRunning)) {
@@ -767,23 +837,36 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.postChatRestore(chatId, chat);
         }
         if (stillRunning) {
-          setTimeout(() => {
-            void poll();
-          }, 1500);
+          schedule(DETACHED_POLL_INTERVAL_MS);
           return;
         }
         this.detachedChatPollers.delete(chatId);
         this.post({ type: "thread_run_state", chatId, running: false });
+        // This run counted as busy; a restart deferred for it can go now.
+        await this.applyPendingSidecarSettings();
         await this.refreshChats();
         this.drainQueueIfIdle(chatId);
-      } catch {
+      } catch (err) {
+        // One slow or dropped poll says nothing about the turn: the sidecar
+        // may just be busy. Declaring it finished here showed a running turn
+        // as idle, let the user start a second turn on the same conversation,
+        // and stranded its queue. Keep polling with backoff; stop only when
+        // the chat is confirmed gone or the sidecar stays unreachable.
+        failures += 1;
+        const delay = detachedPollRetryDelay(failures, isChatNotFoundError(err, chatId));
+        if (delay !== undefined) {
+          schedule(delay);
+          return;
+        }
         this.detachedChatPollers.delete(chatId);
         this.post({ type: "thread_run_state", chatId, running: false });
+        // The run is over as far as this host can tell; don't leave queued
+        // turns waiting on a poller that has stopped.
+        await this.applyPendingSidecarSettings().catch(() => undefined);
+        this.drainQueueIfIdle(chatId);
       }
     };
-    setTimeout(() => {
-      void poll();
-    }, 1000);
+    schedule(1000);
   }
 
   private async loadOlderChatEvents(): Promise<void> {
@@ -828,8 +911,10 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /** A turn is in flight — streaming here, or still running in the sidecar
+   *  after its stream dropped. Restarting the sidecar now would kill it. */
   get busy(): boolean {
-    return this.runs.hasActiveRuns;
+    return this.runs.hasActiveRuns || (this.detachedChatPollers?.size ?? 0) > 0;
   }
 
   private currentTurnSettings(): TurnSettings {
@@ -859,6 +944,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       const modelRoute = modelRouteFromChat(chat);
       if (modelRoute) this.modelRoutes.set(chatId, modelRoute);
       if (!this.chatId) {
+        this.attachments.adopt(undefined, chatId);
         this.chatId = chatId;
         await this.persistLocal(this.persistState());
       }
@@ -1020,6 +1106,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         return;
       }
       const unassignedDraft = startedOn ? "" : this.draftForChat();
+      if (!startedOn) {
+        this.attachments.adopt(undefined, String(chat.id));
+      }
       this.chatId = String(chat.id);
       this.rememberDraft(this.chatId, unassignedDraft);
       this.rememberDraft(undefined, "");
@@ -1152,6 +1241,43 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       this.applyingSidecarSettings = undefined;
     });
     await this.applyingSidecarSettings;
+  }
+
+  /**
+   * Restart so a saved or cleared credential reaches the sidecar's
+   * environment — unless a turn is running, in which case the restart is
+   * deferred until it finishes (restarting would SIGTERM the agent mid-tool).
+   * Returns the phrase to show the user for what happened.
+   */
+  private async applyCredentialChange(): Promise<CredentialRestart> {
+    if (this.busy) {
+      this.pendingSidecarSettings = true;
+      return CREDENTIAL_RESTART_DEFERRED;
+    }
+    this.sidecar.stop();
+    await this.sidecar.ensureStarted();
+    this.post({ type: "sidecar", state: "running" });
+    await this.pushReady();
+    return CREDENTIAL_RESTART_DONE;
+  }
+
+  /**
+   * Restart requested directly by the user. With a turn running this asks
+   * first, since the restart ends that turn.
+   */
+  async restartSidecarInteractive(): Promise<boolean> {
+    if (this.busy) {
+      const choice = await vscode.window.showWarningMessage(
+        "A ClawAgents turn is still running. Restarting the sidecar will stop it.",
+        { modal: true },
+        "Restart Now",
+      );
+      if (choice !== "Restart Now") {
+        return false;
+      }
+    }
+    await this.restartSidecar();
+    return true;
   }
 
   async restartSidecar(): Promise<void> {
@@ -1521,6 +1647,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         const turnSettings = this.currentTurnSettings();
         // Drain in-flight settings saves first — sidecar reads disk per turn.
         await this.saveSettingsChain.catch(() => undefined);
+        // A direct send takes whatever is staged in the composer on screen.
+        // When the webview targets another conversation than the host's
+        // current one (a side-chat overlay), hand those attachments to it.
+        if (msg.chatId && msg.chatId !== this.chatId && !this.attachments.isEmpty(this.chatId)) {
+          this.attachments.adopt(this.chatId, msg.chatId);
+          this.postImagesPending();
+          this.postFilesPending();
+        }
         await this.runTask(
           msg.text,
           msg.includeContext,
@@ -1816,6 +1950,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           await this.gateway.deleteChat(msg.chatId);
           this.humanTiming.forgetChat(msg.chatId);
           this.pendingInteractions.delete(msg.chatId);
+          this.attachments.discard(msg.chatId);
           await this.refreshChats();
         } catch (err) {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
@@ -1933,6 +2068,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             async (chatId) => {
               await this.gateway.deleteChat(chatId);
               this.humanTiming.forgetChat(chatId);
+              this.attachments.discard(chatId);
             },
             true,
           );
@@ -2392,7 +2528,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         this.stopLocalGemma();
         break;
       case "restart_sidecar":
-        await this.restartSidecar();
+        await this.restartSidecarInteractive();
         break;
       case "select_python":
         await vscode.commands.executeCommand("clawagents.selectPythonInterpreter");
@@ -2688,17 +2824,25 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             break;
           }
           // Restart so the new key reaches the sidecar's environment.
-          this.sidecar.stop();
-          await this.sidecar.ensureStarted();
-          this.post({ type: "sidecar", state: "running" });
-          await this.pushReady();
+          const applied = await this.applyCredentialChange();
+          if (applied === CREDENTIAL_RESTART_DEFERRED) {
+            // The running sidecar does not have the key yet, so a live
+            // probe now would report a failure for a key that is fine.
+            this.post({
+              type: "verify_result",
+              provider: savedProvider.toLowerCase().includes("tavily") ? "tavily" : "api key",
+              ok: true,
+              detail: `key saved; ${applied}`,
+            });
+            break;
+          }
 
           if (savedProvider.toLowerCase().includes("tavily")) {
             this.post({
               type: "verify_result",
               provider: "tavily",
               ok: true,
-              detail: "Tavily key saved; sidecar restarted — web_search is ready",
+              detail: `Tavily key saved; ${applied} — web_search is ready`,
             });
             break;
           }
@@ -2718,14 +2862,14 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               type: "verify_result",
               provider: providerId,
               ok: Boolean(res.ok),
-              detail: res.detail || "key saved; sidecar restarted",
+              detail: res.detail || `key saved; ${applied}`,
             });
           } catch (verifyErr) {
             this.post({
               type: "verify_result",
               provider: providerId,
               ok: true,
-              detail: `key saved; sidecar restarted (live check skipped: ${
+              detail: `key saved; ${applied} (live check skipped: ${
                 verifyErr instanceof Error ? verifyErr.message : String(verifyErr)
               })`,
             });
@@ -2747,15 +2891,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       case "set_bedrock_key":
         try {
           await this.config.setApiKey("bedrock", msg.apiKey);
-          this.sidecar.stop();
-          await this.sidecar.ensureStarted();
-          this.post({ type: "sidecar", state: "running" });
-          await this.pushReady();
+          const applied = await this.applyCredentialChange();
           this.post({
             type: "verify_result",
             provider: "bedrock",
             ok: true,
-            detail: "Bedrock Access Gateway API key saved; sidecar restarted",
+            detail: `Bedrock Access Gateway API key saved; ${applied}`,
           });
         } catch (err) {
           this.post({
@@ -2773,10 +2914,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           } else {
             await this.config.setApiKey(msg.provider, msg.apiKey);
           }
-          this.sidecar.stop();
-          await this.sidecar.ensureStarted();
-          this.post({ type: "sidecar", state: "running" });
-          await this.pushReady();
+          const applied = await this.applyCredentialChange();
           const labels: Record<string, string> = {
             openai: "OpenAI / compatible",
             anthropic: "Anthropic",
@@ -2790,7 +2928,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             type: "verify_result",
             provider: msg.provider,
             ok: true,
-            detail: `${labels[msg.provider] || msg.provider} API key saved; sidecar restarted`,
+            detail: `${labels[msg.provider] || msg.provider} API key saved; ${applied}`,
             ...keyFlags,
           });
         } catch (err) {
@@ -2809,10 +2947,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           } else {
             await this.config.clearApiKey(msg.provider);
           }
-          this.sidecar.stop();
-          await this.sidecar.ensureStarted();
-          this.post({ type: "sidecar", state: "running" });
-          await this.pushReady();
+          const applied = await this.applyCredentialChange();
           const labels: Record<string, string> = {
             openai: "OpenAI / compatible",
             anthropic: "Anthropic",
@@ -2827,7 +2962,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             type: "verify_result",
             provider: msg.provider,
             ok: true,
-            detail: `${labels[msg.provider] || msg.provider} key cleared; sidecar restarted`,
+            detail: `${labels[msg.provider] || msg.provider} key cleared; ${applied}`,
             ...keyFlags,
           });
         } catch (err) {
@@ -2931,15 +3066,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             });
             break;
           }
-          this.sidecar.stop();
-          await this.sidecar.ensureStarted();
-          this.post({ type: "sidecar", state: "running" });
-          await this.pushReady();
+          const applied = await this.applyCredentialChange();
           this.post({
             type: "verify_result",
             provider: "api key",
             ok: true,
-            detail: `${cleared === "all" ? "All keys" : cleared} cleared; sidecar restarted`,
+            detail: `${cleared === "all" ? "All keys" : cleared} cleared; ${applied}`,
           });
         } catch (err) {
           this.post({
@@ -3658,6 +3790,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   stopLocalGemma(): void { this.localGemma.stop(); }
 
   dispose(): void {
+    this.disposed = true;
+    for (const timer of this.detachedPollTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.detachedPollTimers.clear();
+    this.detachedChatPollers.clear();
     this.setTranscriptSelection("");
     this.humanTiming.dispose();
     this.localGemma.dispose();
@@ -3846,6 +3984,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     settingsOverride?: TurnSettings,
     modelRouteOverride?: ModelRoute,
     unassignedInputMs = 0,
+    queuedAttachments?: ClaimedAttachments,
   ): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) {
@@ -3863,6 +4002,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         modelOverride,
         modelRoute: modelRouteOverride ?? this.modelRoutes.get(requestedChatId),
         settings: turnSettings,
+        attachments: queuedAttachments ?? this.claimAttachments(requestedChatId),
       });
       this.post({
         type: "status",
@@ -3902,6 +4042,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     let runChatId: string;
     try {
       runChatId = await this.resolveRunChatId(requestedChatId, turnSettings.mode);
+      if (!requestedChatId) {
+        // Sent from the unsaved composer: its staged attachments belong to
+        // the conversation this turn just created, even if the user has
+        // navigated elsewhere while the sidecar was starting.
+        this.attachments.adopt(undefined, runChatId);
+      }
       if (unassignedInputMs > 0) {
         this.humanTiming.timer.addInput(runChatId, unassignedInputMs);
         this.humanTiming.scheduleSave();
@@ -3925,6 +4071,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         modelOverride,
         modelRoute: modelRouteOverride ?? this.modelRoutes.get(runChatId),
         settings: turnSettings,
+        attachments: queuedAttachments ?? this.claimAttachments(runChatId),
       });
       this.post({
         type: "status",
@@ -3943,26 +4090,21 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "thread_run_state", chatId: runChatId, running: true });
     this.post(userEcho);
 
-    // Claim attachments synchronously with the run slot. Without this, two
-    // conversations racing through getSettings() could attach the visible
-    // composer's files to whichever request resumed first.
-    const images = this.pendingImages.map((i) => ({
+    // Claim this conversation's attachments synchronously with the run slot.
+    // Only what was staged in this conversation's own composer is taken — a
+    // queued turn draining in the background must never pick up attachments
+    // the user is staging in whichever conversation is on screen. A turn that
+    // waited in the queue carries the attachments captured when it was queued.
+    const claimed = queuedAttachments ?? this.claimAttachments(runChatId);
+    const images = claimed.images.map((i) => ({
       data: i.data,
       media_type: i.mediaType,
     }));
-    if (this.pendingImages.length > 0) {
-      this.pendingImages = [];
-      this.postImagesPending();
-    }
-    const files = this.pendingFiles.map((f) => ({
+    const files = claimed.files.map((f) => ({
       data: f.data,
       media_type: f.mediaType,
       name: f.name,
     }));
-    if (this.pendingFiles.length > 0) {
-      this.pendingFiles = [];
-      this.postFilesPending();
-    }
 
     try {
       const settings = await this.gateway
@@ -4069,6 +4211,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
       if (newId) {
         // Completing a background run must never pull the UI away from the
         // conversation the user selected while it was running.
+        this.attachments.adopt(runChatId, newId);
         if (this.chatId === runChatId) {
           this.chatId = newId;
           await this.persistLocal(this.persistState());
@@ -4131,8 +4274,24 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         next.modelOverride,
         next.settings,
         next.modelRoute,
+        0,
+        next.attachments,
       );
     }
+  }
+
+  /** Take everything staged in one conversation's composer and, when that
+   *  composer is the one on screen, clear its chips. */
+  private claimAttachments(chatId: string): ClaimedAttachments {
+    const claimed = this.attachments.claim(chatId);
+    if (
+      chatId === this.chatId &&
+      (claimed.images.length > 0 || claimed.files.length > 0)
+    ) {
+      this.postImagesPending();
+      this.postFilesPending();
+    }
+    return claimed;
   }
 
   private getHtml(webview: vscode.Webview): string {

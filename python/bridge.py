@@ -156,7 +156,18 @@ def main() -> None:
         f"on http://{host}:{args.port} (workspace={WORKSPACE})",
         flush=True,
     )
-    uvicorn.run(create_app(), host=host, port=args.port, log_level="info")
+    from parent_watchdog import start_parent_watchdog
+
+    start_parent_watchdog()
+    uvicorn.run(
+        create_app(),
+        host=host,
+        port=args.port,
+        log_level="info",
+        # Open SSE streams would otherwise hold a SIGTERM shutdown open until
+        # the extension escalates to SIGKILL; bound the wait instead.
+        timeout_graceful_shutdown=3,
+    )
 
 
 if __name__ == "__main__":

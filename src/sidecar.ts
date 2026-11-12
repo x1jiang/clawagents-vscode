@@ -1,4 +1,5 @@
 import { ChildProcess, spawn } from "child_process";
+import { SIDECAR_KILL_GRACE_MS, terminateProcess } from "./processTermination";
 import * as crypto from "crypto";
 import * as http from "http";
 import * as net from "net";
@@ -159,7 +160,7 @@ export class SidecarManager {
     this.output.appendLine(
       `Sidecar invalidated${reason ? `: ${reason}` : ""} — will respawn on next use`,
     );
-    this.stopChild();
+    void this.stopChild();
     this.lastHealthyAt = 0;
   }
 
@@ -202,20 +203,27 @@ export class SidecarManager {
       this.output.appendLine(
         "Sidecar process alive but /health failed — restarting (hung sidecar)",
       );
-      this.stopChild();
+      void this.stopChild();
     }
     // Concurrent callers (activation + command) must share one spawn —
     // otherwise two sidecars race for the same handle slot.
     if (this.starting) {
       return this.starting;
     }
-    const now = Date.now();
-    if (now < this.restartCooldownUntil) {
-      await new Promise((r) => setTimeout(r, this.restartCooldownUntil - now));
-    }
+    // Register the start *before* waiting out the restart cooldown. Awaiting
+    // first let a second caller slip past the `starting` check during the
+    // wait, begin its own start, and supersede this one — which then failed
+    // with "start was superseded" even though a healthy sidecar came up.
     const generation = this.startGeneration.begin();
+    const cooldownMs = this.restartCooldownUntil - Date.now();
     let tracked: Promise<SidecarHandle>;
-    tracked = this.doStart(generation).finally(() => {
+    tracked = (async () => {
+      if (cooldownMs > 0) {
+        await new Promise((r) => setTimeout(r, cooldownMs));
+        this.assertCurrentStart(generation);
+      }
+      return this.doStart(generation);
+    })().finally(() => {
       if (this.starting === tracked) {
         this.starting = undefined;
       }
@@ -229,7 +237,7 @@ export class SidecarManager {
   }
 
   private async doStart(generation: number): Promise<SidecarHandle> {
-    this.stopChild();
+    void this.stopChild();
 
     const python = await this.resolvePythonRuntime();
     this.assertCurrentStart(generation);
@@ -319,6 +327,9 @@ export class SidecarManager {
       // (would clobber SecretStorage keys). Spawn env already merged keys once.
       CLAWAGENTS_SKIP_DOTENV: "1",
       CLAWAGENTS_DOTENV_OVERRIDE: "0",
+      // The sidecar exits when its stdin (held open below) reaches EOF, i.e.
+      // when this extension host dies without running deactivate().
+      CLAW_PARENT_WATCHDOG: "1",
     });
     if (model) {
       env.CLAW_MODEL = model;
@@ -338,8 +349,12 @@ export class SidecarManager {
     this.child = spawn(python, [bridge, "--port", String(port), "--host", "127.0.0.1"], {
       cwd,
       env,
-      stdio: ["ignore", "pipe", "pipe"],
+      // stdin is a pipe we never write to: it is the sidecar's liveness
+      // signal for this host (see python/parent_watchdog.py).
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    // The pipe breaks when the sidecar exits first; that is not an error.
+    this.child.stdin?.on("error", () => undefined);
 
     const appendLog = (chunk: string) => {
       const text = redactSecrets(chunk);
@@ -372,7 +387,7 @@ export class SidecarManager {
       await waitForHealth(baseUrl, token, 30_000);
     } catch (err) {
       const tail = this.lastLog.trim().split("\n").slice(-12).join("\n");
-      this.terminateChild(spawned);
+      void this.terminateChild(spawned);
       if (this.child === spawned) {
         this.child = undefined;
         this.handle = undefined;
@@ -387,7 +402,7 @@ export class SidecarManager {
     try {
       this.assertCurrentStart(generation);
     } catch (err) {
-      this.terminateChild(spawned);
+      void this.terminateChild(spawned);
       if (this.child === spawned) {
         this.child = undefined;
       }
@@ -405,32 +420,17 @@ export class SidecarManager {
     return this.handle;
   }
 
-  private terminateChild(child: ChildProcess): void {
-    if (child && child.exitCode === null && child.signalCode === null) {
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        /* ignore */
-      }
-      setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            /* ignore */
-          }
-        }
-      }, 1500);
-    }
+  /** SIGTERM now, SIGKILL after a grace period. Resolves once the process
+   *  has exited (or immediately if it already had). */
+  private terminateChild(child: ChildProcess): Promise<void> {
+    return terminateProcess(child, SIDECAR_KILL_GRACE_MS);
   }
 
-  private stopChild(): void {
+  private stopChild(): Promise<void> {
     const child = this.child;
-    if (child) {
-      this.terminateChild(child);
-    }
     this.child = undefined;
     this.handle = undefined;
+    return child ? this.terminateChild(child) : Promise.resolve();
   }
 
   stop(): void {
@@ -439,7 +439,19 @@ export class SidecarManager {
     clearManagedPythonFailures();
     this.startGeneration.invalidate();
     this.starting = undefined;
-    this.stopChild();
+    void this.stopChild();
+  }
+
+  /**
+   * Stop the sidecar and wait for the process to be gone. Used on
+   * deactivation: returning before the SIGKILL escalation timer fires let the
+   * extension host exit first and leave the sidecar running.
+   */
+  async shutdown(): Promise<void> {
+    clearManagedPythonFailures();
+    this.startGeneration.invalidate();
+    this.starting = undefined;
+    await this.stopChild();
   }
 
   dispose(): void {

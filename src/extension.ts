@@ -180,7 +180,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await provider?.cancelTask();
     }),
     vscode.commands.registerCommand("clawagents.restartSidecar", async () => {
-      await provider?.restartSidecar();
+      await provider?.restartSidecarInteractive();
     }),
     vscode.commands.registerCommand("clawagents.selectWorkspaceRoot", async () => {
       const roots = workspaceRoots();
@@ -233,9 +233,11 @@ export function activate(context: vscode.ExtensionContext): void {
       });
       if (probe.ok) {
         void vscode.window.showInformationMessage(
-          `ClawAgents deps OK (${probe.version || "ok"}). Restarting sidecar…`,
+          provider?.busy
+            ? `ClawAgents deps OK (${probe.version || "ok"}). The sidecar restarts when the running turn finishes.`
+            : `ClawAgents deps OK (${probe.version || "ok"}). Restarting sidecar…`,
         );
-        await provider?.restartSidecar();
+        await provider?.requestSidecarSettingsRestart();
       } else {
         void vscode.window.showErrorMessage(probe.detail.split("\n")[0] || "Install failed");
       }
@@ -360,15 +362,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("clawagents.setApiKey", async () => {
       const saved = await config.promptSetApiKey();
       if (saved) {
-        sidecar?.stop();
-        await provider?.restartSidecar();
+        await restartForSavedCredentials();
       }
     }),
     vscode.commands.registerCommand("clawagents.clearApiKey", async () => {
       const cleared = await config.promptClearApiKey();
       if (cleared) {
-        sidecar?.stop();
-        await provider?.restartSidecar();
+        await restartForSavedCredentials();
       }
     }),
   );
@@ -473,9 +473,25 @@ export function activate(context: vscode.ExtensionContext): void {
   })();
 }
 
-export function deactivate(): void {
+/** Restart for a key change, deferring while a turn is running. */
+async function restartForSavedCredentials(): Promise<void> {
+  if (provider?.busy) {
+    void vscode.window.showInformationMessage(
+      "ClawAgents: key saved — it takes effect when the running turn finishes (or use Restart Sidecar).",
+    );
+  }
+  await provider?.requestSidecarSettingsRestart();
+}
+
+export async function deactivate(): Promise<void> {
   provider?.dispose();
   provider = undefined;
-  sidecar?.dispose();
+  const manager = sidecar;
   sidecar = undefined;
+  if (manager) {
+    // Wait for the sidecar process to be gone (VS Code allows ~5s here);
+    // a synchronous return let the host exit before SIGKILL escalation.
+    await manager.shutdown().catch(() => undefined);
+    manager.dispose();
+  }
 }

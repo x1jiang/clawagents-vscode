@@ -44,6 +44,9 @@ function fixture(error) {
   const posted = [], calls = [];
   const provider = Object.create(ClawAgentsWebviewProvider.prototype);
   Object.assign(provider, {
+    // Assigning chatId re-syncs the attachment chips, so these come first.
+    postImagesPending: () => {}, postFilesPending: () => {},
+    attachments: { adopt: () => {}, discard: () => {}, isEmpty: () => true },
     chatId: "chat_saved", drafts: { chat_saved: "unsent draft" }, modelRoutes: new Map(),
     humanTiming: { pauseReading: () => {}, endInput: () => {}, refreshFile: () => {} },
     runs: { isActive: () => false }, chatRouteSaveChain: Promise.resolve(),
@@ -55,7 +58,6 @@ function fixture(error) {
     post: message => posted.push(message),
     persistLocal: async state => calls.push(["persist", state]),
     refreshChats: async () => {}, refreshJobs: async () => {},
-    postImagesPending: () => {}, postFilesPending: () => {},
     postChatRestore: async id => calls.push(["restore", id]),
     pushReady: async () => calls.push(["ready", provider.chatId]),
   });

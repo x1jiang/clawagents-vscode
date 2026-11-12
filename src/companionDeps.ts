@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as vscode from "vscode";
+import { trustedPythonPathSetting } from "./config";
 import { curatedProcessEnv } from "./envCurate";
 import { versionAtLeast } from "./pythonDeps";
 
@@ -163,8 +164,9 @@ function cacheGraphifyProbe(py: string, probe: CompanionProbe): CompanionProbe {
 export function probeGraphify(python?: string): CompanionProbe {
   const py =
     python ||
-    vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
-    "python3";
+    // Never the merged setting: a repo's .vscode/settings.json could point
+    // pythonPath at a binary inside the workspace, and this value is executed.
+    trustedPythonPathSetting();
   const cached = graphifyProbeCache.get(py);
   if (cached && Date.now() - cached.at < GRAPHIFY_PROBE_TTL_MS) {
     return cached.probe;
@@ -394,8 +396,7 @@ async function ensureGraphify(
 ): Promise<CompanionProbe> {
   const python =
     options?.python ||
-    vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
-    "python3";
+    trustedPythonPathSetting();
   let probe = probeGraphify(python);
   if (probe.ok) {
     return probe;
@@ -436,8 +437,7 @@ async function ensureCompanionsOnce(
 ): Promise<CompanionProbe[]> {
   const python =
     options?.python ||
-    vscode.workspace.getConfiguration("clawagents").get<string>("pythonPath") ||
-    undefined;
+    trustedPythonPathSetting();
   output.appendLine("=== Companion probe (context-mode, rtk, graphify) ===");
   const before = probeCompanions(python);
   for (const p of before) {

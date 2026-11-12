@@ -2531,6 +2531,10 @@ async def run_chat_turn(
             delta = getattr(ev, "delta", "") or ""
             if delta:
                 on_event("assistant_delta", {"delta": delta})
+        elif kind == "assistant_reset":
+            # A retried model stream produced different text: the partial
+            # answer streamed so far is void and will be re-sent from the start.
+            on_event("assistant_reset", {})
         elif kind == "assistant_message":
             text = str(getattr(ev, "content", "") or "")
             if text.strip():

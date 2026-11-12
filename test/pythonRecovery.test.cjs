@@ -98,6 +98,7 @@ const extensionBuild = require("esbuild").build({
       return { contents: `
         export class ExtensionConfig {}
         export const setPreferredWorkspaceRoot = () => false;
+        export const trustedPythonPathSetting = () => "python3";
         export const workspaceRoot = () => undefined;
         export const trackEditorFocus = () => {};
         export const buildProblemsContext = () => "";

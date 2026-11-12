@@ -132,6 +132,9 @@ export type HostToWebview =
   | { type: "view_hidden" }
   | { type: "user_echo"; text: string; chatId?: string }
   | { type: "assistant_delta"; delta: string; chatId?: string }
+  /** Discard the assistant text streamed so far in this turn; the model
+   *  stream was retried and is being re-sent from the start. */
+  | { type: "assistant_reset"; chatId?: string }
   | { type: "assistant_message"; text: string; chatId?: string }
   | { type: "tool_started"; id: string; name: string; args?: unknown; filePath?: string; chatId?: string }
   | {

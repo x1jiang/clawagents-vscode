@@ -86,3 +86,7 @@ test("usage keeps efficiency snapshots and both cache directions", () => {
   assert.deepEqual(mapped.efficiency.compactions, {micro: 1});
   assert.equal(mapAgentEvent("usage", {prompt_tokens: 100}).efficiency, undefined);
 });
+
+test("assistant_reset maps through so the UI can drop a retried partial answer", () => {
+  assert.deepEqual(mapAgentEvent("assistant_reset", {}), { type: "assistant_reset" });
+});

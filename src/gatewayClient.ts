@@ -59,8 +59,8 @@ export function isSidecarTransportError(err: unknown): boolean {
   );
 }
 
-function requestJson<T>(
-  handle: SidecarHandle,
+export function requestJson<T>(
+  handle: Pick<SidecarHandle, "port" | "token">,
   method: string,
   pathName: string,
   body?: unknown,
@@ -88,21 +88,56 @@ function requestJson<T>(
         timeout: timeoutMs,
       },
       (res) => {
+        // Decode as one UTF-8 stream. Calling toString() per chunk turned any
+        // multibyte character split across two chunks into U+FFFD, so
+        // restored transcripts with CJK or emoji showed stray "\uFFFD".
+        res.setEncoding("utf8");
         let data = "";
-        res.on("data", (c) => {
-          data += c.toString();
+        let ended = false;
+        res.on("data", (c: string) => {
+          data += c;
         });
         res.on("end", () => {
+          ended = true;
           if (res.statusCode && res.statusCode >= 400) {
             reject(new SidecarHttpError(method, pathName, res.statusCode, data));
             return;
           }
-          try {
-            resolve((data ? JSON.parse(data) : {}) as T);
-          } catch {
+          if (!data) {
             resolve({} as T);
+            return;
+          }
+          try {
+            resolve(JSON.parse(data) as T);
+          } catch {
+            // A body that is not JSON is a broken response, not an empty
+            // success: callers would otherwise read missing fields as defaults.
+            reject(
+              new Error(
+                `${method} ${pathName} returned an invalid JSON body (${data.length} chars)`,
+              ),
+            );
           }
         });
+        // The sidecar can die after sending headers (restart, crash). Then
+        // neither "end" nor the request's "error" fires, and the caller would
+        // wait forever. Settle on the response's own error/close instead.
+        const dropped = (cause?: Error) => {
+          if (ended) {
+            return;
+          }
+          ended = true;
+          const err = new Error(
+            `${method} ${pathName} connection closed before the response completed` +
+              (cause?.message ? `: ${cause.message}` : "") +
+              " (ECONNRESET)",
+          ) as Error & { code?: string };
+          err.code = "ECONNRESET";
+          reject(err);
+        };
+        res.on("error", dropped);
+        res.on("aborted", () => dropped());
+        res.on("close", () => dropped());
       },
     );
     req.on("timeout", () => {
@@ -163,6 +198,8 @@ export function mapAgentEvent(
       return { type: "conversation_timing", timing: data as ConversationTiming };
     case "assistant_delta":
       return { type: "assistant_delta", delta: String(data.delta ?? data.text ?? "") };
+    case "assistant_reset":
+      return { type: "assistant_reset" };
     case "assistant_message":
       return {
         type: "assistant_message",
@@ -684,8 +721,9 @@ export class GatewayClient {
         (res) => {
           if (res.statusCode && res.statusCode >= 400) {
             let errBody = "";
-            res.on("data", (c) => {
-              errBody += c.toString();
+            res.setEncoding("utf8");
+            res.on("data", (c: string) => {
+              errBody += c;
             });
             res.on("end", () => {
               reject(new Error(`chat/stream HTTP ${res.statusCode}: ${errBody}`));
@@ -694,8 +732,10 @@ export class GatewayClient {
           }
 
           let buffer = "";
-          res.on("data", (chunk: Buffer) => {
-            buffer += chunk.toString("utf8");
+          // Same reason as requestJson: never decode chunk by chunk.
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => {
+            buffer += chunk;
             const parsed = parseSseChunk(buffer);
             buffer = parsed.rest;
             for (const ev of parsed.events) {

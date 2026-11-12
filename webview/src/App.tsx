@@ -104,6 +104,7 @@ const RUN_SCOPED_EVENT_TYPES = new Set<HostToWebview["type"]>([
   "status",
   "user_echo",
   "assistant_delta",
+  "assistant_reset",
   "assistant_message",
   "tool_started",
   "tool_completed",
@@ -2852,6 +2853,13 @@ export function App() {
             else items.push({ kind: "assistant", text: msg.delta, timestamp: messageTimestamp() });
             return { ...current, items };
           }
+          case "assistant_reset": {
+            // The model stream was retried: drop the partial answer so the
+            // re-sent text does not appear after it.
+            const last = current.items[current.items.length - 1];
+            if (last?.kind !== "assistant") return current;
+            return { ...current, items: current.items.slice(0, -1) };
+          }
           case "assistant_message": {
             if (!msg.text.trim()) return current;
             const items = [...current.items];
@@ -3571,6 +3579,16 @@ export function App() {
             streamingRef.current = true;
             return [...next, { kind: "assistant", text: msg.delta, timestamp: messageTimestamp() }];
           });
+          break;
+        case "assistant_reset":
+          if (isStaleEvent(msg)) break;
+          if (streamingRef.current) {
+            // Drop the partial answer; the retried stream re-sends it whole.
+            streamingRef.current = false;
+            setItems((prev) =>
+              prev[prev.length - 1]?.kind === "assistant" ? prev.slice(0, -1) : prev,
+            );
+          }
           break;
         case "assistant_message": {
           const wasStreaming = streamingRef.current;
