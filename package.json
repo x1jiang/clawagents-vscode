@@ -2,7 +2,7 @@
   "name": "clawagents",
   "displayName": "ClawAgents",
   "description": "Coding agent for VS Code — chat, edit, and run tools with OpenAI, Anthropic, Gemini, AWS Bedrock, or local models.",
-  "version": "1.0.211",
+  "version": "1.0.212",
   "publisher": "clawagents",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -395,8 +395,8 @@
     "test": "node --test test/*.test.cjs",
     "watch": "node esbuild.mjs --watch",
     "install:all": "npm install && npm install --prefix webview",
-    "package": "npx --yes @vscode/vsce package",
-    "publish": "npx --yes @vscode/vsce publish",
+    "package": "npx --yes @vscode/vsce@4.1.0 package --no-dependencies",
+    "publish": "npx --yes @vscode/vsce@4.1.0 publish --no-dependencies",
     "publish:ovsx": "npx --yes ovsx publish"
   },
   "devDependencies": {

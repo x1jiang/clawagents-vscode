@@ -1,3 +1,13 @@
+# 1.0.212
+
+- Add **Gemini 4 Carbon** (`gemini-4-carbon`) to the Google model picker, context-window catalog, and token/cache pricing tables; add context windows and pricing for the hosted **Muse** family on the Meta Model API (`muse-spark-1.1/1.2/1.3`, `muse-wonder-1.0`, `muse-ember-1.0` including its >200K tier) and gated **GPT-6 Cyber** (`gpt-6-cyber`, excluded from the interactive picker).
+- Coalesce streamed assistant tokens to ~30 updates/s before posting to the webview while preserving ordering around tool cards and control events, and handle `assistant_reset` stream events so retried streams clear diverged partial text cleanly.
+- Run dependency, companion, and managed-Python probes through a non-blocking `execCapture` helper so sidecar startup never blocks the extension host, and register managed-Python startup before its first `await` so concurrent callers share one environment setup.
+- Scope staged attachments per conversation so background and queued turns claim only their own chat's files.
+- Harden sidecar lifecycle and HTTP decoding: decode sidecar responses as a single UTF-8 stream, retry detached-run polling with backoff, defer credential/dependency restarts while turns are active, exit the sidecar via a stdin parent watchdog when the extension host terminates, wait for process exit in `deactivate()`, use the trusted `pythonPath` setting for companion probes, and surface webview message-handler errors.
+- Pin `@vscode/vsce` with `--no-dependencies` in packaging/publish scripts for bundled builds.
+- Require Python clawagents **6.20.98** (channel/gateway/CodeAct/Seatbelt/bash security hardening, Gemini 4 Carbon + hosted Muse + GPT-6 Cyber profiles, Harness² Propose–Probe–Compose recursion loop, provider module split under `clawagents.providers`, non-blocking `LocalBackend.exec` pipe handling, cancellable lane commands, `assistant_reset` stream retry handling, optional `gateway` / `observatory` extras, and HTTPS `web_fetch` IP-pinned certificate verification).
+
 # 1.0.211
 
 - Include deliberate thread reading in human time estimates, with a 90-second idle limit, one-minute confirmed resume, and shared deduplication across reading, drafting, and file viewing. Ignore streaming output and automatic scrolling; document the rules in English.
