@@ -57,6 +57,7 @@ import type {
 } from "./protocol";
 import { AutoOpenScheduler } from "./autoOpenFiles";
 import { DETACHED_POLL_INTERVAL_MS, detachedPollRetryDelay } from "./detachedPoll";
+import { DeltaBatcher } from "./deltaBatcher";
 import { PendingAttachments } from "./pendingAttachments";
 import type { ClaimedAttachments, StagedAttachment } from "./pendingAttachments";
 import { isBareFileName, isWorkspaceSearchCandidate } from "./pathReferences";
@@ -493,8 +494,15 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
   }
 
   post(msg: HostToWebview): void {
-    void this.view?.webview.postMessage(msg);
+    // Streamed tokens are coalesced (see DeltaBatcher); everything else goes
+    // straight through, after any text that preceded it.
+    (this.deltaBatcher ??= new DeltaBatcher((out) => {
+      void this.view?.webview.postMessage(out);
+    })).post(msg);
   }
+
+  /** Lazily created so objects built without the constructor still post. */
+  private deltaBatcher: DeltaBatcher | undefined;
 
   /** Push Graphify companion status into the webview Settings panel. */
   postGraphifyStatus(data: Record<string, unknown>): void {
@@ -3796,6 +3804,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     }
     this.detachedPollTimers.clear();
     this.detachedChatPollers.clear();
+    this.deltaBatcher?.dispose();
     this.setTranscriptSelection("");
     this.humanTiming.dispose();
     this.localGemma.dispose();

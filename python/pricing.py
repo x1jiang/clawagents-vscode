@@ -32,6 +32,8 @@ PRICES: dict[str, PriceTuple] = {
     # https://developers.openai.com/api/docs/models/gpt-6.1-sol
     "gpt-6.1-sol": (2.0, 10.0, 0.1, 2.5),
     "gpt-6.1-terra": (1.0, 5.0, 0.05, 1.25),
+    # Gated (Daybreak Red). https://developers.openai.com/api/docs/models/gpt-6-cyber
+    "gpt-6-cyber": (20.0, 100.0, 2.0, 25.0),
     "gpt-6-sol": (2.0, 10.0, 0.2, 2.5),
     "gpt-6-luna": (0.1, 0.5, 0.01, 0.125),
     # OpenAI GPT-5.6 family (Sol / Terra / Luna) — cached read = 10%, write = 1.25×
@@ -69,10 +71,25 @@ PRICES: dict[str, PriceTuple] = {
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
     "claude-haiku-4-5-20251001": (1.0, 5.0, 0.1, 1.25),
     # Gemini (approx; standard paid tier — cache rates when reported)
-    # 4 Argon intro $2.00/$10.00 ($0.10 cache read) through 2026-11-30, then $3.00/$15.00.
+    # 4 Argon / 4 Carbon intro $2.00/$10.00 ($0.10 cache read) through 2026-11-30.
+    # The pricing page on 2026-11-11 lists $4.00/$20.00 ($0.20 cache read) from
+    # 2026-12-01 for both — update these rows then.
+    "gemini-4-carbon": (2.0, 10.0, 0.1, 2.5),
     # 3.8 / 3.7 / 3.6 Flash intro $0.75/$3.75 through 2026-12-31, then $1.50/$7.50.
     "gemini-4-argon": (2.0, 10.0, 0.1, 2.5),
     "gemini-4": (2.0, 10.0, 0.1, 2.5),
+    # Meta Model API — hosted Muse (https://dev.meta.ai/docs/pricing-rate-limits).
+    # Meta publishes no cache-write rate, so writes are estimated at the full
+    # input rate rather than an invented premium. Contributor ids come first:
+    # prefix lookup must not resolve them through the Standard row.
+    "muse-wonder-1.0": (4.0, 20.0, 0.20, 4.0),
+    "muse-spark-1.3-contributor": (0.10, 0.20, 0.002, 0.10),
+    "muse-spark-1.2-contributor": (0.10, 0.20, 0.002, 0.10),
+    "muse-spark-1.3": (1.25, 4.25, 0.15, 1.25),
+    "muse-spark-1.2": (1.25, 4.25, 0.15, 1.25),
+    "muse-spark-1.1": (1.25, 4.25, 0.15, 1.25),
+    # Up to 200K input; over that the whole request is billed at 3x (below).
+    "muse-ember-1.0": (0.10, 0.50, 0.004, 0.10),
     "gemini-3.8-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.7-flash": (0.75, 3.75, 0.075, 0.9375),
     "gemini-3.6-flash": (0.75, 3.75, 0.075, 0.9375),
@@ -317,11 +334,15 @@ _LONG_CONTEXT_INPUT_MULT = 2.0
 _LONG_CONTEXT_OUTPUT_MULT_GPT56 = 1.5
 _LONG_CONTEXT_OUTPUT_MULT_GROK = 2.0
 _LONG_CONTEXT_MULT_HAIKU5 = 5.0
+# Muse Ember: requests over 200K input tokens are billed at 3x on every rate
+# ($0.30 / $0.012 cached / $1.50), applied to the whole request.
+_LONG_CONTEXT_THRESHOLD_MUSE_EMBER = 200_000
+_LONG_CONTEXT_MULT_MUSE_EMBER = 3.0
 
 
 def _is_gpt56_family(model_id: str) -> bool:
     key = normalize_model_id(model_id)
-    return (key.startswith(("gpt-5.6", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5"))
+    return (key.startswith(("gpt-5.6", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6-cyber", "gpt-5.5"))
             or (key.startswith("gpt-5.4") and not key.startswith(("gpt-5.4-mini", "gpt-5.4-nano"))))
 
 
@@ -346,6 +367,11 @@ def long_context_multipliers(
         return (_LONG_CONTEXT_INPUT_MULT, _LONG_CONTEXT_OUTPUT_MULT_GROK)
     if _is_haiku5_family(model_id) and prompt > _LONG_CONTEXT_THRESHOLD_HAIKU5:
         return (_LONG_CONTEXT_MULT_HAIKU5, _LONG_CONTEXT_MULT_HAIKU5)
+    if (
+        normalize_model_id(model_id).startswith("muse-ember")
+        and prompt > _LONG_CONTEXT_THRESHOLD_MUSE_EMBER
+    ):
+        return (_LONG_CONTEXT_MULT_MUSE_EMBER, _LONG_CONTEXT_MULT_MUSE_EMBER)
     return None
 
 

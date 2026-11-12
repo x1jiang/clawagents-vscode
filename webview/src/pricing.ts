@@ -30,6 +30,8 @@ const PRICES: Record<string, Rates> = {
   // https://developers.openai.com/api/docs/models/gpt-6.1-sol
   "gpt-6.1-sol": withCache(2, 10, 0.1, 2.5),
   "gpt-6.1-terra": withCache(1, 5, 0.05, 1.25),
+  // Gated (Daybreak Red). https://developers.openai.com/api/docs/models/gpt-6-cyber
+  "gpt-6-cyber": withCache(20, 100, 2, 25),
   "gpt-6-sol": withCache(2, 10, 0.2, 2.5),
   "gpt-6-luna": withCache(0.1, 0.5, 0.01, 0.125),
   "gpt-5.6": withCache(5, 30, 0.5, 6.25),
@@ -61,8 +63,20 @@ const PRICES: Record<string, Rates> = {
   "claude-haiku-5": withCache(0.1, 0.5, 0.01, 0.125),
   "claude-haiku-4-5": withCache(1, 5, 0.1, 1.25),
   "claude-haiku-4-5-20251001": withCache(1, 5, 0.1, 1.25),
+  // Argon / Carbon intro pricing through 2026-11-30; the pricing page lists
+  // $4 / $20 ($0.20 cached) from 2026-12-01 for both.
+  "gemini-4-carbon": withCache(2, 10, 0.1, 2.5),
   "gemini-4-argon": withCache(2, 10, 0.1, 2.5),
   "gemini-4": withCache(2, 10, 0.1, 2.5),
+  // Meta Model API — hosted Muse. No published cache-write rate, so writes
+  // are estimated at the full input rate. Contributor ids first (prefix lookup).
+  "muse-wonder-1.0": withCache(4, 20, 0.2, 4),
+  "muse-spark-1.3-contributor": withCache(0.1, 0.2, 0.002, 0.1),
+  "muse-spark-1.2-contributor": withCache(0.1, 0.2, 0.002, 0.1),
+  "muse-spark-1.3": withCache(1.25, 4.25, 0.15, 1.25),
+  "muse-spark-1.2": withCache(1.25, 4.25, 0.15, 1.25),
+  "muse-spark-1.1": withCache(1.25, 4.25, 0.15, 1.25),
+  "muse-ember-1.0": withCache(0.1, 0.5, 0.004, 0.1),
   "gemini-3.8-flash": withCache(0.75, 3.75),
   "gemini-3.7-flash": withCache(0.75, 3.75),
   "gemini-3.6-flash": withCache(0.75, 3.75),
@@ -259,10 +273,13 @@ const LONG_CONTEXT_INPUT_MULT = 2;
 const LONG_CONTEXT_OUTPUT_MULT_GPT56 = 1.5;
 const LONG_CONTEXT_OUTPUT_MULT_GROK = 2;
 const LONG_CONTEXT_MULT_HAIKU5 = 5;
+/** Muse Ember: over 200K input tokens the whole request is billed at 3×. */
+const LONG_CONTEXT_THRESHOLD_MUSE_EMBER = 200_000;
+const LONG_CONTEXT_MULT_MUSE_EMBER = 3;
 
 function isGpt56Family(modelId: string): boolean {
   const key = normalizeModelId(modelId);
-  return key.startsWith("gpt-5.6") || key.startsWith("gpt-6.1-sol") || key.startsWith("gpt-6.1-terra") || /^gpt-6-(astra|sol|luna)/.test(key) || key.startsWith("gpt-5.5")
+  return key.startsWith("gpt-5.6") || key.startsWith("gpt-6.1-sol") || key.startsWith("gpt-6.1-terra") || /^gpt-6-(astra|sol|luna|cyber)/.test(key) || key.startsWith("gpt-5.5")
     || (key.startsWith("gpt-5.4") && !/^gpt-5\.4-(mini|nano)/.test(key));
 }
 
@@ -287,6 +304,9 @@ function longContextMultipliers(
   }
   if (isHaiku5Family(modelId) && prompt > LONG_CONTEXT_THRESHOLD_HAIKU5) {
     return { input: LONG_CONTEXT_MULT_HAIKU5, output: LONG_CONTEXT_MULT_HAIKU5 };
+  }
+  if (normalizeModelId(modelId).startsWith("muse-ember") && prompt > LONG_CONTEXT_THRESHOLD_MUSE_EMBER) {
+    return { input: LONG_CONTEXT_MULT_MUSE_EMBER, output: LONG_CONTEXT_MULT_MUSE_EMBER };
   }
   return null;
 }

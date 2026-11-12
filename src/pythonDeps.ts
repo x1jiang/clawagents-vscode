@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from "child_process";
+import { execCapture } from "./execCapture";
+import type { CapturedProcess } from "./execCapture";
 import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
@@ -75,63 +77,95 @@ export function versionAtLeast(
   return true;
 }
 
+/** Python snippet that imports the sidecar's dependencies and reports on them. */
+const DEP_PROBE_SCRIPT = [
+  "import sys, inspect",
+  "import fastapi, uvicorn, pydantic",
+  "import pexpect, pyte",
+  "from importlib.metadata import version as _dist_ver",
+  "import clawagents",
+  "from clawagents.agent import create_claw_agent",
+  "print(sys.executable)",
+  // Prefer dist-info over clawagents.__version__, which has lagged
+  // pyproject on more than one release and falsely fails the floor.
+  "try:",
+  "    print(_dist_ver('clawagents'))",
+  "except Exception:",
+  "    print(getattr(clawagents, '__version__', '?'))",
+  "print('skills_exclude' in inspect.signature(create_claw_agent).parameters)",
+].join("\n");
+
+const DEP_PROBE_TIMEOUT_MS = 25_000;
+
+function interpretDepProbe(python: string, result: CapturedProcess): DepProbe {
+  if (result.error) {
+    const err = result.error as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") {
+      return {
+        ok: false,
+        detail:
+          `Python not found: "${python}". Set clawagents.pythonPath to the full interpreter path.`,
+      };
+    }
+    return { ok: false, detail: String(result.error) };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      detail: (result.stderr || result.stdout || `exit ${result.status}`).trim(),
+    };
+  }
+  const lines = (result.stdout || "")
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return {
+    ok: true,
+    executable: lines[0],
+    version: lines[1],
+    supportsSkillsExclude: lines[2] === "True",
+    detail: lines.join("\n"),
+  };
+}
+
+/**
+ * Probe the interpreter without blocking the extension host. This imports
+ * fastapi and clawagents, which takes seconds on a cold or remote Python.
+ */
+export async function probeSidecarDeps(
+  python: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<DepProbe> {
+  try {
+    const result = await execCapture(python, ["-c", DEP_PROBE_SCRIPT], {
+      timeout: DEP_PROBE_TIMEOUT_MS,
+      env,
+    });
+    return interpretDepProbe(python, result);
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Blocking variant. Prefer {@link probeSidecarDeps}; kept for callers that
+ *  cannot await. */
 export function probeSidecarDepsSync(
   python: string,
   env?: NodeJS.ProcessEnv,
 ): DepProbe {
   try {
-    const result = spawnSync(
-      python,
-      [
-        "-c",
-        [
-          "import sys, inspect",
-          "import fastapi, uvicorn, pydantic",
-          "import pexpect, pyte",
-          "from importlib.metadata import version as _dist_ver",
-          "import clawagents",
-          "from clawagents.agent import create_claw_agent",
-          "print(sys.executable)",
-          // Prefer dist-info over clawagents.__version__, which has lagged
-          // pyproject on more than one release and falsely fails the floor.
-          "try:",
-          "    print(_dist_ver('clawagents'))",
-          "except Exception:",
-          "    print(getattr(clawagents, '__version__', '?'))",
-          "print('skills_exclude' in inspect.signature(create_claw_agent).parameters)",
-        ].join("\n"),
-      ],
-      { encoding: "utf8", timeout: 25_000, env },
-    );
-    if (result.error) {
-      const err = result.error as NodeJS.ErrnoException;
-      if (err.code === "ENOENT") {
-        return {
-          ok: false,
-          detail:
-            `Python not found: "${python}". Set clawagents.pythonPath to the full interpreter path.`,
-        };
-      }
-      return { ok: false, detail: String(result.error) };
-    }
-    if (result.status !== 0) {
-      return {
-        ok: false,
-        detail: (result.stderr || result.stdout || `exit ${result.status}`).trim(),
-      };
-    }
-    const lines = (result.stdout || "")
-      .trim()
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    return {
-      ok: true,
-      executable: lines[0],
-      version: lines[1],
-      supportsSkillsExclude: lines[2] === "True",
-      detail: lines.join("\n"),
-    };
+    const result = spawnSync(python, ["-c", DEP_PROBE_SCRIPT], {
+      encoding: "utf8",
+      timeout: DEP_PROBE_TIMEOUT_MS,
+      env,
+    });
+    return interpretDepProbe(python, {
+      status: result.status,
+      stdout: result.stdout || "",
+      stderr: result.stderr || "",
+      error: result.error as NodeJS.ErrnoException | undefined,
+    });
   } catch (err) {
     return { ok: false, detail: err instanceof Error ? err.message : String(err) };
   }
@@ -313,7 +347,7 @@ async function ensureSidecarDepsOnce(
   env?: NodeJS.ProcessEnv,
   opts?: EnsureDepsOptions,
 ): Promise<DepProbe> {
-  let probe = probeSidecarDepsSync(python, env);
+  let probe = await probeSidecarDeps(python, env);
   output.appendLine(
     `Deps probe: ok=${probe.ok} version=${probe.version || "?"} skills_exclude=${probe.supportsSkillsExclude}`,
   );
@@ -350,7 +384,7 @@ async function ensureSidecarDepsOnce(
       };
     }
 
-    probe = probeSidecarDepsSync(python, env);
+    probe = await probeSidecarDeps(python, env);
     if (!probe.ok) {
       return {
         ok: false,

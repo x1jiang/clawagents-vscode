@@ -20,8 +20,13 @@ const WINDOWS: Array<[string, number]> = [
   ["gemma-4-12b-agentic-fable5-composer2.5-v2", 16_384],
   // Deployment /v1/models reports max_model_len=196608.
   ["muse-glimmer-30b", 196_608],
+  // Meta Model API — hosted Muse (https://dev.meta.ai/docs/models.md).
+  ["muse-spark-", 1_048_576],
+  ["muse-wonder-", 1_048_576],
+  ["muse-ember-", 1_000_000],
   // OpenAI
   ["gpt-6-astra", 1_050_000],
+  ["gpt-6-cyber", 1_050_000],
   ["gpt-6.1-sol", 1_050_000],
   ["gpt-6.1-terra", 1_050_000],
   ["gpt-6-sol", 1_050_000],
@@ -59,6 +64,7 @@ const WINDOWS: Array<[string, number]> = [
   ["claude-haiku-4", 200_000],
   ["claude-3", 200_000],
   // Google
+  ["gemini-4-carbon", 1_048_576],
   ["gemini-4-argon", 1_048_576],
   ["gemini-4", 1_048_576],
   ["gemini-3.8", 1_048_576],

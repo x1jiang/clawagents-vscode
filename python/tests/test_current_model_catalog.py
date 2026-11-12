@@ -9,7 +9,7 @@ import pricing
  "provider,ids",
  [
   ("anthropic",["claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5","claude-opus-5","claude-sonnet-5"]),
-  ("gemini",["gemini-4-argon","gemini-3.8-flash"]),
+  ("gemini",["gemini-4-carbon","gemini-4-argon","gemini-3.8-flash"]),
   ("bedrock",["us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","global.anthropic.claude-haiku-5-5"]),
   ("xai",["grok-4.6"]),
  ],
@@ -28,6 +28,14 @@ def test_current_direct_catalog(provider,ids):
   ("claude-haiku-5.5",(.1,.5,.01,.125)),
   ("claude-opus-5",(5,25,.5,6.25)),
   ("gemini-4-argon",(2,10,.1,2.5)),
+  ("gemini-4-carbon",(2,10,.1,2.5)),
+  ("gpt-6-cyber",(20,100,2,25)),
+  ("muse-wonder-1.0",(4,20,.2,4)),
+  ("muse-spark-1.3",(1.25,4.25,.15,1.25)),
+  ("muse-spark-1.3-contributor",(.1,.2,.002,.1)),
+  ("muse-spark-1.2-contributor",(.1,.2,.002,.1)),
+  ("muse-spark-1.1",(1.25,4.25,.15,1.25)),
+  ("muse-ember-1.0",(.1,.5,.004,.1)),
   ("grok-4.6",(2,6,.5,2)),
   ("gemini-3.6-flash",(.75,3.75,.075,.9375)),
  ],
@@ -76,3 +84,14 @@ def test_mantle_grok_current_route_and_price(monkeypatch):
  assert kwargs["wire_api"]=="responses"
  assert pricing.price_for_full("xai.grok-4.6")== (2.2,6.6,.55,2.2)
  assert pricing.price_for_full("global.xai.grok-4.6")== (2,6,.5,2)
+
+
+def test_muse_ember_and_gpt6_cyber_long_context_tiers():
+ import pricing
+ assert pricing.long_context_multipliers("muse-ember-1.0", 200_000) is None
+ assert pricing.long_context_multipliers("muse-ember-1.0", 200_001) == (3.0, 3.0)
+ assert pricing.long_context_multipliers("muse-spark-1.3", 900_000) is None
+ assert pricing.long_context_multipliers("gpt-6-cyber", 272_001) == (2.0, 1.5)
+ # Ember over the cliff: $0.30 in / $1.50 out per 1M.
+ assert abs(pricing.estimate_usd("muse-ember-1.0", prompt_tokens=300_000, completion_tokens=10_000) - 0.105) < 1e-9
+ assert abs(pricing.estimate_usd("muse-ember-1.0", prompt_tokens=100_000, completion_tokens=10_000) - 0.015) < 1e-9

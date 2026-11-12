@@ -10,7 +10,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { isExternalGraphPath, workspaceRoot } from "./config";
 import { curatedProcessEnv } from "./envCurate";
-import { ensureCompanions, probeGraphify } from "./companionDeps";
+import { ensureCompanions, probeGraphify, probeGraphifyAsync } from "./companionDeps";
 
 export type GraphifyMode = "extract_code" | "extract_full" | "update";
 
@@ -174,7 +174,7 @@ export async function ensureGraphifyPackage(
   python: string,
   output?: { appendLine(s: string): void },
 ): Promise<boolean> {
-  const probe = probeGraphify(python);
+  const probe = await probeGraphifyAsync(python);
   if (probe.ok) {
     return true;
   }

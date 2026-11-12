@@ -114,7 +114,7 @@ test("dependency probe prefers dist-info over clawagents.__version__", () => {
   assert.match(src, /from importlib\.metadata import version as _dist_ver/);
 });
 
-test("dependency probe requires PTY runtime imports", () => {
+test("dependency probe requires PTY runtime imports", async () => {
   const fakePython = path.join(tempDir, "python-without-pty");
   fs.writeFileSync(
     fakePython,
@@ -133,6 +133,9 @@ exit 0
   assert.equal(probe.ok, false);
   assert.equal(deps.needsPipInstall(probe), true);
   assert.match(probe.detail, /ModuleNotFoundError/);
+  // The non-blocking probe used on sidecar start must agree with it.
+  const asyncProbe = await deps.probeSidecarDeps(fakePython, {});
+  assert.deepEqual(asyncProbe, probe);
 });
 
 test("concurrent dependency checks share one in-flight promise", async () => {

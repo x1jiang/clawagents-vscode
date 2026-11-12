@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "child_process";
+import { execCapture } from "./execCapture";
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as https from "https";
@@ -46,16 +47,30 @@ export function parsePythonIdentity(stdout: string): PythonIdentity | undefined 
   return { executable: lines[0], majorMinor: lines[1] };
 }
 
+const IDENTITY_SCRIPT =
+  "import sys; print(sys.executable); print(f'{sys.version_info.major}.{sys.version_info.minor}')";
+
 export function probePythonIdentity(basePython: string): PythonIdentity | undefined {
-  const result = spawnSync(
-    basePython,
-    ["-c", "import sys; print(sys.executable); print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
-    { encoding: "utf8", timeout: 10_000, windowsHide: true },
-  );
+  const result = spawnSync(basePython, ["-c", IDENTITY_SCRIPT], {
+    encoding: "utf8",
+    timeout: 10_000,
+    windowsHide: true,
+  });
   if (result.status !== 0) {
     return undefined;
   }
   return parsePythonIdentity(result.stdout || "");
+}
+
+/** Non-blocking variant: this runs on every sidecar start. */
+export async function probePythonIdentityAsync(
+  basePython: string,
+): Promise<PythonIdentity | undefined> {
+  const result = await execCapture(basePython, ["-c", IDENTITY_SCRIPT], { timeout: 10_000 });
+  if (result.status !== 0) {
+    return undefined;
+  }
+  return parsePythonIdentity(result.stdout);
 }
 
 export function managedPythonEnvDir(
@@ -79,12 +94,10 @@ export function managedPythonExecutable(
     : path.join(envDir, "bin", "python");
 }
 
-function managedPythonIsUsable(python: string): boolean {
+async function managedPythonIsUsable(python: string): Promise<boolean> {
   if (!fs.existsSync(python)) return false;
-  const result = spawnSync(python, ["-c", "import pip, sys; print(sys.executable)"], {
-    encoding: "utf8",
+  const result = await execCapture(python, ["-c", "import pip, sys; print(sys.executable)"], {
     timeout: 10_000,
-    windowsHide: true,
   });
   return result.status === 0;
 }
@@ -418,7 +431,7 @@ export async function ensureManagedPython(
     confirmNetworkBootstrap?: ConfirmNetworkBootstrap;
   },
 ): Promise<string> {
-  const identity = probePythonIdentity(basePython);
+  const identity = await probePythonIdentityAsync(basePython);
   if (!identity) {
     throw new Error(`Could not inspect base Python interpreter: ${basePython}`);
   }
@@ -440,47 +453,51 @@ export async function ensureManagedPython(
   if (existing) {
     return existing;
   }
-  if (managedPythonIsUsable(python)) {
-    recentFailures.delete(envDir);
-    return python;
-  }
-  const failed = recentFailures.get(envDir);
-  if (failed && Date.now() - failed.at < MANAGED_PYTHON_FAILURE_TTL_MS) {
-    throw failed.error;
-  }
-  if (fs.existsSync(envDir)) {
-    output.appendLine(`Removing incomplete managed Python environment: ${envDir}`);
-    fs.rmSync(envDir, { recursive: true, force: true });
-  }
-  const creating = (async () => {
-    fs.mkdirSync(path.dirname(envDir), { recursive: true });
-    output.appendLine(
-      `Creating managed Python environment (${identity.majorMinor}) at ${envDir}`,
-    );
-    try {
-      await createManagedEnv(identity, envDir, output, options?.confirmNetworkBootstrap);
-    } catch (err) {
-      fs.rmSync(envDir, { recursive: true, force: true });
-      throw err;
+  // Register this start before the first await below. The usability probe is
+  // asynchronous now, and two callers interleaving there would both decide to
+  // rebuild — each deleting the directory the other was creating.
+  const creating: Promise<string> = (async () => {
+    if (await managedPythonIsUsable(python)) {
+      recentFailures.delete(envDir);
+      return python;
     }
-    if (!managedPythonIsUsable(python)) {
+    const failed = recentFailures.get(envDir);
+    if (failed && Date.now() - failed.at < MANAGED_PYTHON_FAILURE_TTL_MS) {
+      throw failed.error;
+    }
+    if (fs.existsSync(envDir)) {
+      output.appendLine(`Removing incomplete managed Python environment: ${envDir}`);
       fs.rmSync(envDir, { recursive: true, force: true });
-      throw new Error(
-        `Managed Python at ${python} is missing a working pip installation\n\n`
-        + ensurepipRemedy(identity),
+    }
+    return await (async () => {
+      fs.mkdirSync(path.dirname(envDir), { recursive: true });
+      output.appendLine(
+        `Creating managed Python environment (${identity.majorMinor}) at ${envDir}`,
       );
-    }
-    recentFailures.delete(envDir);
-    return python;
-  })()
-    .catch((err: unknown) => {
-      const error = err instanceof Error ? err : new Error(String(err));
-      recentFailures.set(envDir, { error, at: Date.now() });
-      throw error;
-    })
-    .finally(() => {
-      ensureInFlight.delete(envDir);
-    });
+      try {
+        await createManagedEnv(identity, envDir, output, options?.confirmNetworkBootstrap);
+      } catch (err) {
+        fs.rmSync(envDir, { recursive: true, force: true });
+        throw err;
+      }
+      if (!(await managedPythonIsUsable(python))) {
+        fs.rmSync(envDir, { recursive: true, force: true });
+        throw new Error(
+          `Managed Python at ${python} is missing a working pip installation\n\n`
+          + ensurepipRemedy(identity),
+        );
+      }
+      recentFailures.delete(envDir);
+      return python;
+    })()
+      .catch((err: unknown) => {
+        const error = err instanceof Error ? err : new Error(String(err));
+        recentFailures.set(envDir, { error, at: Date.now() });
+        throw error;
+      });
+  })().finally(() => {
+    ensureInFlight.delete(envDir);
+  });
   ensureInFlight.set(envDir, creating);
   return creating;
 }

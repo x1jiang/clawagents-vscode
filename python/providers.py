@@ -148,6 +148,7 @@ _CATALOG: list[dict[str, Any]] = [
         "env_key": "GEMINI_API_KEY",
         "models": [
             {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash"},
+            {"id": "gemini-4-carbon", "label": "Gemini 4 Carbon"},
             {"id": "gemini-4-argon", "label": "Gemini 4 Argon"},
             {"id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash"},
             {"id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash"},

@@ -59,3 +59,15 @@ test("probeCompanions returns context-mode, rtk, and graphify", () => {
     assert.equal(typeof p.detail, "string");
   }
 });
+
+test("probeCompanionsAsync matches the blocking probe without blocking", async () => {
+  const pending = deps.probeCompanionsAsync();
+  assert.ok(pending instanceof Promise, "must not run synchronously on the extension host");
+  const probes = await pending;
+  assert.deepEqual(probes.map((p) => p.name), ["context-mode", "rtk", "graphify"]);
+  const blocking = deps.probeCompanions();
+  assert.deepEqual(
+    probes.map((p) => [p.name, p.found, p.ok, p.version]),
+    blocking.map((p) => [p.name, p.found, p.ok, p.version]),
+  );
+});

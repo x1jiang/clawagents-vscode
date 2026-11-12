@@ -55,5 +55,6 @@ test("the poller retries instead of declaring the turn finished on one error", (
 
 test("companion probes never fall back to the workspace-merged pythonPath", () => {
   assert.doesNotMatch(companion, /get<string>\("pythonPath"\)/);
-  assert.equal((companion.match(/trustedPythonPathSetting\(\)/g) || []).length, 3);
+  // probeGraphify, probeGraphifyAsync, ensureGraphify, ensureCompanionsOnce.
+  assert.equal((companion.match(/trustedPythonPathSetting\(\)/g) || []).length, 4);
 });

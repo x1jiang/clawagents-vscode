@@ -12,7 +12,7 @@ import {
   workspaceRoot,
   workspaceRoots,
 } from "./config";
-import { ensureCompanions, probeCompanions } from "./companionDeps";
+import { ensureCompanions, probeCompanionsAsync } from "./companionDeps";
 import {
   adoptUpstreamGraph,
   getGraphifyStatus,
@@ -260,7 +260,7 @@ export function activate(context: vscode.ExtensionContext): void {
           `  executable=${probe.executable || "?"}`,
       );
       out.appendLine("=== Companions ===");
-      for (const c of probeCompanions()) {
+      for (const c of await probeCompanionsAsync()) {
         out.appendLine(`  ${c.name}: ${c.detail}`);
       }
       if (config.pythonRuntime === "managed") {

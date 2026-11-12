@@ -4,6 +4,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { trustedPythonPathSetting } from "./config";
 import { curatedProcessEnv } from "./envCurate";
+import { execCapture } from "./execCapture";
 import { versionAtLeast } from "./pythonDeps";
 
 /**
@@ -35,21 +36,32 @@ function parseVersion(text: string | undefined): [number, number, number] | unde
   return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
 }
 
+const WHICH_CMD = process.platform === "win32" ? "where" : "which";
+
+function firstLine(status: number | null, stdout: string): string | undefined {
+  if (status !== 0) {
+    return undefined;
+  }
+  return (
+    (stdout || "")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find(Boolean) || undefined
+  );
+}
+
 function whichSync(bin: string): string | undefined {
-  const cmd = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(cmd, [bin], {
+  const result = spawnSync(WHICH_CMD, [bin], {
     encoding: "utf8",
     timeout: 5_000,
     env: process.env,
   });
-  if (result.status !== 0) {
-    return undefined;
-  }
-  const line = (result.stdout || "")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .find(Boolean);
-  return line || undefined;
+  return firstLine(result.status, result.stdout || "");
+}
+
+async function which(bin: string): Promise<string | undefined> {
+  const result = await execCapture(WHICH_CMD, [bin], { timeout: 5_000, env: process.env });
+  return firstLine(result.status, result.stdout);
 }
 
 function walkPackageJson(start: string, maxUp = 8): string | undefined {
@@ -71,7 +83,14 @@ function walkPackageJson(start: string, maxUp = 8): string | undefined {
 }
 
 export function probeContextMode(): CompanionProbe {
-  const bin = whichSync("context-mode");
+  return describeContextMode(whichSync("context-mode"));
+}
+
+export async function probeContextModeAsync(): Promise<CompanionProbe> {
+  return describeContextMode(await which("context-mode"));
+}
+
+function describeContextMode(bin: string | undefined): CompanionProbe {
   if (!bin) {
     return {
       name: "context-mode",
@@ -107,22 +126,36 @@ export function probeContextMode(): CompanionProbe {
   };
 }
 
+const RTK_MISSING: CompanionProbe = {
+  name: "rtk",
+  found: false,
+  ok: false,
+  detail: "missing — brew install rtk (https://www.rtk-ai.app/)",
+};
+
 export function probeRtk(): CompanionProbe {
   const bin = process.env.CLAW_RTK_BIN || whichSync("rtk");
   if (!bin) {
-    return {
-      name: "rtk",
-      found: false,
-      ok: false,
-      detail: "missing — brew install rtk (https://www.rtk-ai.app/)",
-    };
+    return { ...RTK_MISSING };
   }
   const result = spawnSync(bin, ["--version"], {
     encoding: "utf8",
     timeout: 10_000,
     env: process.env,
   });
-  const text = `${result.stdout || ""}\n${result.stderr || ""}`;
+  return describeRtk(bin, `${result.stdout || ""}\n${result.stderr || ""}`);
+}
+
+export async function probeRtkAsync(): Promise<CompanionProbe> {
+  const bin = process.env.CLAW_RTK_BIN || (await which("rtk"));
+  if (!bin) {
+    return { ...RTK_MISSING };
+  }
+  const result = await execCapture(bin, ["--version"], { timeout: 10_000, env: process.env });
+  return describeRtk(bin, `${result.stdout}\n${result.stderr}`);
+}
+
+function describeRtk(bin: string, text: string): CompanionProbe {
   const parsed = parseVersion(text);
   const version = parsed ? parsed.join(".") : undefined;
   const ok = versionAtLeast(version, MIN_RTK_VERSION);
@@ -171,19 +204,32 @@ export function probeGraphify(python?: string): CompanionProbe {
   if (cached && Date.now() - cached.at < GRAPHIFY_PROBE_TTL_MS) {
     return cached.probe;
   }
-  const result = spawnSync(
-    py,
-    [
-      "-c",
-      "import importlib.metadata as m; print(m.version('graphifyy'))",
-    ],
-    {
-      encoding: "utf8",
-      timeout: 15_000,
-      env: process.env,
-    },
-  );
-  if (result.status !== 0) {
+  const result = spawnSync(py, ["-c", GRAPHIFY_PROBE_SCRIPT], {
+    encoding: "utf8",
+    timeout: 15_000,
+    env: process.env,
+  });
+  return describeGraphify(py, result.status, result.stdout || "");
+}
+
+/** Non-blocking probe; fills the same cache the blocking one reads. */
+export async function probeGraphifyAsync(python?: string): Promise<CompanionProbe> {
+  const py = python || trustedPythonPathSetting();
+  const cached = graphifyProbeCache.get(py);
+  if (cached && Date.now() - cached.at < GRAPHIFY_PROBE_TTL_MS) {
+    return cached.probe;
+  }
+  const result = await execCapture(py, ["-c", GRAPHIFY_PROBE_SCRIPT], {
+    timeout: 15_000,
+    env: process.env,
+  });
+  return describeGraphify(py, result.status, result.stdout);
+}
+
+const GRAPHIFY_PROBE_SCRIPT = "import importlib.metadata as m; print(m.version('graphifyy'))";
+
+function describeGraphify(py: string, status: number | null, stdout: string): CompanionProbe {
+  if (status !== 0) {
     const floor = MIN_GRAPHIFY_VERSION.join(".");
     return cacheGraphifyProbe(py, {
       name: "graphify",
@@ -193,7 +239,7 @@ export function probeGraphify(python?: string): CompanionProbe {
       detail: `missing — pip install '${GRAPHIFY_PIP_SPEC}' (need >=${floor})`,
     });
   }
-  const version = (result.stdout || "").trim().split(/\r?\n/).find(Boolean);
+  const version = (stdout || "").trim().split(/\r?\n/).find(Boolean);
   const ok = versionAtLeast(version, MIN_GRAPHIFY_VERSION);
   const floor = MIN_GRAPHIFY_VERSION.join(".");
   return cacheGraphifyProbe(py, {
@@ -210,6 +256,11 @@ export function probeGraphify(python?: string): CompanionProbe {
 
 export function probeCompanions(python?: string): CompanionProbe[] {
   return [probeContextMode(), probeRtk(), probeGraphify(python)];
+}
+
+/** Non-blocking, and the three probes run concurrently. */
+export function probeCompanionsAsync(python?: string): Promise<CompanionProbe[]> {
+  return Promise.all([probeContextModeAsync(), probeRtkAsync(), probeGraphifyAsync(python)]);
 }
 
 /**
@@ -282,11 +333,11 @@ async function ensureContextMode(
   output: { appendLine(s: string): void },
   options?: { force?: boolean },
 ): Promise<CompanionProbe> {
-  let probe = probeContextMode();
+  let probe = await probeContextModeAsync();
   if (probe.ok) {
     return probe;
   }
-  const npm = whichSync("npm");
+  const npm = await which("npm");
   if (!npm) {
     output.appendLine("context-mode: npm not found — skip auto-install");
     return probe;
@@ -312,9 +363,9 @@ async function ensureContextMode(
   );
   if (!result.ok) {
     output.appendLine(`context-mode install failed: ${result.detail}`);
-    return probeContextMode();
+    return probeContextModeAsync();
   }
-  probe = probeContextMode();
+  probe = await probeContextModeAsync();
   output.appendLine(`context-mode after ensure: ${probe.detail}`);
   return probe;
 }
@@ -323,11 +374,11 @@ async function ensureRtk(
   output: { appendLine(s: string): void },
   options?: { force?: boolean },
 ): Promise<CompanionProbe> {
-  let probe = probeRtk();
+  let probe = await probeRtkAsync();
   if (probe.ok) {
     return probe;
   }
-  const brew = whichSync("brew");
+  const brew = await which("brew");
   if (!brew) {
     output.appendLine(
       "rtk: Homebrew not found — install manually from https://www.rtk-ai.app/",
@@ -356,9 +407,9 @@ async function ensureRtk(
   );
   if (!result.ok) {
     output.appendLine(`rtk brew failed: ${result.detail}`);
-    return probeRtk();
+    return probeRtkAsync();
   }
-  probe = probeRtk();
+  probe = await probeRtkAsync();
   output.appendLine(`rtk after ensure: ${probe.detail}`);
   return probe;
 }
@@ -397,7 +448,7 @@ async function ensureGraphify(
   const python =
     options?.python ||
     trustedPythonPathSetting();
-  let probe = probeGraphify(python);
+  let probe = await probeGraphifyAsync(python);
   if (probe.ok) {
     return probe;
   }
@@ -424,9 +475,9 @@ async function ensureGraphify(
   invalidateGraphifyProbe();
   if (!result.ok) {
     output.appendLine(`graphify install failed: ${result.detail}`);
-    return probeGraphify(python);
+    return probeGraphifyAsync(python);
   }
-  probe = probeGraphify(python);
+  probe = await probeGraphifyAsync(python);
   output.appendLine(`graphify after ensure: ${probe.detail}`);
   return probe;
 }
@@ -439,7 +490,7 @@ async function ensureCompanionsOnce(
     options?.python ||
     trustedPythonPathSetting();
   output.appendLine("=== Companion probe (context-mode, rtk, graphify) ===");
-  const before = probeCompanions(python);
+  const before = await probeCompanionsAsync(python);
   for (const p of before) {
     output.appendLine(`  ${p.name}: ${p.detail}`);
   }

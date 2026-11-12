@@ -81,3 +81,25 @@ test("Mantle Grok4.6 uses its own endpoint and regional price",()=>{
  assert(Math.abs(pricing.estimateCostUsd("xai.grok-4.6",100000,10000)-.286)<1e-12);
  assert.equal(pricing.estimateCostUsd("global.xai.grok-4.6",100000,10000),.26);
 });
+test("Models added 2026-11: Gemini 4 Carbon, GPT-6 Cyber, hosted Muse", () => {
+ const models = id => catalog.FALLBACK_PROVIDERS.find(p=>p.id===id).models.map(m=>m.id);
+ assert(models("gemini").includes("gemini-4-carbon"));
+ assert(selection.modelSupportsEffort("gemini-4-carbon"));
+ assert.deepEqual(selection.effortOptionsForModel("gemini-4-carbon").map(o=>o.value),["low","medium","high"]);
+ assert.equal(selection.compatibleEffortForModel("gemini-4-carbon","max"),"high");
+ assert.equal(context.contextWindowFor("gemini-4-carbon"),1048576);
+ assert(Math.abs(pricing.estimateCostUsd("gemini-4-carbon",100000,10000)-.3)<1e-12);
+ // Gated model: priced and sized, but not offered in the picker.
+ assert(!models("openai").includes("gpt-6-cyber"));
+ assert.equal(context.contextWindowFor("gpt-6-cyber"),1050000);
+ assert(Math.abs(pricing.estimateCostUsd("gpt-6-cyber",100000,10000)-3)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("gpt-6-cyber",300000,10000)-(300000*40+10000*150)/1e6)<1e-9);
+ for (const m of ["muse-spark-1.3","muse-spark-1.3-contributor","muse-spark-1.2","muse-spark-1.1","muse-wonder-1.0"]) assert.equal(context.contextWindowFor(m),1048576);
+ assert.equal(context.contextWindowFor("muse-ember-1.0"),1000000);
+ assert.equal(context.contextWindowFor("Muse-Glimmer-30B"),196608);
+ assert(Math.abs(pricing.estimateCostUsd("muse-spark-1.3",100000,10000)-.1675)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("muse-spark-1.3-contributor",100000,10000)-.012)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("muse-wonder-1.0",100000,10000)-.6)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("muse-ember-1.0",100000,10000)-.015)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("muse-ember-1.0",300000,10000)-.105)<1e-12);
+});
