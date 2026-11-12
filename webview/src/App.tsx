@@ -1,5 +1,6 @@
 import { SkillUsageRanking } from "./SkillUsageRanking";
-import type { SkillUsageStats } from "../../src/protocol";
+import { HarnessOptimizerPanel } from "./HarnessOptimizerPanel";
+import type { HarnessOptimizeStatus, SkillUsageStats } from "../../src/protocol";
 import { HeaderInfoPanel } from "./HeaderInfoPanel";
 import { copyText } from "./clipboard";
 import { installThreadReading, type ReadingContext } from "./threadReading";
@@ -2317,8 +2318,13 @@ export function App() {
   );
   const [stats, setStats] = useState<unknown>();
   const [skillUsage, setSkillUsage] = useState<SkillUsageStats | null>(null);
+  const [harnessOptimizeStatus, setHarnessOptimizeStatus] =
+    useState<HarnessOptimizeStatus | null>(null);
   useEffect(() => {
-    if (panel === "settings") post({ type: "load_skill_usage" });
+    if (panel === "settings") {
+      post({ type: "load_skill_usage" });
+      post({ type: "load_harness_optimize" });
+    }
   }, [panel]);
   const [usage, setUsage] = useState<{
     promptTokens?: number;
@@ -2333,6 +2339,12 @@ export function App() {
     longContextRequestCount?: number;
     nextPromptEstTokens?: number;
     runCostUsd?: number;
+    ttftMs?: number;
+    avgTtftMs?: number;
+    decodeTps?: number;
+    steadyDecodeTps?: number;
+    maxStepMs?: number;
+    cacheHitRatio?: number;
   }>({});
   const [compactPhase, setCompactPhase] = useState<string | undefined>();
   // Add-on context shown above the chat. The stored text/scope are kept apart
@@ -2383,6 +2395,12 @@ export function App() {
     longContextRequestCount?: number;
     nextPromptEstTokens?: number;
     runCostUsd?: number;
+    ttftMs?: number;
+    avgTtftMs?: number;
+    decodeTps?: number;
+    steadyDecodeTps?: number;
+    maxStepMs?: number;
+    cacheHitRatio?: number;
   }>({});
   const modelRef = useRef("");
   const modelMetaRef = useRef<ModelPrice | undefined>(undefined);
@@ -3404,6 +3422,9 @@ export function App() {
         case "skill_usage":
           setSkillUsage(msg.data);
           break;
+        case "harness_optimize_status":
+          setHarnessOptimizeStatus(msg.data);
+          break;
         case "stats":
           setStats(msg.data);
           break;
@@ -3770,6 +3791,14 @@ export function App() {
             nextPromptEstTokens:
               msg.nextPromptEstTokens ?? runUsageRef.current?.nextPromptEstTokens,
             runCostUsd: msg.runCostUsd ?? runUsageRef.current?.runCostUsd,
+            ttftMs: msg.ttftMs ?? runUsageRef.current?.ttftMs,
+            avgTtftMs: msg.avgTtftMs ?? runUsageRef.current?.avgTtftMs,
+            decodeTps: msg.decodeTps ?? runUsageRef.current?.decodeTps,
+            steadyDecodeTps:
+              msg.steadyDecodeTps ?? runUsageRef.current?.steadyDecodeTps,
+            maxStepMs: msg.maxStepMs ?? runUsageRef.current?.maxStepMs,
+            cacheHitRatio:
+              msg.cacheHitRatio ?? runUsageRef.current?.cacheHitRatio,
           };
           runUsageRef.current = next;
           setUsage(next);
@@ -5791,6 +5820,9 @@ export function App() {
                 <div><dt>Cache read</dt><dd className="info-cache-value">{cachedTok.toLocaleString()}</dd></div>
                 <div><dt>Cache write</dt><dd>{cacheCreateTok.toLocaleString()}</dd></div>
                 <div><dt>Cache hit rate</dt><dd className="info-cache-value">{cacheHitPct != null ? `${cacheHitPct}%` : "—"}</dd></div>
+                {(usage.avgTtftMs ?? usage.ttftMs) != null ? <div><dt>Avg TTFT</dt><dd>{`${Math.round((usage.avgTtftMs ?? usage.ttftMs)!)} ms`}</dd></div> : null}
+                {(usage.steadyDecodeTps ?? usage.decodeTps) != null ? <div><dt>Decode speed</dt><dd>{`${(usage.steadyDecodeTps ?? usage.decodeTps)!.toFixed(1)} tok/s`}</dd></div> : null}
+                {usage.maxStepMs != null ? <div><dt>Slowest call</dt><dd>{`${(usage.maxStepMs / 1000).toFixed(1)}s`}</dd></div> : null}
                 {usage.maxInputTokens ? <div><dt>Largest input</dt><dd>{usage.maxInputTokens.toLocaleString()}</dd></div> : null}
                 {usage.longContextRequestCount ? <div><dt>Long-context requests</dt><dd>{usage.longContextRequestCount}</dd></div> : null}
                 {efficiencyLabel(usage.efficiency) && <div><dt>Efficiency</dt><dd>{efficiencyLabel(usage.efficiency)}</dd></div>}
@@ -7567,6 +7599,7 @@ export function App() {
               Independent of local telemetry.
             </p>
             <SkillUsageRanking data={skillUsage} enabled={Boolean(settings.skill_usage)} />
+            <HarnessOptimizerPanel status={harnessOptimizeStatus} />
             <p className="settings-hint">
               Register folders that contain skills. A folder with{" "}
               <code>SKILL.md</code> registers as one skill; a parent folder registers each

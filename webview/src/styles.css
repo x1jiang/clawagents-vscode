@@ -4994,3 +4994,17 @@ button.chat-pin.active {
 .skill-usage-table th, .skill-usage-table td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--vscode-panel-border); }
 .skill-usage-table th[scope="row"] { font-weight: normal; overflow-wrap: anywhere; }
 .skill-usage-table td:last-child { white-space: nowrap; }
+
+.harness-optimizer-panel { margin-block: 14px 22px; padding: 10px 12px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; }
+.harness-controls-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; margin-block: 8px; }
+.harness-inline-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.harness-state-pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--vscode-panel-border); text-transform: capitalize; }
+.harness-state-pill.state-running { color: var(--vscode-charts-yellow, #cca700); }
+.harness-state-pill.state-completed { color: var(--vscode-charts-green, #388a34); }
+.harness-state-pill.state-failed { color: var(--vscode-errorForeground, #f48771); }
+.harness-error-note { color: var(--vscode-errorForeground, #f48771); font-size: 12px; margin: 8px 0 0; }
+.harness-ledger-bar { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
+.harness-diffs { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.harness-diff-item { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 4px 8px; }
+.harness-diff-item summary { cursor: pointer; font-size: 12px; }
+.harness-diff-pre { margin: 6px 0 2px; max-height: 220px; overflow: auto; font-size: 11px; white-space: pre; }

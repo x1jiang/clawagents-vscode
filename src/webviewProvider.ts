@@ -3154,6 +3154,41 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
         }
         break;
+      case "load_harness_optimize":
+      case "cancel_harness_optimize":
+        try {
+          const data = msg.type === "cancel_harness_optimize"
+            ? await this.gateway.cancelHarnessOptimize()
+            : await this.gateway.getHarnessOptimizeStatus();
+          this.post({ type: "harness_optimize_status", data });
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
+      case "start_harness_optimize":
+        try {
+          const data = await this.gateway.startHarnessOptimize({
+            task: msg.task,
+            k: msg.k,
+            mode: msg.mode,
+            adaptiveProbe: msg.adaptiveProbe,
+            maxUsd: msg.maxUsd,
+          });
+          this.post({ type: "harness_optimize_status", data });
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
+      case "apply_harness_optimize":
+        try {
+          const data = await this.gateway.applyHarnessOptimize();
+          this.post({ type: "harness_optimize_status", data });
+          const skills = await this.gateway.getSkills();
+          this.post({ type: "skills_preview", ...skills });
+        } catch (err) {
+          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
+        break;
       case "load_stats":
         try {
           this.post({ type: "stats", data: await this.gateway.getStats() });

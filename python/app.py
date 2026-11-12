@@ -56,6 +56,7 @@ from snapshots import (
     shadow_checkpoint_diff,
 )
 from skill_usage import SkillUsageTracker, get_skill_usage, clear_skill_usage
+from harness_optimizer import get_harness_optimizer
 from stats import get_stats, record_turn
 
 Decision = Literal["allow_once", "allow_always", "deny"]
@@ -799,6 +800,15 @@ class PinnedBody(BaseModel):
     all_conversations: bool = False
 
 
+class HarnessOptimizeBody(BaseModel):
+    task: str
+    k: int = 1
+    mode: Literal["parallel", "sequential"] = "parallel"
+    adaptive_probe: bool = True
+    max_usd: float | None = None
+    deliverables_mode: Literal["contents", "names"] = "contents"
+
+
 class HunkActionBody(BaseModel):
     hunk_id: str | None = None
     path: str | None = None
@@ -1183,6 +1193,52 @@ def create_app() -> FastAPI:
         if denied:
             return denied
         return clear_skill_usage()
+
+    @app.get("/skills/harness/status")
+    async def skills_harness_status(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return get_harness_optimizer().get_status()
+
+    @app.post("/skills/harness/optimize")
+    async def skills_harness_optimize(body: HarnessOptimizeBody, request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            return get_harness_optimizer().start_optimize(
+                WORKSPACE,
+                task=body.task,
+                k=body.k,
+                mode=body.mode,
+                adaptive_probe=body.adaptive_probe,
+                max_usd=body.max_usd,
+                deliverables_mode=body.deliverables_mode,
+            )
+        except ValueError as exc:
+            return Response(status_code=400, content=json.dumps({"ok": False, "error": str(exc)}))
+        except RuntimeError as exc:
+            return Response(status_code=409, content=json.dumps({"ok": False, "error": str(exc)}))
+
+    @app.post("/skills/harness/cancel")
+    async def skills_harness_cancel(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        return get_harness_optimizer().cancel_optimize()
+
+    @app.post("/skills/harness/apply")
+    async def skills_harness_apply(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            return await asyncio.to_thread(get_harness_optimizer().apply_optimized, WORKSPACE)
+        except ValueError as exc:
+            return Response(status_code=400, content=json.dumps({"ok": False, "error": str(exc)}))
+        except RuntimeError as exc:
+            return Response(status_code=409, content=json.dumps({"ok": False, "error": str(exc)}))
 
     @app.get("/snapshots")
     async def snapshots(request: Request):

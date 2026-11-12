@@ -1,3 +1,9 @@
+# 1.0.213
+
+- Add the **Harness² Workspace Optimizer** panel in Settings → Skills (`GET /skills/harness/status`, `POST /skills/harness/optimize`, `POST /skills/harness/cancel`, `POST /skills/harness/apply`) to run Propose–Probe–Compose benchmarks on workspace `AGENTS.md`, `skills/`, and `.clawagents/hooks.json` with blind trajectory selection, adaptive probe deduplication, USD caps, unified diff previews, and backed-up one-click workspace application.
+- Surface inference efficiency telemetry in the floating Info session card (`Avg TTFT`, warmup-aware `Decode speed` in `tok/s`, `Slowest call`, and `Cache hit rate`), persisted across reloads and mapped end-to-end from sidecar stream events.
+- Require Python clawagents **6.20.99** (Harness² `ClawAgentSubstrate`, `.adapt_complete` stage runmarks, `HarnessLedger` budget ceilings and savings accounting, `EvidenceWorkspace` staging, schema-constrained proposer/selector outputs, adaptive probe short-circuiting, step-quantized prefix-cache compaction watermarks, overlapped `DeferredStepFlush` post-step persistence, and decode throughput telemetry).
+
 # 1.0.212
 
 - Add **Gemini 4 Carbon** (`gemini-4-carbon`) to the Google model picker, context-window catalog, and token/cache pricing tables; add context windows and pricing for the hosted **Muse** family on the Meta Model API (`muse-spark-1.1/1.2/1.3`, `muse-wonder-1.0`, `muse-ember-1.0` including its >200K tier) and gated **GPT-6 Cyber** (`gpt-6-cyber`, excluded from the interactive picker).

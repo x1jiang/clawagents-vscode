@@ -295,6 +295,12 @@ export function mapAgentEvent(
         nextPromptEstTokens: num(
           data.next_prompt_est_tokens ?? data.nextPromptEstTokens,
         ),
+        ttftMs: num(data.time_to_first_token_ms ?? data.ttftMs),
+        avgTtftMs: num(data.avg_ttft_ms ?? data.avgTtftMs),
+        decodeTps: num(data.decode_tokens_per_sec ?? data.decodeTps),
+        steadyDecodeTps: num(data.steady_decode_tps ?? data.steadyDecodeTps),
+        maxStepMs: num(data.max_step_ms ?? data.maxStepMs),
+        cacheHitRatio: num(data.cache_hit_ratio ?? data.cacheHitRatio),
       };
     case "compact_progress":
       return {
@@ -570,6 +576,55 @@ export class GatewayClient {
     return requestJson<import("./protocol").SkillUsageStats>(this.requireHandle(), "POST", "/skills/usage/clear", {});
   }
 
+  getHarnessOptimizeStatus() {
+    return requestJson<import("./protocol").HarnessOptimizeStatus>(
+      this.requireHandle(),
+      "GET",
+      "/skills/harness/status",
+    );
+  }
+
+  startHarnessOptimize(opts: {
+    task: string;
+    k: number;
+    mode: "parallel" | "sequential";
+    adaptiveProbe: boolean;
+    maxUsd?: number;
+  }) {
+    return requestJson<import("./protocol").HarnessOptimizeStatus>(
+      this.requireHandle(),
+      "POST",
+      "/skills/harness/optimize",
+      {
+        task: opts.task,
+        k: opts.k,
+        mode: opts.mode,
+        adaptive_probe: opts.adaptiveProbe,
+        ...(opts.maxUsd != null ? { max_usd: opts.maxUsd } : {}),
+      },
+      30_000,
+    );
+  }
+
+  cancelHarnessOptimize() {
+    return requestJson<import("./protocol").HarnessOptimizeStatus>(
+      this.requireHandle(),
+      "POST",
+      "/skills/harness/cancel",
+      {},
+    );
+  }
+
+  applyHarnessOptimize() {
+    return requestJson<import("./protocol").HarnessOptimizeStatus>(
+      this.requireHandle(),
+      "POST",
+      "/skills/harness/apply",
+      {},
+      30_000,
+    );
+  }
+
   getStats() {
     return requestJson<unknown>(this.requireHandle(), "GET", "/stats");
   }
@@ -816,6 +871,12 @@ export class GatewayClient {
                   maxInputTokens: num(data.max_input_tokens),
                   longContextRequestCount: num(data.long_context_request_count),
                   nextPromptEstTokens: num(data.next_prompt_est_tokens),
+                  ttftMs: num(data.time_to_first_token_ms ?? data.ttftMs),
+                  avgTtftMs: num(data.avg_ttft_ms ?? data.avgTtftMs),
+                  decodeTps: num(data.decode_tokens_per_sec ?? data.decodeTps),
+                  steadyDecodeTps: num(data.steady_decode_tps ?? data.steadyDecodeTps),
+                  maxStepMs: num(data.max_step_ms ?? data.maxStepMs),
+                  cacheHitRatio: num(data.cache_hit_ratio ?? data.cacheHitRatio),
                 });
               } else if (ev.event === "done") {
                 const usageObj =

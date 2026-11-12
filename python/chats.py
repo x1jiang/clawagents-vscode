@@ -2086,6 +2086,22 @@ def _ev_usage_int(ev: Any, *names: str) -> int:
     return 0
 
 
+def _ev_usage_float(ev: Any, *names: str) -> float | None:
+    """Extract a positive float latency/throughput metric from event or event.data."""
+    data = getattr(ev, "data", None)
+    for name in names:
+        for raw in (getattr(ev, name, None), data.get(name) if isinstance(data, dict) else None):
+            if raw is None:
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if value > 0.0:
+                return value
+    return None
+
+
 async def run_chat_turn(
     *,
     chat_id: str,
@@ -2456,7 +2472,7 @@ async def run_chat_turn(
     # operational kinds (warn / error / checkpoint / compact_progress /
     # context / approval_required) that the webview needs.
     saw_assistant = False
-    usage_totals = {
+    usage_totals: dict[str, Any] = {
         "prompt_tokens": 0,
         "completion_tokens": 0,
         "total_tokens": 0,
@@ -2468,6 +2484,9 @@ async def run_chat_turn(
         "long_context_request_count": 0,
         "run_cost_usd": 0.0,
     }
+    ttft_samples: list[float] = []
+    decode_tps_samples: list[float] = []
+    step_ms_samples: list[float] = []
     model_id_for_cost = str(
         kwargs.get("model") or settings.get("model") or MODEL or ""
     )
@@ -2627,6 +2646,30 @@ async def run_chat_turn(
                 usage_totals["run_cost_usd"] = float(
                     usage_totals["run_cost_usd"]
                 ) + float(req_cost)
+            ttft_ms = _ev_usage_float(ev, "time_to_first_token_ms", "ttft_ms")
+            elapsed_ms = _ev_usage_float(ev, "elapsed_ms")
+            decode_tps = _ev_usage_float(ev, "decode_tokens_per_sec", "decode_tps")
+            if decode_tps is None and out > 0 and elapsed_ms is not None:
+                decode_dur_ms = max(1.0, elapsed_ms - (ttft_ms or 0.0))
+                decode_tps = round(out / (decode_dur_ms / 1000.0), 1)
+            if ttft_ms is not None:
+                ttft_samples.append(ttft_ms)
+                usage_totals["time_to_first_token_ms"] = round(ttft_ms, 1)
+                usage_totals["avg_ttft_ms"] = round(sum(ttft_samples) / len(ttft_samples), 1)
+            if elapsed_ms is not None:
+                step_ms_samples.append(elapsed_ms)
+                usage_totals["elapsed_ms"] = round(elapsed_ms, 1)
+                usage_totals["max_step_ms"] = round(max(step_ms_samples), 1)
+            if decode_tps is not None:
+                decode_tps_samples.append(decode_tps)
+                usage_totals["decode_tokens_per_sec"] = round(decode_tps, 1)
+                steady = decode_tps_samples[1:] if len(decode_tps_samples) >= 2 else decode_tps_samples
+                usage_totals["steady_decode_tps"] = round(sum(steady) / len(steady), 1)
+            tot_in = int(usage_totals["prompt_tokens"])
+            if tot_in > 0:
+                usage_totals["cache_hit_ratio"] = round(
+                    int(usage_totals["cached_input_tokens"]) / tot_in, 4
+                )
             # Context meter needs the *latest* prompt size, not the sum —
             # summing every tool-loop round falsely pegs the bar at 100%.
             usage_totals["last_input_tokens"] = inp
@@ -2900,7 +2943,7 @@ async def run_chat_turn(
     # Rough next-prompt estimate: last request size (history+tools+system after
     # this turn). Not chars÷4 — that understates schema/system overhead.
     next_prompt_est = last_input_n or max_input_n or 0
-    usage_payload = {
+    usage_payload: dict[str, Any] = {
         "prompt_tokens": prompt_n,
         "completion_tokens": completion_n,
         "total_tokens": total_n,
@@ -2915,6 +2958,20 @@ async def run_chat_turn(
         "provider": provider_for_cost,
         "reasoning_effort": str(settings.get("reasoning_effort") or ""),
     }
+    for telemetry_key in (
+        "time_to_first_token_ms",
+        "avg_ttft_ms",
+        "decode_tokens_per_sec",
+        "steady_decode_tps",
+        "elapsed_ms",
+        "max_step_ms",
+        "cache_hit_ratio",
+    ):
+        val = usage_totals.get(telemetry_key)
+        if val is None and isinstance(usage, dict):
+            val = usage.get(telemetry_key)
+        if val is not None:
+            usage_payload[telemetry_key] = val
 
     if isinstance(run_efficiency, dict):
         usage_payload["efficiency"] = run_efficiency
