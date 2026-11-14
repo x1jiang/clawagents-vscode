@@ -49,7 +49,7 @@ try {
 
 test.after(() => fs.rmSync(outputDir, { recursive: true, force: true }));
 
-test("parseWebviewToHost accepts no-payload harness optimizer actions", () => {
+test("parseWebviewToHost accepts no-payload and force harness optimizer actions", () => {
   for (const type of [
     "load_harness_optimize",
     "cancel_harness_optimize",
@@ -58,16 +58,26 @@ test("parseWebviewToHost accepts no-payload harness optimizer actions", () => {
   ]) {
     assert.deepEqual(parseWebviewToHost({ type }), { type });
   }
+  assert.deepEqual(
+    parseWebviewToHost({ type: "apply_harness_optimize", force: true }),
+    { type: "apply_harness_optimize", force: true },
+  );
+  assert.equal(
+    parseWebviewToHost({ type: "apply_harness_optimize", force: "yes" }),
+    undefined,
+  );
 });
 
 test("parseWebviewToHost validates start_harness_optimize bounds", () => {
   const valid = {
     type: "start_harness_optimize",
     task: "Run pytest and improve skills",
-    k: 2,
+    k: 3,
     mode: "parallel",
     adaptiveProbe: true,
     maxUsd: 2.5,
+    tasks: ["Run pytest", "Verify with ruff"],
+    reflect: true,
   };
   assert.deepEqual(parseWebviewToHost(valid), valid);
 
@@ -88,6 +98,8 @@ test("parseWebviewToHost validates start_harness_optimize bounds", () => {
     { k: 1.5 },
     { mode: "diagonal" },
     { adaptiveProbe: "yes" },
+    { reflect: "no" },
+    { tasks: [""] },
     { maxUsd: 0 },
     { maxUsd: -5 },
     { maxUsd: 1001 },

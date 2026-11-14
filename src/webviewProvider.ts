@@ -20,7 +20,7 @@ import {
   wrapCurrentFileRef,
   wrapSelectionBlock,
 } from "./config";
-import { GatewayClient, isChatNotFoundError, isSidecarTransportError } from "./gatewayClient";
+import { GatewayClient, SidecarHttpError, isChatNotFoundError, isSidecarTransportError } from "./gatewayClient";
 import { eventsToItems } from "./chatItems";
 import {
   TEXT_ATTACHMENT_MIME_BY_EXT,
@@ -2075,6 +2075,7 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             "deleted",
             async (chatId) => {
               await this.gateway.deleteChat(chatId);
+              this.modelRoutes.delete(chatId);
               this.humanTiming.forgetChat(chatId);
               this.attachments.discard(chatId);
             },
@@ -3169,14 +3170,24 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         try {
           const data = await this.gateway.startHarnessOptimize({
             task: msg.task,
+            tasks: msg.tasks,
             k: msg.k,
             mode: msg.mode,
             adaptiveProbe: msg.adaptiveProbe,
             maxUsd: msg.maxUsd,
+            reflect: msg.reflect,
           });
           this.post({ type: "harness_optimize_status", data });
         } catch (err) {
-          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+          this.post({
+            type: "error",
+            message:
+              err instanceof SidecarHttpError
+                ? err.detailMessage
+                : err instanceof Error
+                  ? err.message
+                  : String(err),
+          });
         }
         break;
       case "apply_harness_optimize":
@@ -3185,12 +3196,41 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
           const data =
             msg.type === "rollback_harness_optimize"
               ? await this.gateway.rollbackHarnessOptimize()
-              : await this.gateway.applyHarnessOptimize();
+              : await this.gateway.applyHarnessOptimize({ force: msg.force });
           this.post({ type: "harness_optimize_status", data });
           const skills = await this.gateway.getSkills();
           this.post({ type: "skills_preview", ...skills });
         } catch (err) {
-          this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+          if (
+            msg.type === "apply_harness_optimize" &&
+            err instanceof SidecarHttpError &&
+            err.conflict
+          ) {
+            let latest: import("./protocol").HarnessOptimizeStatus | null = null;
+            try {
+              latest = await this.gateway.getHarnessOptimizeStatus();
+            } catch {
+              latest = null;
+            }
+            this.post({
+              type: "harness_optimize_status",
+              data: {
+                ...(latest ?? { ok: false, state: "completed" as const }),
+                conflict: true,
+                error: err.detailMessage,
+              },
+            });
+            break;
+          }
+          this.post({
+            type: "error",
+            message:
+              err instanceof SidecarHttpError
+                ? err.detailMessage
+                : err instanceof Error
+                  ? err.message
+                  : String(err),
+          });
         }
         break;
       case "load_stats":

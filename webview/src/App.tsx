@@ -1,5 +1,3 @@
-import { SkillUsageRanking } from "./SkillUsageRanking";
-import { HarnessOptimizerPanel } from "./HarnessOptimizerPanel";
 import type { HarnessOptimizeStatus, SkillUsageStats } from "../../src/protocol";
 import { HeaderInfoPanel } from "./HeaderInfoPanel";
 import { copyText } from "./clipboard";
@@ -9,6 +7,8 @@ import { collectDropUris, hasVsCodeUriPayload } from "./dropPaths";
 import { modelSupportsEffort, effortOptionsForModel, compatibleEffortForModel, modelRequiresResponsesForTools, compatibleWireApiForModel, modelSupportsFastMode } from "./modelSelection";
 import { normalizeEfficiency, efficiencyLabel, type Efficiency } from "../../src/efficiency";
 import {
+  Suspense,
+  lazy,
   memo,
   useCallback,
   useEffect,
@@ -21,9 +21,16 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { renderMarkdownToHtml } from "./renderMarkdownHtml";
+
+const SkillUsageRanking = lazy(() =>
+  import("./SkillUsageRanking").then((m) => ({ default: m.SkillUsageRanking })),
+);
+const HarnessOptimizerPanel = lazy(() =>
+  import("./HarnessOptimizerPanel").then((m) => ({ default: m.HarnessOptimizerPanel })),
+);
 import {
   getVsCodeApi,
   post,
@@ -72,7 +79,9 @@ import {
   threadActivityLabel,
 } from "./threadUnread";
 import { ModelRouteCapsule } from "./ModelRouteCapsule";
-import { DiagnosticsPanel } from "./DiagnosticsPanel";
+const DiagnosticsPanel = lazy(() =>
+  import("./DiagnosticsPanel").then((m) => ({ default: m.DiagnosticsPanel })),
+);
 import { ChangedFilesSummary } from "./ChangedFilesSummary";
 import { ToolRunGroup } from "./ToolRunGroup";
 import {
@@ -1132,9 +1141,7 @@ function editableMarkdown(element: HTMLElement): string {
 }
 
 function renderedMarkdown(markdown: string): string {
-  return renderToStaticMarkup(
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>,
-  );
+  return renderMarkdownToHtml(markdown);
 }
 
 function insertRenderedMarkdown(editor: HTMLElement, html: string): boolean {
@@ -7598,8 +7605,10 @@ export function App() {
               locally for this workspace. Turning this off keeps existing statistics.
               Independent of local telemetry.
             </p>
-            <SkillUsageRanking data={skillUsage} enabled={Boolean(settings.skill_usage)} />
-            <HarnessOptimizerPanel status={harnessOptimizeStatus} />
+            <Suspense fallback={null}>
+              <SkillUsageRanking data={skillUsage} enabled={Boolean(settings.skill_usage)} />
+              <HarnessOptimizerPanel status={harnessOptimizeStatus} />
+            </Suspense>
             <p className="settings-hint">
               Register folders that contain skills. A folder with{" "}
               <code>SKILL.md</code> registers as one skill; a parent folder registers each
@@ -8249,19 +8258,21 @@ export function App() {
       )}
 
       {panel === "diagnostics" && (
-        <DiagnosticsPanel
-          diagnostics={diagnostics}
-          stats={stats}
-          workspace={workspace}
-          sidecar={sidecar}
-          sidecarDetail={sidecarDetail}
-          onBack={() => showPanel("settings")}
-          onRefresh={() => {
-            post({ type: "load_diagnostics" });
-            post({ type: "load_stats" });
-          }}
-          onRestart={() => post({ type: "restart_sidecar" })}
-        />
+        <Suspense fallback={null}>
+          <DiagnosticsPanel
+            diagnostics={diagnostics}
+            stats={stats}
+            workspace={workspace}
+            sidecar={sidecar}
+            sidecarDetail={sidecarDetail}
+            onBack={() => showPanel("settings")}
+            onRefresh={() => {
+              post({ type: "load_diagnostics" });
+              post({ type: "load_stats" });
+            }}
+            onRestart={() => post({ type: "restart_sidecar" })}
+          />
+        </Suspense>
       )}
 
       {panel === "chat" && (

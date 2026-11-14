@@ -27,8 +27,9 @@ Module._load = function loadWithVscodeStub(request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 let mapAgentEvent;
+let SidecarHttpError;
 try {
-  ({ mapAgentEvent } = require(outputFile));
+  ({ mapAgentEvent, SidecarHttpError } = require(outputFile));
 } finally {
   Module._load = originalLoad;
 }
@@ -89,4 +90,32 @@ test("usage keeps efficiency snapshots and both cache directions", () => {
 
 test("assistant_reset maps through so the UI can drop a retried partial answer", () => {
   assert.deepEqual(mapAgentEvent("assistant_reset", {}), { type: "assistant_reset" });
+});
+
+test("status events forward text/message and ignore empty payloads", () => {
+  assert.deepEqual(
+    mapAgentEvent("status", { text: "Paused active Goal — switch back to Goal to resume" }),
+    { type: "status", message: "Paused active Goal — switch back to Goal to resume" },
+  );
+  assert.deepEqual(
+    mapAgentEvent("status", { message: "Applying workspace rules" }),
+    { type: "status", message: "Applying workspace rules" },
+  );
+  assert.equal(mapAgentEvent("status", { text: "   " }), null);
+});
+
+test("SidecarHttpError extracts detailMessage and 409 conflict flag", () => {
+  const err409 = new SidecarHttpError(
+    "POST",
+    "/skills/harness/apply",
+    409,
+    JSON.stringify({ ok: false, conflict: true, error: "Workspace harness files changed" }),
+  );
+  assert.equal(err409.conflict, true);
+  assert.equal(err409.detailMessage, "Workspace harness files changed");
+  assert.match(err409.message, /POST \/skills\/harness\/apply HTTP 409: Workspace harness files changed/);
+
+  const errPlain = new SidecarHttpError("PATCH", "/chats/c1", 404, "not found");
+  assert.equal(errPlain.conflict, false);
+  assert.equal(errPlain.detailMessage, "not found");
 });

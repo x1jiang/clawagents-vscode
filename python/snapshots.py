@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -17,17 +19,48 @@ from paths import (
 )
 
 
+_SNAPSHOT_META_DIRNAME = "snapshots_meta"
+
+
+def _read_snapshot_meta(meta_file: Path) -> list[str] | None:
+    if not meta_file.is_file():
+        return None
+    try:
+        loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(loaded, dict) or not isinstance(loaded.get("files"), list):
+        return None
+    return [str(item) for item in loaded["files"] if isinstance(item, str)]
+
+
 def list_snapshots(limit: int = 50) -> list[dict[str, Any]]:
     ensure_dirs()
     if not SNAPSHOTS_DIR.exists():
         return []
+    meta_dir = SNAPSHOTS_DIR.parent / _SNAPSHOT_META_DIRNAME
     dirs = sorted(
         [p for p in SNAPSHOTS_DIR.iterdir() if p.is_dir()],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     out: list[dict[str, Any]] = []
+    now = time.time()
     for d in dirs[:limit]:
+        stat_mtime = d.stat().st_mtime
+        meta_file = meta_dir / f"{d.name}.json"
+        cached = _read_snapshot_meta(meta_file)
+        if cached is not None:
+            out.append(
+                {
+                    "id": d.name,
+                    "path": str(d),
+                    "mtime": stat_mtime,
+                    "files": cached[:100],
+                }
+            )
+            continue
+
         base = d.resolve()
         files: list[str] = []
         for f in d.rglob("*"):
@@ -37,12 +70,18 @@ def list_snapshots(limit: int = 50) -> list[dict[str, Any]]:
                 f.resolve().relative_to(base)
             except (OSError, ValueError):
                 continue
-            files.append(str(f.relative_to(d)))
+            files.append(f.relative_to(d).as_posix())
+        if now - stat_mtime >= 2.0:
+            try:
+                meta_dir.mkdir(parents=True, exist_ok=True)
+                meta_file.write_text(json.dumps({"files": files[:200]}), encoding="utf-8")
+            except OSError:
+                pass
         out.append(
             {
                 "id": d.name,
                 "path": str(d),
-                "mtime": d.stat().st_mtime,
+                "mtime": stat_mtime,
                 "files": files[:100],
             }
         )

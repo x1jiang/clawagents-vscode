@@ -134,7 +134,14 @@ test("creates and reuses an isolated virtual environment", { timeout: 30_000 }, 
 const REAL_PYTHON = (() => {
   try {
     return require("node:child_process")
-      .execFileSync("sh", ["-c", "command -v python3"], { encoding: "utf8" })
+      .execFileSync(
+        "sh",
+        [
+          "-c",
+          'for p in python3.13 python3.12 python3.11 python3.10 python3; do command -v "$p" && exit 0; done; exit 1',
+        ],
+        { encoding: "utf8" },
+      )
       .trim();
   } catch {
     return "";
@@ -174,7 +181,7 @@ function writeEnsurepiplessPython(dir, opts = {}) {
       "fi",
       ...(opts.blockPip
         ? ['if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 1; fi']
-        : []),
+        : ['if [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "--version" ]; then echo "pip 24.0 from /fake/pip (python 3.12)"; exit 0; fi']),
       'exec "$REAL" "$@"',
     ].join("\n"),
     { mode: 0o755 },
@@ -207,9 +214,6 @@ test(
     const state = fs.mkdtempSync(path.join(os.tmpdir(), "clawagents-noensurepip-"));
     try {
       const shim = writeEnsurepiplessPython(state);
-      if (!managed.pipCanTargetOtherInterpreter(REAL_PYTHON)) {
-        return; // Host has no pip 22.3+; this fallback cannot apply.
-      }
       const lines = [];
       const requests = [];
       await withoutPathTools(state, async () => {

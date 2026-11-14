@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import chats
+import paths
 from clawagents.prompts import append_pinned_context
 from clawagents.providers.llm import LLMMessage
 from clawagents.memory.rules import write_pinned_context
 
 
 def test_conversation_contexts_are_isolated(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "CHATS_DIR", tmp_path)
+    monkeypatch.setattr(paths, "SESSIONS_MEMORY_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(paths, "SNAPSHOTS_DIR", tmp_path / "snapshots")
     monkeypatch.setattr(chats, "CHATS_DIR", tmp_path)
+    monkeypatch.setattr(chats, "SESSIONS_MEMORY_DIR", tmp_path / "sessions")
     monkeypatch.setattr(
         chats,
         "read_pinned_context_scope",
@@ -52,7 +57,11 @@ def test_global_context_only_wins_after_opt_in(monkeypatch):
 
 
 def test_conversation_context_is_bounded(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "CHATS_DIR", tmp_path)
+    monkeypatch.setattr(paths, "SESSIONS_MEMORY_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(paths, "SNAPSHOTS_DIR", tmp_path / "snapshots")
     monkeypatch.setattr(chats, "CHATS_DIR", tmp_path)
+    monkeypatch.setattr(chats, "SESSIONS_MEMORY_DIR", tmp_path / "sessions")
     chats.create_chat(chat_id="chat_bounded")
 
     stored = chats.write_conversation_pinned_context(

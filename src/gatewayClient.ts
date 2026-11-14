@@ -19,14 +19,44 @@ export type StreamHandlers = {
   signal?: AbortSignal;
 };
 
+function parseSidecarErrorBody(body: string): {
+  detailMessage: string;
+  conflict: boolean;
+} {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    return { detailMessage: "Empty error response", conflict: false };
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object") {
+      const conflict = parsed.conflict === true;
+      const detail = parsed.error ?? parsed.detail ?? parsed.message;
+      if (typeof detail === "string" && detail.trim()) {
+        return { detailMessage: detail.trim(), conflict };
+      }
+      return { detailMessage: trimmed, conflict };
+    }
+  } catch {
+    // Plain-text error body
+  }
+  return { detailMessage: trimmed, conflict: false };
+}
+
 export class SidecarHttpError extends Error {
+  readonly detailMessage: string;
+  readonly conflict: boolean;
+
   constructor(
     readonly method: string,
     readonly pathName: string,
     readonly statusCode: number,
-    body: string,
+    readonly body: string,
   ) {
-    super(`${method} ${pathName} HTTP ${statusCode}: ${body}`);
+    const parsed = parseSidecarErrorBody(body);
+    super(`${method} ${pathName} HTTP ${statusCode}: ${parsed.detailMessage}`);
+    this.detailMessage = parsed.detailMessage;
+    this.conflict = statusCode === 409 && parsed.conflict;
   }
 }
 
@@ -346,6 +376,10 @@ export function mapAgentEvent(
         message: `⚠ Retrying${attempt ? ` (attempt ${attempt})` : ""}: ${reason}`,
       };
     }
+    case "status": {
+      const message = String(data.text ?? data.message ?? "").trim();
+      return message ? { type: "status", message } : null;
+    }
     case "warn":
       return { type: "status", message: `⚠ ${String(data.message ?? "warning")}` };
     case "error":
@@ -586,10 +620,12 @@ export class GatewayClient {
 
   startHarnessOptimize(opts: {
     task: string;
+    tasks?: string[];
     k: number;
     mode: "parallel" | "sequential";
     adaptiveProbe: boolean;
     maxUsd?: number;
+    reflect?: boolean;
   }) {
     return requestJson<import("./protocol").HarnessOptimizeStatus>(
       this.requireHandle(),
@@ -597,10 +633,12 @@ export class GatewayClient {
       "/skills/harness/optimize",
       {
         task: opts.task,
+        ...(opts.tasks && opts.tasks.length > 0 ? { tasks: opts.tasks } : {}),
         k: opts.k,
         mode: opts.mode,
         adaptive_probe: opts.adaptiveProbe,
         ...(opts.maxUsd != null ? { max_usd: opts.maxUsd } : {}),
+        ...(typeof opts.reflect === "boolean" ? { reflect: opts.reflect } : {}),
       },
       30_000,
     );
@@ -615,12 +653,12 @@ export class GatewayClient {
     );
   }
 
-  applyHarnessOptimize() {
+  applyHarnessOptimize(opts?: { force?: boolean }) {
     return requestJson<import("./protocol").HarnessOptimizeStatus>(
       this.requireHandle(),
       "POST",
       "/skills/harness/apply",
-      {},
+      opts?.force ? { force: true } : {},
       30_000,
     );
   }
@@ -839,6 +877,8 @@ export class GatewayClient {
                   type: "ask_user_required",
                   requestId: String(data.request_id ?? ""),
                   question: String(data.question ?? ""),
+                  secret: typeof data.secret === "boolean" ? data.secret : undefined,
+                  command: data.command ? String(data.command) : undefined,
                 });
               } else if (ev.event === "plan_approval_required") {
                 emit({

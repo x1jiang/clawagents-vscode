@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import inspect
 import os
@@ -25,6 +26,7 @@ from paths import (
     ensure_dirs,
     now_ts,
     read_json,
+    safe_id,
 )
 from settings_store import load_settings
 from pricing import estimate_usd, long_context_multipliers
@@ -1472,6 +1474,43 @@ async def unlock_chat(chat_id: str) -> dict[str, Any]:
     }
 
 
+def _compact_msg_chars(m: dict[str, Any]) -> int:
+    c = m.get("content")
+    n = len(c) if isinstance(c, str) else len(json.dumps(c, ensure_ascii=False))
+    meta = m.get("tool_calls_meta")
+    if meta:
+        n += len(json.dumps(meta, ensure_ascii=False))
+    return n
+
+
+def _compact_trim_message(m: dict[str, Any], *, max_content: int) -> dict[str, Any]:
+    out = dict(m)
+    c = out.get("content")
+    if isinstance(c, str) and len(c) > max_content:
+        out["content"] = (
+            c[:max_content]
+            + f"\n…[compact truncated {len(c) - max_content} chars]"
+        )
+    meta = out.get("tool_calls_meta")
+    if isinstance(meta, list):
+        trimmed_meta = []
+        for tc in meta:
+            if not isinstance(tc, dict):
+                trimmed_meta.append(tc)
+                continue
+            tc2 = dict(tc)
+            args = tc2.get("arguments")
+            if isinstance(args, str) and len(args) > max_content:
+                tc2["arguments"] = args[:max_content] + "…"
+            elif isinstance(args, dict):
+                dumped = json.dumps(args, ensure_ascii=False)
+                if len(dumped) > max_content:
+                    tc2["arguments"] = dumped[:max_content] + "…"
+            trimmed_meta.append(tc2)
+        out["tool_calls_meta"] = trimmed_meta
+    return out
+
+
 async def compact_chat(chat_id: str) -> dict[str, Any]:
     """Manually compact session memory so the next turn starts lighter.
 
@@ -1488,107 +1527,64 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
     """
     import time
 
-    ensure_dirs()
-    mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
-    if not mem.exists():
-        return {"compacted": False, "reason": "no session memory"}
-
-    raw = mem.read_text(encoding="utf-8")
-    lines = [ln for ln in raw.splitlines() if ln.strip()]
-    if not lines:
-        return {"compacted": False, "reason": "no session memory"}
-
+    safe_id(chat_id, kind="chat_id")
     keep_head = 2
     keep_tail = 4
     min_keep = keep_head + keep_tail
-    total_chars = sum(len(ln) for ln in lines)
-    # ~4 chars/token rough estimate used elsewhere in clawagents.
-    est_tokens_before = max(1, total_chars // 4)
 
-    parsed: list[dict[str, Any]] = []
-    for ln in lines:
-        try:
-            obj = json.loads(ln)
-            if isinstance(obj, dict):
-                parsed.append(obj)
-            else:
-                parsed.append({"role": "user", "content": str(obj)})
-        except json.JSONDecodeError:
-            parsed.append({"role": "user", "content": ln})
+    def _prepare_sync() -> tuple[str, dict[str, Any]]:
+        ensure_dirs()
+        mem = SESSIONS_MEMORY_DIR / f"{chat_id}.jsonl"
+        if not mem.exists():
+            return ("done", {"compacted": False, "reason": "no session memory"})
 
-    def _msg_chars(m: dict[str, Any]) -> int:
-        c = m.get("content")
-        n = len(c) if isinstance(c, str) else len(json.dumps(c, ensure_ascii=False))
-        meta = m.get("tool_calls_meta")
-        if meta:
-            n += len(json.dumps(meta, ensure_ascii=False))
-        return n
+        raw = mem.read_text(encoding="utf-8")
+        lines = [ln for ln in raw.splitlines() if ln.strip()]
+        if not lines:
+            return ("done", {"compacted": False, "reason": "no session memory"})
 
-    def _trim_message(m: dict[str, Any], *, max_content: int) -> dict[str, Any]:
-        out = dict(m)
-        c = out.get("content")
-        if isinstance(c, str) and len(c) > max_content:
-            out["content"] = (
-                c[:max_content]
-                + f"\n…[compact truncated {len(c) - max_content} chars]"
+        total_chars = sum(len(ln) for ln in lines)
+        # ~4 chars/token rough estimate used elsewhere in clawagents.
+        est_tokens_before = max(1, total_chars // 4)
+
+        parsed: list[dict[str, Any]] = []
+        for ln in lines:
+            try:
+                obj = json.loads(ln)
+                if isinstance(obj, dict):
+                    parsed.append(obj)
+                else:
+                    parsed.append({"role": "user", "content": str(obj)})
+            except json.JSONDecodeError:
+                parsed.append({"role": "user", "content": ln})
+
+        can_drop_turns = len(parsed) > min_keep
+        # Fat payloads even with few turns (Goal tool dumps) still need compact.
+        needs_payload_trim = total_chars > 12_000 or any(
+            _compact_msg_chars(m) > 4_000 for m in parsed
+        )
+
+        if not can_drop_turns and not needs_payload_trim:
+            return (
+                "done",
+                {
+                    "compacted": False,
+                    "reason": (
+                        "not enough history to compact "
+                        f"({len(parsed)} messages, ~{est_tokens_before} tokens). "
+                        "Context % is from the last model call — start a new turn or "
+                        "New chat to reset the meter."
+                    ),
+                    "before": len(parsed),
+                    "est_tokens_before": est_tokens_before,
+                },
             )
-        meta = out.get("tool_calls_meta")
-        if isinstance(meta, list):
-            trimmed_meta = []
-            for tc in meta:
-                if not isinstance(tc, dict):
-                    trimmed_meta.append(tc)
-                    continue
-                tc2 = dict(tc)
-                args = tc2.get("arguments")
-                if isinstance(args, str) and len(args) > max_content:
-                    tc2["arguments"] = args[:max_content] + "…"
-                elif isinstance(args, dict):
-                    dumped = json.dumps(args, ensure_ascii=False)
-                    if len(dumped) > max_content:
-                        tc2["arguments"] = dumped[:max_content] + "…"
-                trimmed_meta.append(tc2)
-            out["tool_calls_meta"] = trimmed_meta
-        return out
 
-    can_drop_turns = len(parsed) > min_keep
-    # Fat payloads even with few turns (Goal tool dumps) still need compact.
-    needs_payload_trim = total_chars > 12_000 or any(
-        _msg_chars(m) > 4_000 for m in parsed
-    )
-
-    if not can_drop_turns and not needs_payload_trim:
-        return {
-            "compacted": False,
-            "reason": (
-                "not enough history to compact "
-                f"({len(parsed)} messages, ~{est_tokens_before} tokens). "
-                "Context % is from the last model call — start a new turn or "
-                "New chat to reset the meter."
-            ),
-            "before": len(parsed),
-            "est_tokens_before": est_tokens_before,
-        }
-
-    backup = mem.with_suffix(mem.suffix + f".before-compact-{int(time.time())}")
-    backup.write_text(raw, encoding="utf-8")
-
-    summary_text = ""
-    compact_usage: dict[str, Any] = {
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "cached_input_tokens": 0,
-        "cache_creation_tokens": 0,
-        "model": "",
-    }
-    settings = load_settings()
-    model = (settings.get("model") or MODEL or "").strip()
-    if can_drop_turns and model and model.lower() not in ("default",):
-        # Best-effort LLM summary (desktop-style); fall back to stub on failure.
-        try:
-            from clawagents.config.config import load_config
-            from clawagents.providers.llm import LLMMessage, create_provider
-
+        backup = mem.with_suffix(mem.suffix + f".before-compact-{int(time.time())}")
+        settings = load_settings()
+        model = (settings.get("model") or MODEL or "").strip()
+        prompt = ""
+        if can_drop_turns and model and model.lower() not in ("default",):
             convo_bits: list[str] = []
             for m in parsed:
                 role = str(m.get("role") or "unknown")
@@ -1610,6 +1606,42 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
                 "Drop chit-chat and verbose tool output. 8–15 short bullets.\n\n"
                 f"=== CONVERSATION ===\n{transcript}\n=== END ==="
             )
+
+        return (
+            "ready",
+            {
+                "mem": mem,
+                "backup": backup,
+                "raw": raw,
+                "parsed": parsed,
+                "est_tokens_before": est_tokens_before,
+                "can_drop_turns": can_drop_turns,
+                "settings": settings,
+                "model": model,
+                "prompt": prompt,
+            },
+        )
+
+    phase, prep = await asyncio.to_thread(_prepare_sync)
+    if phase == "done":
+        return prep
+
+    summary_text = ""
+    compact_usage: dict[str, Any] = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_creation_tokens": 0,
+        "model": "",
+    }
+    model = str(prep["model"])
+    prompt = str(prep["prompt"])
+    if prompt:
+        # Best-effort LLM summary (desktop-style); fall back to stub on failure.
+        try:
+            from clawagents.config.config import load_config
+            from clawagents.providers.llm import LLMMessage, create_provider
+
             provider = create_provider(model, load_config())
             resp = await provider.chat(
                 messages=[LLMMessage(role="user", content=prompt)],
@@ -1640,152 +1672,157 @@ async def compact_chat(chat_id: str) -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             summary_text = ""
 
-    if not summary_text:
-        dropped = max(0, len(parsed) - min_keep) if can_drop_turns else 0
-        summary_text = (
-            "[Compacted conversation] Older turns were summarized away. "
-            f"Dropped {dropped} messages "
-            f"(~{est_tokens_before} tokens before compact). "
-            "Continue from the recent context below."
-        )
+    def _finalize_sync() -> dict[str, Any]:
+        mem: Path = prep["mem"]
+        backup: Path = prep["backup"]
+        raw: str = prep["raw"]
+        parsed: list[dict[str, Any]] = prep["parsed"]
+        est_tokens_before: int = prep["est_tokens_before"]
+        can_drop_turns: bool = prep["can_drop_turns"]
+        settings: dict[str, Any] = prep["settings"]
 
-    if can_drop_turns:
-        head = parsed[:keep_head]
-        tail = parsed[-keep_tail:]
-        # Trim fat tool dumps in the retained tail so compact actually frees context.
-        tail = [_trim_message(m, max_content=2_500) for m in tail]
-        kept_msgs = head + [{"role": "user", "content": summary_text}] + tail
-    else:
-        # Few turns but huge payloads — trim in place, keep every role.
-        kept_msgs = [_trim_message(m, max_content=2_000) for m in parsed]
-        kept_msgs.insert(
-            min(1, len(kept_msgs)),
-            {
-                "role": "user",
-                "content": (
-                    "[Compacted conversation] Truncated oversized tool/user "
-                    f"payloads (~{est_tokens_before} tokens before). "
-                    "Continue from the trimmed context."
-                ),
-            },
-        )
-
-    kept_lines = [json.dumps(m, ensure_ascii=False) for m in kept_msgs]
-    after_chars = sum(len(ln) for ln in kept_lines)
-    est_tokens_after = max(1, after_chars // 4)
-
-    def _charge_compact_usage() -> float | None:
-        """Bill the summarizer call even when the rewrite is rejected."""
-        try:
-            cost = estimate_usd(
-                str(compact_usage.get("model") or model),
-                prompt_tokens=int(compact_usage.get("prompt_tokens") or 0),
-                completion_tokens=int(compact_usage.get("completion_tokens") or 0),
-                cached_input_tokens=int(compact_usage.get("cached_input_tokens") or 0),
-                cache_creation_tokens=int(
-                    compact_usage.get("cache_creation_tokens") or 0
-                ),
-                provider=str(settings.get("provider") or ""),
-                fast_mode=settings.get("fast_mode") is True and _supports_direct_openai_fast(
-                    str(compact_usage.get("model") or model), str(settings.get("provider") or ""),
-                    str(settings.get("base_url") or ""),
-                ),
+        resolved_summary = summary_text
+        if not resolved_summary:
+            dropped = max(0, len(parsed) - min_keep) if can_drop_turns else 0
+            resolved_summary = (
+                "[Compacted conversation] Older turns were summarized away. "
+                f"Dropped {dropped} messages "
+                f"(~{est_tokens_before} tokens before compact). "
+                "Continue from the recent context below."
             )
-        except Exception:  # noqa: BLE001
-            return None
-        if cost is None or cost <= 0:
-            return cost
-        latest = get_chat(chat_id) or {}
-        prev = float(latest.get("session_cost_usd") or 0.0)
-        patch_chat(
-            chat_id,
-            session_cost_usd=prev + float(cost),
-            session_prompt_tokens=int(latest.get("session_prompt_tokens") or 0)
-            + int(compact_usage.get("prompt_tokens") or 0),
-            session_completion_tokens=int(latest.get("session_completion_tokens") or 0)
-            + int(compact_usage.get("completion_tokens") or 0),
-            session_total_tokens=int(latest.get("session_total_tokens") or 0)
-            + int(compact_usage.get("prompt_tokens") or 0)
-            + int(compact_usage.get("completion_tokens") or 0),
-        )
-        return cost
 
-    # Never accept a "successful" compact that grows (or barely shrinks) stored
-    # context — that resets the UI meter while leaving the session larger.
-    saved = est_tokens_before - est_tokens_after
-    min_save_tokens = 100
-    min_save_ratio = 0.05
-    if saved < min_save_tokens and saved < int(est_tokens_before * min_save_ratio):
-        mem.write_text(raw, encoding="utf-8")  # restore pre-compact backup body
-        try:
-            backup.unlink(missing_ok=True)  # type: ignore[call-arg]
-        except TypeError:
-            if backup.exists():
-                backup.unlink()
-        except OSError:
-            pass
-        reject_cost = _charge_compact_usage()
+        if can_drop_turns:
+            head = parsed[:keep_head]
+            tail = parsed[-keep_tail:]
+            # Trim fat tool dumps in the retained tail so compact actually frees context.
+            tail = [_compact_trim_message(m, max_content=2_500) for m in tail]
+            kept_msgs = head + [{"role": "user", "content": resolved_summary}] + tail
+        else:
+            # Few turns but huge payloads — trim in place, keep every role.
+            kept_msgs = [_compact_trim_message(m, max_content=2_000) for m in parsed]
+            kept_msgs.insert(
+                min(1, len(kept_msgs)),
+                {
+                    "role": "user",
+                    "content": (
+                        "[Compacted conversation] Truncated oversized tool/user "
+                        f"payloads (~{est_tokens_before} tokens before). "
+                        "Continue from the trimmed context."
+                    ),
+                },
+            )
+
+        kept_lines = [json.dumps(m, ensure_ascii=False) for m in kept_msgs]
+        after_chars = sum(len(ln) for ln in kept_lines)
+        est_tokens_after = max(1, after_chars // 4)
+
+        def _charge_compact_usage() -> float | None:
+            """Bill the summarizer call even when the rewrite is rejected."""
+            try:
+                cost = estimate_usd(
+                    str(compact_usage.get("model") or model),
+                    prompt_tokens=int(compact_usage.get("prompt_tokens") or 0),
+                    completion_tokens=int(compact_usage.get("completion_tokens") or 0),
+                    cached_input_tokens=int(compact_usage.get("cached_input_tokens") or 0),
+                    cache_creation_tokens=int(
+                        compact_usage.get("cache_creation_tokens") or 0
+                    ),
+                    provider=str(settings.get("provider") or ""),
+                    fast_mode=settings.get("fast_mode") is True and _supports_direct_openai_fast(
+                        str(compact_usage.get("model") or model), str(settings.get("provider") or ""),
+                        str(settings.get("base_url") or ""),
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                return None
+            if cost is None or cost <= 0:
+                return cost
+            latest = get_chat(chat_id) or {}
+            prev = float(latest.get("session_cost_usd") or 0.0)
+            patch_chat(
+                chat_id,
+                session_cost_usd=prev + float(cost),
+                session_prompt_tokens=int(latest.get("session_prompt_tokens") or 0)
+                + int(compact_usage.get("prompt_tokens") or 0),
+                session_completion_tokens=int(latest.get("session_completion_tokens") or 0)
+                + int(compact_usage.get("completion_tokens") or 0),
+                session_total_tokens=int(latest.get("session_total_tokens") or 0)
+                + int(compact_usage.get("prompt_tokens") or 0)
+                + int(compact_usage.get("completion_tokens") or 0),
+            )
+            return cost
+
+        # Never accept a "successful" compact that grows (or barely shrinks) stored
+        # context — that resets the UI meter while leaving the session larger.
+        saved = est_tokens_before - est_tokens_after
+        min_save_tokens = 100
+        min_save_ratio = 0.05
+        if saved < min_save_tokens and saved < int(est_tokens_before * min_save_ratio):
+            reject_cost = _charge_compact_usage()
+            append_ui_event(
+                chat_id,
+                {
+                    "kind": "status",
+                    "text": (
+                        f"Compact rejected — would not shrink "
+                        f"(~{est_tokens_before} → ~{est_tokens_after} tokens). "
+                        "Original session kept."
+                        + (
+                            f" · summarizer ~${reject_cost:.4f}"
+                            if reject_cost is not None and reject_cost > 0
+                            else ""
+                        )
+                    ),
+                },
+            )
+            return {
+                "compacted": False,
+                "reason": (
+                    f"compaction would not reduce tokens "
+                    f"(~{est_tokens_before} → ~{est_tokens_after}); kept original"
+                ),
+                "before": len(parsed),
+                "after": len(parsed),
+                "est_tokens_before": est_tokens_before,
+                "est_tokens_after": est_tokens_before,
+                "rejected_growth": True,
+                "meter_reset": False,
+                "usage": compact_usage,
+                "compact_cost_usd": reject_cost,
+            }
+
+        backup.write_text(raw, encoding="utf-8")
+        mem.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
+        compact_cost = _charge_compact_usage()
+
         append_ui_event(
             chat_id,
             {
                 "kind": "status",
                 "text": (
-                    f"Compact rejected — would not shrink "
-                    f"(~{est_tokens_before} → ~{est_tokens_after} tokens). "
-                    "Original session kept."
+                    f"Compacted session ({len(parsed)} → {len(kept_msgs)} messages, "
+                    f"~{est_tokens_before} → ~{est_tokens_after} tokens)"
                     + (
-                        f" · summarizer ~${reject_cost:.4f}"
-                        if reject_cost is not None and reject_cost > 0
+                        f" · compact ~${compact_cost:.4f}"
+                        if compact_cost is not None and compact_cost > 0
                         else ""
                     )
                 ),
             },
         )
         return {
-            "compacted": False,
-            "reason": (
-                f"compaction would not reduce tokens "
-                f"(~{est_tokens_before} → ~{est_tokens_after}); kept original"
-            ),
+            "compacted": True,
             "before": len(parsed),
-            "after": len(parsed),
+            "after": len(kept_msgs),
             "est_tokens_before": est_tokens_before,
-            "est_tokens_after": est_tokens_before,
-            "rejected_growth": True,
-            "meter_reset": False,
+            "est_tokens_after": est_tokens_after,
+            "backup": backup.name,
+            "meter_reset": True,
             "usage": compact_usage,
-            "compact_cost_usd": reject_cost,
+            "compact_cost_usd": compact_cost,
         }
 
-    mem.write_text("\n".join(kept_lines) + "\n", encoding="utf-8")
-    compact_cost = _charge_compact_usage()
-
-    append_ui_event(
-        chat_id,
-        {
-            "kind": "status",
-            "text": (
-                f"Compacted session ({len(parsed)} → {len(kept_msgs)} messages, "
-                f"~{est_tokens_before} → ~{est_tokens_after} tokens)"
-                + (
-                    f" · compact ~${compact_cost:.4f}"
-                    if compact_cost is not None and compact_cost > 0
-                    else ""
-                )
-            ),
-        },
-    )
-    return {
-        "compacted": True,
-        "before": len(parsed),
-        "after": len(kept_msgs),
-        "est_tokens_before": est_tokens_before,
-        "est_tokens_after": est_tokens_after,
-        "backup": backup.name,
-        "meter_reset": True,
-        "usage": compact_usage,
-        "compact_cost_usd": compact_cost,
-    }
+    return await asyncio.to_thread(_finalize_sync)
 
 
 def _model_looks_bedrock(model: str | None) -> bool:
@@ -2314,10 +2351,8 @@ async def run_chat_turn(
                     "Paused because UI is in Act/Plan (not Goal mode)",
                 )
                 on_event(
-                    {
-                        "kind": "status",
-                        "text": "Paused active Goal — switch back to Goal to resume",
-                    }
+                    "status",
+                    {"text": "Paused active Goal — switch back to Goal to resume"},
                 )
         except Exception:  # noqa: BLE001
             pass
@@ -2534,6 +2569,7 @@ async def run_chat_turn(
         if kind in {
             "compact_progress",
             "context",
+            "status",
             "warn",
             "error",
             "retry",

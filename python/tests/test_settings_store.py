@@ -16,7 +16,6 @@ if str(_HERE) not in sys.path:
 import settings_store  # noqa: E402
 from settings_store import (  # noqa: E402
     DEFAULTS,
-    KNOWN_KEYS,
     PERSISTED_KEYS,
     RUNTIME_ONLY_KEYS,
     load_settings,

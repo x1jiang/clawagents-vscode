@@ -132,7 +132,7 @@ def context_mode_status() -> dict[str, Any]:
             "path": path,
             "hint": "ok" if found else "npm install -g context-mode@latest",
             "summary": (
-                f"context-mode: found (version unknown; upgrade clawagents>=6.19.0 for floors)"
+                "context-mode: found (version unknown; upgrade clawagents>=6.19.0 for floors)"
                 if found
                 else f"context-mode: missing — need >={min_v}"
             ),

@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Set up Python
@@ -45,7 +45,7 @@ jobs:
           # Prefer workspace clawagents when developing in a monorepo checkout;
           # on the extension-only GitHub repo this installs from PyPI / extras.
           if [ -d ../clawagents_py ]; then
-            pip install -e "../clawagents_py[gemini,anthropic,bedrock,mcp,media,accurate-tokens,dev]"
+            pip install -e "../clawagents_py[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty,dev]"
           fi
           cd python && PYTHONPATH=. python -m pytest -q
 
@@ -94,7 +94,7 @@ jobs:
           name: clawagents-vsix
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - name: Publish to Visual Studio Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -104,3 +104,12 @@ jobs:
             exit 0
           fi
           npx --yes @vscode/vsce@4.1.0 publish --packagePath clawagents-*.vsix
+      - name: Publish to Open VSX Registry
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "${OVSX_PAT:-}" ]; then
+            echo "OVSX_PAT secret is not configured; skipping Open VSX publish."
+            exit 0
+          fi
+          npx --yes ovsx@0.10.1 publish clawagents-*.vsix -p "$OVSX_PAT"

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
 
@@ -45,6 +46,16 @@ class WorkspaceWriteGate:
             if self._depth == 0:
                 self._owner = None
                 self._condition.notify_all()
+
+    @contextmanager
+    def exclusive(self) -> Iterator[None]:
+        """Acquire exclusive workspace-mutation access outside an agent tool batch."""
+        token = object()
+        self._acquire(token)
+        try:
+            yield
+        finally:
+            self._release(token)
 
 
 class RunWriteLease:

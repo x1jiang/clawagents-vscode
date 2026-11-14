@@ -1,3 +1,9 @@
+# 1.0.215
+
+- **Harness² optimizer & workspace concurrency hardening:** surface multi-task benchmark suites (`tasks`), `k=3` depth, `ExperienceLibrary` reflection (`reflect`), automatic staging cleanup and old run pruning, 409 live-disk drift conflict detection with **Force apply anyway**, and `WorkspaceWriteGate.exclusive()` serialization across harness apply/rollback and snapshot/checkpoint restores.
+- **Sidecar responsiveness & event fidelity:** offload synchronous diagnostics, Graphify status, MCP config, snapshot/checkpoint listings, mode loading, and `compact_chat` file I/O off the FastAPI event loop (`asyncio.to_thread`), index `snapshots_meta` with settled-snapshot caching, return structured `JSONResponse` 4xx errors, tolerate transient `/health` pauses on `ensureStarted()`, forward `status` events cleanly (including Goal auto-pause notices), clear `modelRoutes` on chat delete, and sync `SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK` (`pyyaml>=6.0`, `anthropic>=0.95.0`, `mcp>=1.27.1,<2.0.0`).
+- **Leaner webview bundle & CI parity:** render Markdown editor HTML via unified/remark/HAST instead of `react-dom/server`, lazy-load `DiagnosticsPanel`, `HarnessOptimizerPanel`, and `SkillUsageRanking`, upgrade CI Node to 22 with the `pty` extra and optional `OVSX_PAT` publish support, and require Python clawagents **6.20.101**.
+
 # 1.0.214
 
 - Add one-click **Revert to backup** rollback (`POST /skills/harness/rollback`) and live stage progress chips in the Harness² Workspace Optimizer panel, with `ExperienceLibrary` directory persistence and double-submit guards.

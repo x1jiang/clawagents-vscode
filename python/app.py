@@ -11,8 +11,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi import Body, FastAPI, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from chats import (
@@ -56,8 +56,15 @@ from snapshots import (
     shadow_checkpoint_diff,
 )
 from skill_usage import SkillUsageTracker, get_skill_usage, clear_skill_usage
-from harness_optimizer import get_harness_optimizer
+from harness_optimizer import HarnessConflictError, get_harness_optimizer
 from stats import get_stats, record_turn
+from write_gate import workspace_write_gate
+
+
+def _run_exclusive_write(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Acquire exclusive workspace-mutation access off the FastAPI event loop."""
+    with workspace_write_gate.exclusive():
+        return fn(*args, **kwargs)
 
 Decision = Literal["allow_once", "allow_always", "deny"]
 Mode = Literal["ask", "read_only", "auto", "full_access"]
@@ -801,12 +808,18 @@ class PinnedBody(BaseModel):
 
 
 class HarnessOptimizeBody(BaseModel):
-    task: str
+    task: str = ""
+    tasks: list[str] | None = None
     k: int = 1
     mode: Literal["parallel", "sequential"] = "parallel"
     adaptive_probe: bool = True
     max_usd: float | None = None
     deliverables_mode: Literal["contents", "names"] = "contents"
+    reflect: bool = True
+
+
+class HarnessApplyBody(BaseModel):
+    force: bool = False
 
 
 class HunkActionBody(BaseModel):
@@ -1084,7 +1097,7 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return run_diagnostics()
+        return await asyncio.to_thread(run_diagnostics)
 
     @app.get("/graphify/status")
     async def graphify_status_endpoint(request: Request):
@@ -1094,15 +1107,18 @@ def create_app() -> FastAPI:
         from mcp_loader import graphify_status
         from settings_store import load_settings
 
-        settings = load_settings()
-        return {
-            "enabled": bool(settings.get("graphify")),
-            **graphify_status(
-                graph_path=str(settings.get("graphify_graph_path") or ""),
-                corpus=str(settings.get("graphify_corpus") or "workspace"),
-                allow_external_path=bool(settings.get("allow_external_graph_path")),
-            ),
-        }
+        def _load_status() -> dict[str, Any]:
+            settings = load_settings()
+            return {
+                "enabled": bool(settings.get("graphify")),
+                **graphify_status(
+                    graph_path=str(settings.get("graphify_graph_path") or ""),
+                    corpus=str(settings.get("graphify_corpus") or "workspace"),
+                    allow_external_path=bool(settings.get("allow_external_graph_path")),
+                ),
+            }
+
+        return await asyncio.to_thread(_load_status)
 
     @app.get("/providers")
     async def providers(request: Request):
@@ -1169,9 +1185,13 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return list_mcp_config(
-            trust_workspace=bool(load_settings().get("mcp_trust_workspace", False)),
-        )
+
+        def _load_mcp():
+            return list_mcp_config(
+                trust_workspace=bool(load_settings().get("mcp_trust_workspace", False)),
+            )
+
+        return await asyncio.to_thread(_load_mcp)
 
     @app.get("/stats")
     async def stats(request: Request):
@@ -1210,16 +1230,18 @@ def create_app() -> FastAPI:
             return get_harness_optimizer().start_optimize(
                 WORKSPACE,
                 task=body.task,
+                tasks=body.tasks,
                 k=body.k,
                 mode=body.mode,
                 adaptive_probe=body.adaptive_probe,
                 max_usd=body.max_usd,
                 deliverables_mode=body.deliverables_mode,
+                reflect=body.reflect,
             )
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"ok": False, "error": str(exc)}))
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         except RuntimeError as exc:
-            return Response(status_code=409, content=json.dumps({"ok": False, "error": str(exc)}))
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
 
     @app.post("/skills/harness/cancel")
     async def skills_harness_cancel(request: Request):
@@ -1229,16 +1251,29 @@ def create_app() -> FastAPI:
         return get_harness_optimizer().cancel_optimize()
 
     @app.post("/skills/harness/apply")
-    async def skills_harness_apply(request: Request):
+    async def skills_harness_apply(
+        request: Request,
+        body: HarnessApplyBody | None = Body(default=None),
+    ):
         denied = _auth_or_401(request)
         if denied:
             return denied
         try:
-            return await asyncio.to_thread(get_harness_optimizer().apply_optimized, WORKSPACE)
+            return await asyncio.to_thread(
+                _run_exclusive_write,
+                get_harness_optimizer().apply_optimized,
+                WORKSPACE,
+                force=bool(body and body.force),
+            )
+        except HarnessConflictError as exc:
+            return JSONResponse(
+                {"ok": False, "conflict": True, "error": str(exc)},
+                status_code=409,
+            )
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"ok": False, "error": str(exc)}))
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         except RuntimeError as exc:
-            return Response(status_code=409, content=json.dumps({"ok": False, "error": str(exc)}))
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
 
     @app.post("/skills/harness/rollback")
     async def skills_harness_rollback(request: Request):
@@ -1246,27 +1281,31 @@ def create_app() -> FastAPI:
         if denied:
             return denied
         try:
-            return await asyncio.to_thread(get_harness_optimizer().rollback_optimized, WORKSPACE)
+            return await asyncio.to_thread(
+                _run_exclusive_write,
+                get_harness_optimizer().rollback_optimized,
+                WORKSPACE,
+            )
         except FileNotFoundError as exc:
-            return Response(status_code=404, content=json.dumps({"ok": False, "error": str(exc)}))
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
         except RuntimeError as exc:
-            return Response(status_code=409, content=json.dumps({"ok": False, "error": str(exc)}))
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
 
     @app.get("/snapshots")
     async def snapshots(request: Request):
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return list_snapshots()
+        return await asyncio.to_thread(list_snapshots)
 
     @app.get("/snapshots/latest")
     async def snapshots_latest(path: str, request: Request):
         denied = _auth_or_401(request)
         if denied:
             return denied
-        hit = latest_snapshot_for(path)
+        hit = await asyncio.to_thread(latest_snapshot_for, path)
         if not hit:
-            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+            return JSONResponse({"error": "not found"}, status_code=404)
         return hit
 
     @app.post("/snapshots/restore")
@@ -1275,18 +1314,24 @@ def create_app() -> FastAPI:
         if denied:
             return denied
         try:
-            return restore_file(body.snapshot_id, body.rel, body.dest_rel)
+            return await asyncio.to_thread(
+                _run_exclusive_write,
+                restore_file,
+                body.snapshot_id,
+                body.rel,
+                body.dest_rel,
+            )
         except FileNotFoundError as exc:
-            return Response(status_code=404, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=404)
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.get("/checkpoints")
     async def checkpoints_list(request: Request, limit: int = 30):
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return list_shadow_checkpoints(limit=limit)
+        return await asyncio.to_thread(list_shadow_checkpoints, limit=limit)
 
     @app.post("/checkpoints/restore")
     async def checkpoints_restore(body: CheckpointRestoreBody, request: Request):
@@ -1297,8 +1342,12 @@ def create_app() -> FastAPI:
             bad = _validate_chat_id(body.chat_id)
             if bad:
                 return bad
-        return restore_shadow_checkpoint(
-            body.sha, mode=body.mode or "files", chat_id=body.chat_id
+        return await asyncio.to_thread(
+            _run_exclusive_write,
+            restore_shadow_checkpoint,
+            body.sha,
+            mode=body.mode or "files",
+            chat_id=body.chat_id,
         )
 
     @app.get("/checkpoints/diff")
@@ -1308,28 +1357,32 @@ def create_app() -> FastAPI:
         denied = _auth_or_401(request)
         if denied:
             return denied
-        return shadow_checkpoint_diff(lhs, rhs)
+        return await asyncio.to_thread(shadow_checkpoint_diff, lhs, rhs)
 
     @app.get("/modes")
     async def modes_list(request: Request):
         denied = _auth_or_401(request)
         if denied:
             return denied
-        try:
-            from clawagents.modes import load_modes
 
-            modes = load_modes(workspace=str(WORKSPACE))
-            return [
-                {
-                    "id": m.id,
-                    "name": m.display_name(),
-                    "permission_mode": m.permission_mode,
-                    "auto_approve": m.auto_approve,
-                }
-                for m in modes.values()
-            ]
-        except Exception as exc:  # noqa: BLE001
-            return [{"error": str(exc)}]
+        def _load_modes():
+            try:
+                from clawagents.modes import load_modes
+
+                modes = load_modes(workspace=str(WORKSPACE))
+                return [
+                    {
+                        "id": m.id,
+                        "name": m.display_name(),
+                        "permission_mode": m.permission_mode,
+                        "auto_approve": m.auto_approve,
+                    }
+                    for m in modes.values()
+                ]
+            except Exception as exc:  # noqa: BLE001
+                return [{"error": str(exc)}]
+
+        return await asyncio.to_thread(_load_modes)
 
     @app.post("/chats/{chat_id}/compact")
     async def chats_compact(chat_id: str, request: Request):
@@ -1412,7 +1465,7 @@ def create_app() -> FastAPI:
         try:
             return create_chat_group(body.name)
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.put("/chat-groups/order")
     async def chat_groups_reorder(body: ChatGroupOrderBody, request: Request):
@@ -1422,7 +1475,7 @@ def create_app() -> FastAPI:
         try:
             return reorder_chat_groups(body.group_ids)
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.patch("/chat-groups/{group_id}")
     async def chat_groups_rename(group_id: str, body: ChatGroupNameBody, request: Request):
@@ -1432,9 +1485,9 @@ def create_app() -> FastAPI:
         try:
             return rename_chat_group(group_id, body.name)
         except KeyError:
-            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+            return JSONResponse({"error": "not found"}, status_code=404)
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.delete("/chat-groups/{group_id}")
     async def chat_groups_delete(group_id: str, request: Request):
@@ -1444,9 +1497,9 @@ def create_app() -> FastAPI:
         try:
             return {"ok": True, **delete_chat_group(group_id)}
         except KeyError:
-            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+            return JSONResponse({"error": "not found"}, status_code=404)
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.post("/chats")
     async def chats_create(body: CreateChatBody, request: Request):
@@ -1464,7 +1517,7 @@ def create_app() -> FastAPI:
             return denied
         meta = get_chat_meta(chat_id)
         if not meta:
-            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+            return JSONResponse({"error": "not found"}, status_code=404)
         return {**meta, "running": _is_chat_running(chat_id), "timing": _conversation_timing.snapshot(meta)}
 
     @app.get("/chats/{chat_id}")
@@ -1474,7 +1527,7 @@ def create_app() -> FastAPI:
             return denied
         meta = get_chat(chat_id)
         if not meta:
-            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+            return JSONResponse({"error": "not found"}, status_code=404)
         running = _is_chat_running(chat_id)
         meta = {**meta, "timing": _conversation_timing.snapshot(meta)}
         # Paginate by default so long sessions do not load megabytes of JSONL.
@@ -1521,7 +1574,7 @@ def create_app() -> FastAPI:
         if denied:
             return denied
         if not get_chat(chat_id):
-            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+            return JSONResponse({"error": "not found"}, status_code=404)
         return {"entries": list_user_event_index(chat_id)}
 
     @app.patch("/chats/{chat_id}")
@@ -1544,9 +1597,9 @@ def create_app() -> FastAPI:
                 **fields,
             )
         except KeyError:
-            return Response(status_code=404, content=json.dumps({"error": "not found"}))
+            return JSONResponse({"error": "not found"}, status_code=404)
         except ValueError as exc:
-            return Response(status_code=400, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.delete("/chats/{chat_id}")
     async def chats_delete(chat_id: str, request: Request):
@@ -1565,13 +1618,9 @@ def create_app() -> FastAPI:
             meta = fork_chat(chat_id)
             return {"ok": True, "chat": meta, "chat_id": meta["id"]}
         except KeyError:
-            return Response(status_code=404, content=json.dumps({"error": "chat not found"}))
+            return JSONResponse({"error": "chat not found"}, status_code=404)
         except RuntimeError as e:
-            return Response(
-                status_code=500,
-                content=json.dumps({"error": str(e)}),
-                media_type="application/json",
-            )
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     @app.post("/chats/{chat_id}/regenerate")
     async def chats_regenerate(chat_id: str, request: Request):
@@ -1585,7 +1634,7 @@ def create_app() -> FastAPI:
                 last_user = ev.get("text")
                 break
         if not last_user:
-            return Response(status_code=400, content=json.dumps({"error": "no user message"}))
+            return JSONResponse({"error": "no user message"}, status_code=400)
         truncate_after_last_user(chat_id)
         # Client should re-POST /chat/stream with the text; we just prepare state.
         return {"ok": True, "task": last_user, "chat_id": chat_id}
@@ -1711,7 +1760,7 @@ def create_app() -> FastAPI:
         try:
             return {"ok": True, "job": _jobs.output(job_id)}
         except KeyError as exc:
-            return Response(status_code=404, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
 
@@ -1725,7 +1774,7 @@ def create_app() -> FastAPI:
         try:
             return {"ok": True, "job": await _jobs.stop(job_id)}
         except KeyError as exc:
-            return Response(status_code=404, content=json.dumps({"error": str(exc)}))
+            return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
 

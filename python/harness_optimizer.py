@@ -3,15 +3,45 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from paths import WORKSPACE
 from settings_store import load_settings
+
+
+class HarnessConflictError(RuntimeError):
+    """Raised when workspace harness files changed since optimization finished."""
+
+
+def _prune_old_runs(
+    runs_root: Path,
+    *,
+    keep: int = 5,
+    preserve_run_ids: set[str] | None = None,
+) -> None:
+    """Keep the newest ``keep`` run directories plus any preserved active/applied runs."""
+    if not runs_root.is_dir():
+        return
+    preserved = {rid for rid in (preserve_run_ids or set()) if rid}
+    entries: list[tuple[float, Path]] = []
+    for child in runs_root.iterdir():
+        if not child.is_dir() or child.is_symlink():
+            continue
+        if child.name in preserved:
+            continue
+        try:
+            entries.append((child.stat().st_mtime, child))
+        except OSError:
+            continue
+    entries.sort(key=lambda item: item[0], reverse=True)
+    for _mtime, old_dir in entries[max(0, keep) :]:
+        shutil.rmtree(old_dir, ignore_errors=True)
 
 
 def _default_workspace_llm(workspace: Path) -> Any:
@@ -43,10 +73,12 @@ class HarnessOptimizerManager:
         self._state: str = "idle"  # idle | running | completed | failed | cancelled
         self._run_id: str | None = None
         self._task_prompt: str = ""
+        self._tasks: list[str] = []
         self._k: int = 1
         self._mode: str = "parallel"
         self._adaptive_probe: bool = True
         self._max_usd: float | None = None
+        self._reflect: bool = True
         self._started_at: float | None = None
         self._ended_at: float | None = None
         self._error: str | None = None
@@ -57,7 +89,10 @@ class HarnessOptimizerManager:
         self._diff_summary: str = ""
         self._unified_diffs: dict[str, str] = {}
         self._applied: dict[str, Any] | None = None
+        self._applied_run_id: str | None = None
         self._rolled_back: bool = False
+        self._experience: dict[str, Any] | None = None
+        self._conflict: bool = False
 
         self._last_base_tree: dict[str, str] | None = None
         self._last_adopted_tree: dict[str, str] | None = None
@@ -70,10 +105,12 @@ class HarnessOptimizerManager:
                 "state": self._state,
                 "run_id": self._run_id,
                 "task": self._task_prompt,
+                "tasks": list(self._tasks),
                 "k": self._k,
                 "mode": self._mode,
                 "adaptive_probe": self._adaptive_probe,
                 "max_usd": self._max_usd,
+                "reflect": self._reflect,
                 "started_at": self._started_at,
                 "ended_at": self._ended_at,
                 "error": self._error,
@@ -86,22 +123,45 @@ class HarnessOptimizerManager:
                 "has_changes": bool(self._unified_diffs),
                 "applied": dict(self._applied) if self._applied is not None else None,
                 "rolled_back": self._rolled_back,
+                "experience": dict(self._experience) if self._experience is not None else None,
+                "conflict": self._conflict,
             }
 
     def start_optimize(
         self,
         workspace: Path | str | None = None,
         *,
-        task: str,
+        task: str = "",
+        tasks: Sequence[str] | None = None,
         k: int = 1,
         mode: str = "parallel",
         adaptive_probe: bool = True,
         max_usd: float | None = None,
         deliverables_mode: str = "contents",
+        reflect: bool = True,
     ) -> dict[str, Any]:
         clean_task = (task or "").strip()
-        if not clean_task:
+        normalized_tasks: list[str] = []
+        if clean_task:
+            if len(clean_task) > 10_000:
+                raise ValueError("Task prompt must be at most 10000 characters")
+            normalized_tasks.append(clean_task)
+        if tasks is not None:
+            if len(tasks) > 20:
+                raise ValueError("tasks must contain at most 20 items")
+            for item in tasks:
+                s = str(item or "").strip()
+                if s and s not in normalized_tasks:
+                    if len(s) > 10_000:
+                        raise ValueError("Each benchmark task must be at most 10000 characters")
+                    normalized_tasks.append(s)
+        if not normalized_tasks:
             raise ValueError("Task prompt cannot be empty")
+        if len(normalized_tasks) > 20:
+            raise ValueError("tasks must contain at most 20 items")
+        if not clean_task:
+            clean_task = normalized_tasks[0]
+
         if k < 1 or k > 3:
             raise ValueError("k must be between 1 and 3")
         if mode not in ("parallel", "sequential"):
@@ -120,10 +180,12 @@ class HarnessOptimizerManager:
             self._state = "running"
             self._run_id = run_id
             self._task_prompt = clean_task
+            self._tasks = list(normalized_tasks)
             self._k = int(k)
             self._mode = mode
             self._adaptive_probe = bool(adaptive_probe)
             self._max_usd = float(max_usd) if max_usd is not None else None
+            self._reflect = bool(reflect)
             self._started_at = time.time()
             self._ended_at = None
             self._error = None
@@ -135,6 +197,8 @@ class HarnessOptimizerManager:
             self._unified_diffs = {}
             self._applied = None
             self._rolled_back = False
+            self._experience = None
+            self._conflict = False
             self._last_base_tree = None
             self._last_adopted_tree = None
 
@@ -144,11 +208,13 @@ class HarnessOptimizerManager:
                 ws,
                 run_id=run_id,
                 task=clean_task,
+                tasks=normalized_tasks,
                 k=int(k),
                 mode=mode,
                 adaptive_probe=bool(adaptive_probe),
                 max_usd=float(max_usd) if max_usd is not None else None,
                 deliverables_mode=deliverables_mode,
+                reflect=bool(reflect),
             )
         )
         with self._lock:
@@ -161,11 +227,13 @@ class HarnessOptimizerManager:
         *,
         run_id: str,
         task: str,
+        tasks: list[str],
         k: int,
         mode: str,
         adaptive_probe: bool,
         max_usd: float | None,
         deliverables_mode: str,
+        reflect: bool,
     ) -> None:
         def _on_stage(event: str, payload: dict[str, Any]) -> None:
             entry = {"event": event, "ts": time.time(), **dict(payload or {})}
@@ -174,6 +242,7 @@ class HarnessOptimizerManager:
                 if isinstance(payload.get("ledger"), dict):
                     self._ledger = dict(payload["ledger"])
 
+        run_dir = ws / ".clawagents" / "harness_runs" / run_id
         try:
             opt_fn = self._optimize_fn
             if opt_fn is None:
@@ -184,7 +253,6 @@ class HarnessOptimizerManager:
                 opt_fn = optimize_workspace_harness
 
             llm = await asyncio.to_thread(self._llm_factory, ws)
-            run_dir = ws / ".clawagents" / "harness_runs" / run_id
             exp_dir = ws / ".clawagents" / "experience_library"
 
             library = None
@@ -198,6 +266,7 @@ class HarnessOptimizerManager:
             out = await opt_fn(
                 task,
                 ws,
+                tasks=tasks,
                 llm=llm,
                 k=k,
                 mode=mode,
@@ -208,6 +277,7 @@ class HarnessOptimizerManager:
                 run_dir=run_dir,
                 library=library,
                 apply=False,
+                reflect=reflect,
                 on_stage_event=_on_stage,
             )
 
@@ -230,6 +300,13 @@ class HarnessOptimizerManager:
                     "reasoning": getattr(sel, "reasoning", ""),
                 }
 
+            exp = out.get("experience")
+            exp_dict: dict[str, Any] | None = None
+            if isinstance(exp, dict):
+                exp_dict = dict(exp)
+            elif exp is not None and hasattr(exp, "to_dict"):
+                exp_dict = dict(exp.to_dict())
+
             with self._lock:
                 self._state = "completed"
                 self._ended_at = time.time()
@@ -238,6 +315,8 @@ class HarnessOptimizerManager:
                 self._ledger = ledger_dict
                 self._diff_summary = str(out.get("diff_summary") or "")
                 self._unified_diffs = dict(out.get("unified_diffs") or {})
+                self._experience = exp_dict
+                self._conflict = False
                 self._last_base_tree = dict(out.get("base_tree") or {})
                 self._last_adopted_tree = dict(out.get("adopted_tree") or {})
         except asyncio.CancelledError:
@@ -250,6 +329,19 @@ class HarnessOptimizerManager:
                 self._state = "failed"
                 self._ended_at = time.time()
                 self._error = f"{type(exc).__name__}: {exc}"
+        finally:
+            shutil.rmtree(run_dir / "staging", ignore_errors=True)
+            with self._lock:
+                preserve_ids = {run_id}
+                if self._applied_run_id:
+                    preserve_ids.add(self._applied_run_id)
+                if isinstance(self._applied, dict) and self._applied.get("backup_dir"):
+                    preserve_ids.add(Path(str(self._applied["backup_dir"])).parent.name)
+            _prune_old_runs(
+                ws / ".clawagents" / "harness_runs",
+                keep=5,
+                preserve_run_ids=preserve_ids,
+            )
 
     def cancel_optimize(self) -> dict[str, Any]:
         with self._lock:
@@ -260,7 +352,12 @@ class HarnessOptimizerManager:
                 self._ended_at = time.time()
         return self.get_status()
 
-    def apply_optimized(self, workspace: Path | str | None = None) -> dict[str, Any]:
+    def apply_optimized(
+        self,
+        workspace: Path | str | None = None,
+        *,
+        force: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
             if self._state != "completed" or self._last_adopted_tree is None:
                 raise RuntimeError("No completed Harness² optimization result is available to apply")
@@ -271,6 +368,17 @@ class HarnessOptimizerManager:
             run_id = self._run_id or "manual"
 
         ws = Path(workspace or WORKSPACE).resolve()
+        from clawagents.trajectory.harness_recursion import DEFAULT_SURFACE, read_tree
+        from clawagents.trajectory.harness_runmark import tree_fingerprint
+
+        live_tree = dict(read_tree(ws, DEFAULT_SURFACE))
+        if not force and tree_fingerprint(live_tree) != tree_fingerprint(base_tree):
+            with self._lock:
+                self._conflict = True
+            raise HarnessConflictError(
+                "Workspace harness files changed since optimization finished. Retry with force=True to overwrite current files."
+            )
+
         backup_dir = ws / ".clawagents" / "harness_runs" / run_id / "backup"
         apply_fn = self._apply_fn
         if apply_fn is None:
@@ -280,13 +388,15 @@ class HarnessOptimizerManager:
 
         applied_info = apply_fn(
             ws,
-            base_tree,
+            live_tree,
             adopted_tree,
             backup_dir=backup_dir,
         )
         with self._lock:
             self._applied = dict(applied_info)
+            self._applied_run_id = run_id
             self._rolled_back = False
+            self._conflict = False
         return self.get_status()
 
     def rollback_optimized(self, workspace: Path | str | None = None) -> dict[str, Any]:
@@ -304,7 +414,9 @@ class HarnessOptimizerManager:
         rollback_workspace_harness(ws, backup_dir)
         with self._lock:
             self._applied = None
+            self._applied_run_id = None
             self._rolled_back = True
+            self._conflict = False
         return self.get_status()
 
 

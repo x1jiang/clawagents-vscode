@@ -196,7 +196,12 @@ export class SidecarManager {
     if (this.handle && this.child && !this.child.killed) {
       // Process alive ≠ healthy. A hung event loop kept returning ETIMEDOUT.
       const fresh = Date.now() - this.lastHealthyAt < 2_500;
-      if (fresh || (await this.pingHealth(1_500))) {
+      let healthy = fresh || (await this.pingHealth(3_500));
+      if (!healthy) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        healthy = await this.pingHealth(3_500);
+      }
+      if (healthy) {
         this.lastHealthyAt = Date.now();
         return this.handle;
       }

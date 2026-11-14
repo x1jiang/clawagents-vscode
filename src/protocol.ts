@@ -19,10 +19,12 @@ export type HarnessOptimizeStatus = {
   state: "idle" | "running" | "completed" | "failed" | "cancelled";
   run_id?: string | null;
   task?: string;
+  tasks?: string[];
   k?: number;
   mode?: "parallel" | "sequential";
   adaptive_probe?: boolean;
   max_usd?: number | null;
+  reflect?: boolean;
   started_at?: number | null;
   ended_at?: number | null;
   error?: string | null;
@@ -35,6 +37,8 @@ export type HarnessOptimizeStatus = {
   has_changes?: boolean;
   applied?: Record<string, unknown> | null;
   rolled_back?: boolean;
+  experience?: Record<string, unknown> | null;
+  conflict?: boolean;
 };
 
 export type AgentMode = "ask" | "read_only" | "auto" | "full_access";
@@ -611,13 +615,15 @@ export type WebviewToHost =
   | {
       type: "start_harness_optimize";
       task: string;
+      tasks?: string[];
       k: number;
       mode: "parallel" | "sequential";
       adaptiveProbe: boolean;
       maxUsd?: number;
+      reflect?: boolean;
     }
   | { type: "cancel_harness_optimize" }
-  | { type: "apply_harness_optimize" }
+  | { type: "apply_harness_optimize"; force?: boolean }
   | { type: "rollback_harness_optimize" }
   | {
       type: "persist";
@@ -660,7 +666,7 @@ const NO_PAYLOAD_MESSAGES = new Set([
   "ready", "clear", "new_chat", "deselect_chat", "regenerate", "pick_attach_files",
   "clear_images", "clear_files", "compact_chat", "unlock_chat", "restart_sidecar", "select_python", "install_python_deps", "load_settings", "setup_local_gemma", "stop_local_gemma",
   "load_skills", "pick_skill_dir", "set_api_key", "clear_api_key", "load_diagnostics",
-  "load_stats", "load_skill_usage", "clear_skill_usage", "load_harness_optimize", "cancel_harness_optimize", "apply_harness_optimize", "rollback_harness_optimize", "bug_report_capture_screenshot", "load_older_chat", "load_query_index",
+  "load_stats", "load_skill_usage", "clear_skill_usage", "load_harness_optimize", "cancel_harness_optimize", "rollback_harness_optimize", "bug_report_capture_screenshot", "load_older_chat", "load_query_index",
   "list_jobs", "load_pinned",
 ]);
 
@@ -805,6 +811,10 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
     case "start_harness_optimize":
       return text(value.task, 20_000)
         && value.task.trim().length > 0
+        && (value.tasks === undefined
+          || (Array.isArray(value.tasks)
+            && value.tasks.length <= 20
+            && value.tasks.every((item) => text(item, 10_000) && item.trim().length > 0)))
         && typeof value.k === "number"
         && Number.isInteger(value.k)
         && value.k >= 1
@@ -813,7 +823,13 @@ export function parseWebviewToHost(value: unknown): WebviewToHost | undefined {
         && typeof value.adaptiveProbe === "boolean"
         && (value.maxUsd === undefined
           || (typeof value.maxUsd === "number" && Number.isFinite(value.maxUsd) && value.maxUsd > 0 && value.maxUsd <= 1000))
+        && (value.reflect === undefined || typeof value.reflect === "boolean")
         ? value as WebviewToHost
+        : undefined;
+    case "apply_harness_optimize":
+      if (value.force === undefined) return { type: "apply_harness_optimize" };
+      return typeof value.force === "boolean"
+        ? { type: "apply_harness_optimize", force: value.force }
         : undefined;
     case "set_human_timing":
       return typeof value.enabled === "boolean" ? value as WebviewToHost : undefined;

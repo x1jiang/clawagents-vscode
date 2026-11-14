@@ -7,6 +7,7 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
   const [k, setK] = useState<number>(1);
   const [mode, setMode] = useState<"parallel" | "sequential">("parallel");
   const [adaptiveProbe, setAdaptiveProbe] = useState(true);
+  const [reflect, setReflect] = useState(true);
   const [maxUsdText, setMaxUsdText] = useState("");
   const [busyAction, setBusyAction] = useState<"apply" | "rollback" | null>(null);
 
@@ -25,8 +26,11 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
   }, [isRunning]);
 
   const handleStart = () => {
-    const trimmed = task.trim();
-    if (!trimmed) return;
+    const lines = task
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return;
     const parsedMax = maxUsdText.trim() ? Number(maxUsdText.trim()) : undefined;
     const validMax =
       parsedMax !== undefined && Number.isFinite(parsedMax) && parsedMax > 0 && parsedMax <= 1000
@@ -34,11 +38,13 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
         : undefined;
     post({
       type: "start_harness_optimize",
-      task: trimmed,
+      task: lines[0],
+      ...(lines.length > 1 ? { tasks: lines } : {}),
       k,
       mode,
       adaptiveProbe,
       maxUsd: validMax,
+      reflect,
     });
   };
 
@@ -89,7 +95,7 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
       </p>
 
       <label>
-        Representative benchmark task
+        Representative benchmark task(s) (one per line for a multi-task suite)
         <textarea
           rows={2}
           placeholder="e.g. Run pytest on a failing module, diagnose root cause, and verify with ruff"
@@ -109,6 +115,7 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
           >
             <option value={1}>k=1 (4 rollouts)</option>
             <option value={2}>k=2 (8 rollouts)</option>
+            <option value={3}>k=3 (12 rollouts)</option>
           </select>
         </label>
         <label className="harness-inline-field">
@@ -147,6 +154,16 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
           onChange={(e) => setAdaptiveProbe(e.target.checked)}
         />
         Adaptive probe deduplication (skip redundant or clean-confidence rollouts)
+      </label>
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={reflect}
+          disabled={isRunning}
+          onChange={(e) => setReflect(e.target.checked)}
+        />
+        Record reflection to Experience Library
       </label>
 
       <div className="skill-usage-actions" style={{ marginTop: 8 }}>
@@ -197,10 +214,31 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
         )}
       </div>
 
-      {status?.error && (
-        <p className="harness-error-note" role="alert">
-          {status.error}
-        </p>
+      {status?.conflict ? (
+        <div className="harness-error-note" role="alert">
+          <div>
+            {status.error || "Workspace harness files changed since optimization finished."}
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              disabled={busyAction !== null}
+              onClick={() => {
+                setBusyAction("apply");
+                window.setTimeout(() => setBusyAction(null), 3000);
+                post({ type: "apply_harness_optimize", force: true });
+              }}
+            >
+              Force apply anyway
+            </button>
+          </div>
+        </div>
+      ) : (
+        status?.error && (
+          <p className="harness-error-note" role="alert">
+            {status.error}
+          </p>
+        )
       )}
 
       {stages.length > 0 && (
@@ -247,6 +285,17 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
       {reasoning && (
         <p className="muted tiny" style={{ marginTop: 6 }}>
           <strong>Blind selector:</strong> {reasoning}
+        </p>
+      )}
+
+      {status?.experience && (
+        <p className="muted tiny" style={{ marginTop: 6 }}>
+          <strong>Experience Library:</strong>{" "}
+          {typeof status.experience.lesson === "string" && status.experience.lesson
+            ? status.experience.lesson
+            : typeof status.experience.cue === "string" && status.experience.cue
+              ? status.experience.cue
+              : "Reflection recorded."}
         </p>
       )}
 
