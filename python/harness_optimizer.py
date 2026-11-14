@@ -57,6 +57,7 @@ class HarnessOptimizerManager:
         self._diff_summary: str = ""
         self._unified_diffs: dict[str, str] = {}
         self._applied: dict[str, Any] | None = None
+        self._rolled_back: bool = False
 
         self._last_base_tree: dict[str, str] | None = None
         self._last_adopted_tree: dict[str, str] | None = None
@@ -84,6 +85,7 @@ class HarnessOptimizerManager:
                 "unified_diffs": dict(self._unified_diffs),
                 "has_changes": bool(self._unified_diffs),
                 "applied": dict(self._applied) if self._applied is not None else None,
+                "rolled_back": self._rolled_back,
             }
 
     def start_optimize(
@@ -132,6 +134,7 @@ class HarnessOptimizerManager:
             self._diff_summary = ""
             self._unified_diffs = {}
             self._applied = None
+            self._rolled_back = False
             self._last_base_tree = None
             self._last_adopted_tree = None
 
@@ -182,13 +185,13 @@ class HarnessOptimizerManager:
 
             llm = await asyncio.to_thread(self._llm_factory, ws)
             run_dir = ws / ".clawagents" / "harness_runs" / run_id
-            exp_path = ws / ".clawagents" / "experience_library.jsonl"
+            exp_dir = ws / ".clawagents" / "experience_library"
 
             library = None
             try:
-                from clawagents.trajectory.harness_recursion import ExperienceLibrary
+                from clawagents.trajectory.harness_surface import ExperienceLibrary
 
-                library = ExperienceLibrary(exp_path)
+                library = ExperienceLibrary(exp_dir)
             except Exception:  # noqa: BLE001
                 library = None
 
@@ -283,6 +286,25 @@ class HarnessOptimizerManager:
         )
         with self._lock:
             self._applied = dict(applied_info)
+            self._rolled_back = False
+        return self.get_status()
+
+    def rollback_optimized(self, workspace: Path | str | None = None) -> dict[str, Any]:
+        with self._lock:
+            if self._state == "running":
+                raise RuntimeError("Cannot roll back while a Harness² optimization run is active")
+            applied = dict(self._applied) if self._applied is not None else None
+            if applied is None or not applied.get("backup_dir"):
+                raise RuntimeError("No applied Harness² backup is available to roll back")
+            backup_dir = str(applied["backup_dir"])
+
+        ws = Path(workspace or WORKSPACE).resolve()
+        from clawagents.trajectory.harness_substrate import rollback_workspace_harness
+
+        rollback_workspace_harness(ws, backup_dir)
+        with self._lock:
+            self._applied = None
+            self._rolled_back = True
         return self.get_status()
 
 

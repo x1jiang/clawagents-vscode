@@ -1240,6 +1240,18 @@ def create_app() -> FastAPI:
         except RuntimeError as exc:
             return Response(status_code=409, content=json.dumps({"ok": False, "error": str(exc)}))
 
+    @app.post("/skills/harness/rollback")
+    async def skills_harness_rollback(request: Request):
+        denied = _auth_or_401(request)
+        if denied:
+            return denied
+        try:
+            return await asyncio.to_thread(get_harness_optimizer().rollback_optimized, WORKSPACE)
+        except FileNotFoundError as exc:
+            return Response(status_code=404, content=json.dumps({"ok": False, "error": str(exc)}))
+        except RuntimeError as exc:
+            return Response(status_code=409, content=json.dumps({"ok": False, "error": str(exc)}))
+
     @app.get("/snapshots")
     async def snapshots(request: Request):
         denied = _auth_or_401(request)

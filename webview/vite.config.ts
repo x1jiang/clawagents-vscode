@@ -16,8 +16,15 @@ export default defineConfig({
     rollupOptions: {
       output: {
         entryFileNames: "assets/index.js",
-        chunkFileNames: "assets/[name].js",
+        chunkFileNames: "assets/[name]-[hash].js",
         assetFileNames: "assets/[name][extname]",
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("react-markdown") || id.includes("remark-") || id.includes("mdast-") || id.includes("micromark")) {
+              return "markdown-vendor";
+            }
+          }
+        },
       },
     },
   },

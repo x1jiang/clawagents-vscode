@@ -8,8 +8,13 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
   const [mode, setMode] = useState<"parallel" | "sequential">("parallel");
   const [adaptiveProbe, setAdaptiveProbe] = useState(true);
   const [maxUsdText, setMaxUsdText] = useState("");
+  const [busyAction, setBusyAction] = useState<"apply" | "rollback" | null>(null);
 
   const isRunning = status?.state === "running";
+
+  useEffect(() => {
+    setBusyAction(null);
+  }, [status]);
 
   useEffect(() => {
     if (!isRunning) return undefined;
@@ -57,6 +62,8 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
   const diffEntries = Object.entries(diffs);
   const canApply =
     status?.state === "completed" && diffEntries.length > 0 && !status?.applied;
+  const canRollback = Boolean(status?.applied && status.applied.backup_dir);
+  const stages = Array.isArray(status?.stages) ? status.stages : [];
 
   return (
     <div className="harness-optimizer-panel">
@@ -163,10 +170,29 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
         {canApply && (
           <button
             type="button"
-            onClick={() => post({ type: "apply_harness_optimize" })}
+            disabled={busyAction !== null}
+            onClick={() => {
+              setBusyAction("apply");
+              window.setTimeout(() => setBusyAction(null), 3000);
+              post({ type: "apply_harness_optimize" });
+            }}
           >
             Apply to workspace ({diffEntries.length}{" "}
             {diffEntries.length === 1 ? "file" : "files"})
+          </button>
+        )}
+        {canRollback && (
+          <button
+            type="button"
+            className="ghost"
+            disabled={busyAction !== null}
+            onClick={() => {
+              setBusyAction("rollback");
+              window.setTimeout(() => setBusyAction(null), 3000);
+              post({ type: "rollback_harness_optimize" });
+            }}
+          >
+            Revert to backup
           </button>
         )}
       </div>
@@ -175,6 +201,22 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
         <p className="harness-error-note" role="alert">
           {status.error}
         </p>
+      )}
+
+      {stages.length > 0 && (
+        <div className="harness-stages-strip" aria-live="polite">
+          {stages.slice(-8).map((st, idx) => {
+            const label = String(st.stage || st.label || st.event || `step ${idx + 1}`);
+            const evName = String(st.event || "");
+            const detail = st.skipped ? "skipped" : evName.replace(/_/g, " ");
+            return (
+              <span key={`${idx}-${label}`} className="harness-stage-chip">
+                <strong>{label}</strong>
+                {detail && detail !== label ? ` · ${detail}` : ""}
+              </span>
+            );
+          })}
+        </div>
       )}
 
       {(rolloutsExecuted !== null || (status?.stages?.length ?? 0) > 0) && (
@@ -212,6 +254,12 @@ export function HarnessOptimizerPanel({ status }: { status: HarnessOptimizeStatu
         <p className="muted tiny" style={{ marginTop: 6 }}>
           Applied ✓ Backed up prior harness under{" "}
           <code>{String(status.applied.backup_dir || ".clawagents/harness_runs")}</code>.
+        </p>
+      )}
+
+      {status?.rolled_back && !status?.applied && (
+        <p className="muted tiny" style={{ marginTop: 6 }}>
+          Reverted ✓ Restored previous workspace harness from backup.
         </p>
       )}
 

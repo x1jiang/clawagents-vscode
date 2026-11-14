@@ -3180,8 +3180,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
         break;
       case "apply_harness_optimize":
+      case "rollback_harness_optimize":
         try {
-          const data = await this.gateway.applyHarnessOptimize();
+          const data =
+            msg.type === "rollback_harness_optimize"
+              ? await this.gateway.rollbackHarnessOptimize()
+              : await this.gateway.applyHarnessOptimize();
           this.post({ type: "harness_optimize_status", data });
           const skills = await this.gateway.getSkills();
           this.post({ type: "skills_preview", ...skills });
@@ -4346,8 +4350,12 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
     const assetsDir = path.join(dist, "assets");
     if (fs.existsSync(assetsDir)) {
       const files = fs.readdirSync(assetsDir);
-      const js = files.find((f) => f.endsWith(".js"));
-      const css = files.find((f) => f.endsWith(".css"));
+      const js = files.includes("index.js")
+        ? "index.js"
+        : files.find((f) => f.endsWith(".js"));
+      const css = files.includes("index.css")
+        ? "index.css"
+        : files.find((f) => f.endsWith(".css"));
       // Bust webview cache: Vite emits stable index.js/index.css names, and
       // retainContextWhenHidden keeps the previous document until reload.
       const bust = (file: string) => {

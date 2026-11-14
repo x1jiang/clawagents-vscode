@@ -22,6 +22,7 @@ def test_harness_endpoints_require_auth(monkeypatch: pytest.MonkeyPatch) -> None
     assert client.post("/skills/harness/optimize", json={"task": "fix bug"}).status_code == 401
     assert client.post("/skills/harness/cancel").status_code == 401
     assert client.post("/skills/harness/apply").status_code == 401
+    assert client.post("/skills/harness/rollback").status_code == 401
 
 
 def test_harness_optimize_full_lifecycle_and_apply(
@@ -123,6 +124,14 @@ def test_harness_optimize_full_lifecycle_and_apply(
         / "AGENTS.md"
     )
     assert backup_file.read_text(encoding="utf-8") == "# Old rules\n"
+
+    # Rollback restores original AGENTS.md and clears applied state
+    rolled_back = client.post("/skills/harness/rollback", headers=headers)
+    assert rolled_back.status_code == 200
+    rb_json = rolled_back.json()
+    assert rb_json["rolled_back"] is True
+    assert rb_json["applied"] is None
+    assert agents_md.read_text(encoding="utf-8") == "# Old rules\n"
 
 
 def test_harness_optimize_cancellation() -> None:

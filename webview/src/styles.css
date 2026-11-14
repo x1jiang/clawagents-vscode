@@ -5003,6 +5003,8 @@ button.chat-pin.active {
 .harness-state-pill.state-completed { color: var(--vscode-charts-green, #388a34); }
 .harness-state-pill.state-failed { color: var(--vscode-errorForeground, #f48771); }
 .harness-error-note { color: var(--vscode-errorForeground, #f48771); font-size: 12px; margin: 8px 0 0; }
+.harness-stages-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.harness-stage-chip { font-size: 11px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--vscode-panel-border); background: var(--vscode-editor-background); }
 .harness-ledger-bar { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
 .harness-diffs { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .harness-diff-item { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 4px 8px; }

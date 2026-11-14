@@ -1,3 +1,10 @@
+# 1.0.214
+
+- Add one-click **Revert to backup** rollback (`POST /skills/harness/rollback`) and live stage progress chips in the Harness² Workspace Optimizer panel, with `ExperienceLibrary` directory persistence and double-submit guards.
+- Split the webview Markdown pipeline into a content-hashed `markdown-vendor` bundle and explicitly resolve `index.js` / `index.css` in `getHtml()` so chunk order never affects webview startup.
+- Add an optional tag-triggered `publish-marketplace` GitHub Actions job when `VSCE_PAT` is configured.
+- Require Python clawagents **6.20.100** (`rollback_workspace_harness` + `.rollback_manifest.json`, multi-task Harness² benchmark suites, CLI `--adapt` / `--rollback-harness`, and concurrent control-plane schema lock isolation).
+
 # 1.0.213
 
 - Add the **Harness² Workspace Optimizer** panel in Settings → Skills (`GET /skills/harness/status`, `POST /skills/harness/optimize`, `POST /skills/harness/cancel`, `POST /skills/harness/apply`) to run Propose–Probe–Compose benchmarks on workspace `AGENTS.md`, `skills/`, and `.clawagents/hooks.json` with blind trajectory selection, adaptive probe deduplication, USD caps, unified diff previews, and backed-up one-click workspace application.

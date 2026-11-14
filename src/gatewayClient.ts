@@ -625,6 +625,16 @@ export class GatewayClient {
     );
   }
 
+  rollbackHarnessOptimize() {
+    return requestJson<import("./protocol").HarnessOptimizeStatus>(
+      this.requireHandle(),
+      "POST",
+      "/skills/harness/rollback",
+      {},
+      30_000,
+    );
+  }
+
   getStats() {
     return requestJson<unknown>(this.requireHandle(), "GET", "/stats");
   }

@@ -54,6 +54,7 @@ test("parseWebviewToHost accepts no-payload harness optimizer actions", () => {
     "load_harness_optimize",
     "cancel_harness_optimize",
     "apply_harness_optimize",
+    "rollback_harness_optimize",
   ]) {
     assert.deepEqual(parseWebviewToHost({ type }), { type });
   }
