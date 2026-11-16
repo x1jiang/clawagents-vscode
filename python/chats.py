@@ -327,6 +327,26 @@ def _supports_direct_openai_fast(model: str, provider: str, base_url: str = "") 
     ))
 
 
+def _supports_direct_anthropic_fast(model: str, provider: str, base_url: str = "") -> bool:
+    if provider.strip().lower() not in {"auto", "anthropic", "profile:anthropic"}:
+        return False
+    endpoint = base_url.strip().rstrip("/").lower()
+    if endpoint and endpoint not in {"https://api.anthropic.com", "https://api.anthropic.com/v1"}:
+        return False
+    normalized = model.strip().lower().replace("_", "-")
+    return bool(re.fullmatch(
+        r"claude-(?:fable-5[.-]2|mythos-5[.-]2|opus-5[.-]5|opus-5)(?:-\d{8})?",
+        normalized,
+    ))
+
+
+def _supports_direct_fast_mode(model: str, provider: str, base_url: str = "") -> bool:
+    return (
+        _supports_direct_openai_fast(model, provider, base_url)
+        or _supports_direct_anthropic_fast(model, provider, base_url)
+    )
+
+
 def normalize_model_route(value: Any) -> dict[str, Any] | None:
     """Validate a non-secret per-chat model route."""
     if not isinstance(value, dict):
@@ -351,7 +371,7 @@ def normalize_model_route(value: Any) -> dict[str, Any] | None:
         "reasoning_effort": effort,
     }
     if "fast_mode" in value:
-        route["fast_mode"] = value.get("fast_mode") is True and _supports_direct_openai_fast(model, provider)
+        route["fast_mode"] = value.get("fast_mode") is True and _supports_direct_fast_mode(model, provider)
     if mode:
         route["bedrock_mode"] = mode
     for key, limit in (("aws_region", 128), ("aws_profile", 256), ("wire_api", 64)):
@@ -402,6 +422,7 @@ def _model_route_notice_label(route: dict[str, Any] | None) -> str:
         "medium": "Medium",
         "high": "High",
         "xhigh": "Extra High",
+        "max": "Max",
         "none": "None",
     }.get(effort, "")
     return " · ".join(part for part in (provider, model, effort_label, "Fast" if clean.get("fast_mode") else "") if part)
@@ -2016,7 +2037,7 @@ def _resolve_model_kwargs(model: str | None, settings: dict[str, Any]) -> dict[s
         wire = "responses"
     if wire:
         kwargs["wire_api"] = wire
-    kwargs["fast_mode"] = settings.get("fast_mode") is True and _supports_direct_openai_fast(
+    kwargs["fast_mode"] = settings.get("fast_mode") is True and _supports_direct_fast_mode(
         str(effective_model or ""), provider, str(settings.get("base_url") or "")
     )
     if "ssl_verify" in settings:

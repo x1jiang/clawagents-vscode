@@ -46,6 +46,8 @@ const PRICES: Record<string, Rates> = {
   "gpt-5.4-pro": withCache(30, 180, 3, 37.5),
   "gpt-4o": withCache(2.5, 10, 1.25, 3.125),
   "gpt-4o-mini": withCache(0.15, 0.6, 0.075, 0.1875),
+  "claude-fable-5-2": withCache(8, 40, 0.2, 10),
+  "claude-mythos-5-2": withCache(8, 40, 0.2, 10),
   "claude-fable-5-1": withCache(10, 50, 0.25, 12.5),
   "claude-opus-5-5": withCache(4, 20, 0.2, 5),
   "claude-opus-5": withCache(5, 25, 0.5, 6.25),
@@ -63,8 +65,10 @@ const PRICES: Record<string, Rates> = {
   "claude-haiku-5": withCache(0.1, 0.5, 0.01, 0.125),
   "claude-haiku-4-5": withCache(1, 5, 0.1, 1.25),
   "claude-haiku-4-5-20251001": withCache(1, 5, 0.1, 1.25),
-  // Argon / Carbon intro pricing through 2026-11-30; the pricing page lists
-  // $4 / $20 ($0.20 cached) from 2026-12-01 for both.
+  // Gemini 4 Hydrogen ($1.50/$7.50, $0.075 cached) and Argon / Carbon intro pricing
+  // through 2026-11-30; the pricing page lists $4 / $20 ($0.20 cached) from
+  // 2026-12-01 for Argon / Carbon.
+  "gemini-4-hydrogen": withCache(1.5, 7.5, 0.075, 1.875),
   "gemini-4-carbon": withCache(2, 10, 0.1, 2.5),
   "gemini-4-argon": withCache(2, 10, 0.1, 2.5),
   "gemini-4": withCache(2, 10, 0.1, 2.5),
@@ -204,7 +208,7 @@ export function normalizeModelId(modelId: string): string {
     }
   }
   if (key.includes(":")) key = key.split(":", 1)[0]!;
-  if (/^claude-(fable|opus|sonnet|haiku)-/.test(key) && key.includes(".")) {
+  if (/^claude-(fable|mythos|opus|sonnet|haiku)-/.test(key) && key.includes(".")) {
     key = key.replace(/\./g, "-");
   }
   return key;
@@ -257,7 +261,7 @@ function lookup(
   if ((key.startsWith("gpt-6-astra") || key.startsWith("grok-4.6")) && raw.toLowerCase().replace(/^bedrock\//, "").startsWith("global.")) {
     return lookupTable(PRICES, key);
   }
-  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6\.1-(sol|terra)|gpt-6-(sol|luna)|claude-fable-5-1|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(key)) return null;
+  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6\.1-(sol|terra)|gpt-6-(sol|luna)|claude-fable-5|claude-mythos-5|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(key)) return null;
   const primary = forceBedrock || looksBedrock(raw) ? BEDROCK_PRICES : PRICES;
   const hit = lookupTable(primary, key);
   if (hit) return hit;

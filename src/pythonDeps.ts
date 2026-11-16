@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import { curatedProcessEnv } from "./envCurate";
 
 /** Minimum clawagents version required by this extension host. */
-export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 101];
+export const MIN_CLAWAGENTS_VERSION: [number, number, number] = [6, 20, 102];
 export const MAX_CLAWAGENTS_VERSION: [number, number, number] = [7, 0, 0];
 export const MIN_CLAWAGENTS_VERSION_STR = MIN_CLAWAGENTS_VERSION.join(".");
 
@@ -29,7 +29,8 @@ export const SIDECAR_PIP_PACKAGES = [
 export const SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK = [
   CLAWAGENTS_GITHUB_WHEEL,
   "pyyaml>=6.0",
-  "google-genai>=0.1.0",
+  "google-genai>=3.3.0; python_version >= '3.11'",
+  "google-genai>=0.1.0; python_version < '3.11'",
   "anthropic>=0.95.0",
   "boto3>=1.34.0",
   "mcp>=1.27.1,<2.0.0",

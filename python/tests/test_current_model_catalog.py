@@ -8,25 +8,29 @@ import pricing
 @pytest.mark.parametrize(
  "provider,ids",
  [
-  ("anthropic",["claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5","claude-opus-5","claude-sonnet-5"]),
-  ("gemini",["gemini-4-carbon","gemini-4-argon","gemini-3.8-flash"]),
-  ("bedrock",["us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","global.anthropic.claude-haiku-5-5"]),
+  ("anthropic",["claude-fable-5-2","claude-fable-5-1","claude-opus-5-5","claude-sonnet-5-5","claude-haiku-5-5","claude-opus-5","claude-sonnet-5"]),
+  ("gemini",["gemini-4-hydrogen","gemini-4-carbon","gemini-4-argon","gemini-3.8-flash"]),
+  ("bedrock",["us.anthropic.claude-fable-5-2","global.anthropic.claude-fable-5-2","us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","global.anthropic.claude-haiku-5-5"]),
   ("xai",["grok-4.6"]),
  ],
 )
 def test_current_direct_catalog(provider,ids):
  models={m["id"] for p in providers._CATALOG if p["id"]==provider for m in p["models"]}
  assert set(ids)<=models
+ assert "claude-mythos-5-2" not in {m["id"] for p in providers._CATALOG for m in p["models"]}
 
 @pytest.mark.parametrize(
  "model,rates",
  [
+  ("claude-fable-5-2",(8,40,.2,10)),
+  ("claude-mythos-5-2",(8,40,.2,10)),
   ("claude-fable-5-1",(10,50,.25,12.5)),
   ("claude-opus-5-5",(4,20,.2,5)),
   ("claude-sonnet-5-5",(2,10,.1,2.5)),
   ("claude-haiku-5-5",(.1,.5,.01,.125)),
   ("claude-haiku-5.5",(.1,.5,.01,.125)),
   ("claude-opus-5",(5,25,.5,6.25)),
+  ("gemini-4-hydrogen",(1.5,7.5,.075,1.875)),
   ("gemini-4-argon",(2,10,.1,2.5)),
   ("gemini-4-carbon",(2,10,.1,2.5)),
   ("gpt-6-cyber",(20,100,2,25)),
@@ -64,7 +68,7 @@ def test_mantle_models_route_to_chat(model,monkeypatch):
  assert kwargs["wire_api"]=="chat_completions"
  assert "bedrock-mantle.us-east-1.api.aws" in kwargs["base_url"]
 
-@pytest.mark.parametrize("model",["anthropic.claude-opus-5-5","anthropic.claude-sonnet-5-5","anthropic.claude-haiku-5-5"])
+@pytest.mark.parametrize("model",["anthropic.claude-fable-5-2","anthropic.claude-opus-5-5","anthropic.claude-sonnet-5-5","anthropic.claude-haiku-5-5"])
 def test_mantle_claude_55_routes_to_anthropic_messages(model,monkeypatch):
  import chats
  monkeypatch.setattr(chats,"_bedrock_api_key",lambda **kwargs:"test")
@@ -73,7 +77,7 @@ def test_mantle_claude_55_routes_to_anthropic_messages(model,monkeypatch):
  assert "wire_api" not in kwargs
  assert "bedrock-mantle.us-east-1.api.aws" in kwargs["base_url"]
 
-@pytest.mark.parametrize("model",["us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","au.anthropic.claude-haiku-5-5","jp.anthropic.claude-haiku-5-5","us.anthropic.claude-opus-5","anthropic.claude-sonnet-5","us.anthropic.claude-fable-5-1"])
+@pytest.mark.parametrize("model",["us.anthropic.claude-fable-5-2","global.anthropic.claude-fable-5-2","anthropic.claude-fable-5-2","us.anthropic.claude-opus-5-5","us.anthropic.claude-sonnet-5-5","us.anthropic.claude-haiku-5-5","au.anthropic.claude-haiku-5-5","jp.anthropic.claude-haiku-5-5","us.anthropic.claude-opus-5","anthropic.claude-sonnet-5","us.anthropic.claude-fable-5-1"])
 def test_unverified_aws_prices_stay_unknown(model):
  assert pricing.price_for_full(model) is None
 

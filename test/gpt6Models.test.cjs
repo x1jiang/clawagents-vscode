@@ -16,15 +16,22 @@ const selection = load("modelSelection");
 const pricing = load("pricing");
 const context = load("contextWindow");
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-test("Fast toggle is available only for supported direct OpenAI models", () => {
+test("Fast toggle is available for supported direct OpenAI and Anthropic models only", () => {
   for (const id of ["gpt-5.6-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"]) {
     assert.equal(selection.modelSupportsFastMode(id, "openai", ""), true);
     assert.equal(selection.modelSupportsFastMode(id, "auto", "https://api.openai.com/v1/"), true);
     assert.equal(selection.modelSupportsFastMode(id, "anthropic", ""), false);
     assert.equal(selection.modelSupportsFastMode(id, "openai", "https://proxy.example.test/v1"), false);
   }
-  for (const id of ["gpt-4o", "openai.gpt-6-sol", "gpt-6"]) {
+  for (const id of ["claude-fable-5-2", "claude-mythos-5-2", "claude-opus-5-5", "claude-opus-5"]) {
+    assert.equal(selection.modelSupportsFastMode(id, "anthropic", ""), true);
+    assert.equal(selection.modelSupportsFastMode(id, "auto", "https://api.anthropic.com"), true);
     assert.equal(selection.modelSupportsFastMode(id, "openai", ""), false);
+    assert.equal(selection.modelSupportsFastMode(id, "anthropic", "https://proxy.example.test/anthropic"), false);
+  }
+  for (const id of ["gpt-4o", "openai.gpt-6-sol", "gpt-6", "claude-fable-5-1", "claude-sonnet-4-5", "claude-sonnet-5-5", "us.anthropic.claude-fable-5-2"]) {
+    assert.equal(selection.modelSupportsFastMode(id, "openai", ""), false);
+    assert.equal(selection.modelSupportsFastMode(id, "anthropic", ""), false);
   }
 });
 test("GPT-6 Sol and Luna are OpenAI-only additions without changing defaults", () => {

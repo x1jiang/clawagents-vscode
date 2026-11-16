@@ -1,3 +1,8 @@
+# 1.0.216
+
+- **Gemini 4 Hydrogen & Anthropic Claude Fable 5.2 / Mythos 5.2:** add **Gemini 4 Hydrogen** (`gemini-4-hydrogen`, `1,048,576` unified context, `low`/`medium`/`high`/`xhigh` thinking effort, `$1.50/$7.50/$0.075` pricing, alongside **Gemini 4 Carbon** and **Gemini 4 Argon**) and **Claude Fable 5.2** (`claude-fable-5-2` on direct Anthropic, native Bedrock `us.`/`global.anthropic.claude-fable-5-2`, and Bedrock Mantle `anthropic.claude-fable-5-2`), plus gated `claude-mythos-5-2` context/pricing catalogs (`1,000,000` context, `$8/$40/$0.20/$10`).
+- **Direct Anthropic Fast mode & packaging fallback sync:** enable per-conversation **Fast mode** (`speed="fast"`) on direct `https://api.anthropic.com` for `claude-fable-5-2`, `claude-mythos-5-2`, `claude-opus-5-5`, and `claude-opus-5`, surface `Max` effort labels in thread route notices, update `SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK` `google-genai` markers (`>=3.3.0; python_version >= '3.11'`), and require Python clawagents **6.20.102**.
+
 # 1.0.215
 
 - **Harness² optimizer & workspace concurrency hardening:** surface multi-task benchmark suites (`tasks`), `k=3` depth, `ExperienceLibrary` reflection (`reflect`), automatic staging cleanup and old run pruning, 409 live-disk drift conflict detection with **Force apply anyway**, and `WorkspaceWriteGate.exclusive()` serialization across harness apply/rollback and snapshot/checkpoint restores.

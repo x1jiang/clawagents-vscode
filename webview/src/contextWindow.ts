@@ -49,6 +49,8 @@ const WINDOWS: Array<[string, number]> = [
   ["o3", 200_000],
   ["o1", 200_000],
   // Anthropic — 1M generation
+  ["claude-fable-5-2", 1_000_000],
+  ["claude-mythos-5-2", 1_000_000],
   ["claude-fable-5", 1_000_000],
   ["claude-mythos-5", 1_000_000],
   ["claude-opus-5", 1_000_000],
@@ -64,6 +66,7 @@ const WINDOWS: Array<[string, number]> = [
   ["claude-haiku-4", 200_000],
   ["claude-3", 200_000],
   // Google
+  ["gemini-4-hydrogen", 1_048_576],
   ["gemini-4-carbon", 1_048_576],
   ["gemini-4-argon", 1_048_576],
   ["gemini-4", 1_048_576],

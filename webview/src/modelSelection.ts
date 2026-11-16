@@ -1,11 +1,25 @@
 import { normalizeModelId } from "./pricing";
 
-/** Only direct OpenAI model families documented for Fast processing. */
+/** Direct OpenAI and direct Anthropic model families documented for Fast processing. */
 export function modelSupportsFastMode(model: string, provider: string, baseUrl: string): boolean {
-  if (!["auto", "openai", "profile:openai"].includes(provider.trim().toLowerCase())) return false;
+  const prov = provider.trim().toLowerCase();
   const endpoint = baseUrl.trim().replace(/\/+$/, "").toLowerCase();
-  if (endpoint && endpoint !== "https://api.openai.com/v1") return false;
-  return /^(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-(?:sol|terra)|gpt-5\.6(?:-(?:sol|terra|luna))?)(?:-\d{4}-\d{2}-\d{2})?$/.test(model.trim().toLowerCase());
+  const m = model.trim().toLowerCase().replace(/_/g, "-");
+  if (
+    ["auto", "openai", "profile:openai"].includes(prov)
+    && (!endpoint || endpoint === "https://api.openai.com/v1")
+    && /^(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-(?:sol|terra)|gpt-5\.6(?:-(?:sol|terra|luna))?)(?:-\d{4}-\d{2}-\d{2})?$/.test(m)
+  ) {
+    return true;
+  }
+  if (
+    ["auto", "anthropic", "profile:anthropic"].includes(prov)
+    && (!endpoint || endpoint === "https://api.anthropic.com" || endpoint === "https://api.anthropic.com/v1")
+    && /^claude-(?:fable-5[.-]2|mythos-5[.-]2|opus-5[.-]5|opus-5)(?:-\d{8})?$/.test(m)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** ClawAgents chats call tools, which GPT-6.1 Sol, Terra, and GPT-6 Astra support only in Responses. */
@@ -22,7 +36,7 @@ export function compatibleWireApiForModel(model: string, provider: string, wireA
 /** Model-specific reasoning controls shared by Settings and the thread picker. */
 export function modelSupportsEffort(model: string): boolean {
   const m = normalizeModelId(model);
-  return /^(grok|gemini-3\.8|gemini-4|claude-fable-5-1|claude-opus-5|claude-sonnet-5|claude-haiku-5|o1|o3|o4|gpt-5\.5|gpt-5\.6|gpt-6\.1-(?:sol|terra)|gpt-6-(astra|sol|luna))/.test(m)
+  return /^(grok|gemini-3\.8|gemini-4|claude-(?:fable|mythos)-5|claude-opus-5|claude-sonnet-5|claude-haiku-5|o1|o3|o4|gpt-5\.5|gpt-5\.6|gpt-6\.1-(?:sol|terra)|gpt-6-(astra|sol|luna))/.test(m)
     || m === "gpt-5" || m.startsWith("gpt-5-");
 }
 
@@ -36,10 +50,11 @@ const EFFORT_OPTIONS = [
 
 export function effortOptionsForModel(model: string) {
   const m = normalizeModelId(model);
+  if (m.startsWith("gemini-4-hydrogen")) return EFFORT_OPTIONS.filter(o => ["low", "medium", "high", "xhigh"].includes(o.value));
   if (m.startsWith("gemini-3.8") || m.startsWith("gemini-4")) return EFFORT_OPTIONS.filter(o => ["low", "medium", "high"].includes(o.value));
   if (m.startsWith("grok")) return EFFORT_OPTIONS.filter(o => o.value !== "none");
   if (/^(gpt-6-(sol|luna)|gpt-6\.1-terra)/.test(m)) return [...EFFORT_OPTIONS, { value: "max", label: "Max" }];
-  if (/^(gpt-6\.1-(?:sol|terra)|gpt-6-astra|claude-fable-5-1|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(m)) {
+  if (/^(gpt-6\.1-(?:sol|terra)|gpt-6-astra|claude-(?:fable|mythos)-5|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(m)) {
     return [...EFFORT_OPTIONS.filter((option) => option.value !== "none"),
       { value: "max", label: "Max" }];
   }

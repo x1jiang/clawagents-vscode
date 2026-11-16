@@ -38,6 +38,7 @@ _MANTLE_MODELS: list[dict[str, Any]] = [
     {"id": "zai.glm-4.7-flash", "label": "Z.ai GLM-4.7 Flash (Mantle)"},
     {"id": "zai.glm-4.6", "label": "Z.ai GLM-4.6 (Mantle · chat)"},
     # Anthropic Messages path (…/anthropic/v1/messages, Bearer via Mantle client)
+    {"id": "anthropic.claude-fable-5-2", "label": "Claude Fable 5.2 (Mantle · messages · requires AWS review opt-in)"},
     {"id": "anthropic.claude-opus-5-5", "label": "Claude Opus 5.5 (Mantle · messages)"},
     {"id": "anthropic.claude-sonnet-5-5", "label": "Claude Sonnet 5.5 (Mantle · messages)"},
     {"id": "anthropic.claude-haiku-5-5", "label": "Claude Haiku 5.5 (Mantle · messages)"},
@@ -130,6 +131,7 @@ _CATALOG: list[dict[str, Any]] = [
         "env_key": "ANTHROPIC_API_KEY",
         "models": [
             {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"},
+            {"id": "claude-fable-5-2", "label": "Claude Fable 5.2"},
             {"id": "claude-fable-5-1", "label": "Claude Fable 5.1"},
             {"id": "claude-opus-5-5", "label": "Claude Opus 5.5"},
             {"id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5"},
@@ -148,6 +150,7 @@ _CATALOG: list[dict[str, Any]] = [
         "env_key": "GEMINI_API_KEY",
         "models": [
             {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash"},
+            {"id": "gemini-4-hydrogen", "label": "Gemini 4 Hydrogen"},
             {"id": "gemini-4-carbon", "label": "Gemini 4 Carbon"},
             {"id": "gemini-4-argon", "label": "Gemini 4 Argon"},
             {"id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash"},
@@ -218,6 +221,8 @@ _CATALOG: list[dict[str, Any]] = [
             {"id": "global.anthropic.claude-haiku-5-5", "label": "Claude Haiku 5.5 (Global)"},
             {"id": "us.anthropic.claude-opus-5", "label": "Claude Opus 5 (US)"},
             {"id": "us.anthropic.claude-sonnet-5", "label": "Claude Sonnet 5 (US)"},
+            {"id": "us.anthropic.claude-fable-5-2", "label": "Claude Fable 5.2 · requires AWS review opt-in (US)"},
+            {"id": "global.anthropic.claude-fable-5-2", "label": "Claude Fable 5.2 · requires AWS review opt-in (Global)"},
             {"id": "us.anthropic.claude-fable-5-1", "label": "Claude Fable 5.1 · requires AWS review opt-in (US)"},
             {"id": "us.amazon.nova-2-lite-v1:0", "label": "Amazon Nova 2 Lite (US)"},
             {"id": "us.meta.llama4-maverick-17b-instruct-v1:0", "label": "Llama 4 Maverick (US)"},

@@ -52,7 +52,9 @@ PRICES: dict[str, PriceTuple] = {
     # Legacy / still listed
     "gpt-4o": (2.5, 10.0, 1.25, 3.125),
     "gpt-4o-mini": (0.15, 0.6, 0.075, 0.1875),
-    # Anthropic direct API (cache read ~5–10%, write ~1.25×)
+    # Anthropic direct API (cache read ~2.5–10%, write ~1.25×)
+    "claude-fable-5-2": (8.0, 40.0, 0.2, 10.0),
+    "claude-mythos-5-2": (8.0, 40.0, 0.2, 10.0),
     "claude-fable-5-1": (10.0, 50.0, 0.25, 12.5),
     "claude-opus-5-5": (4.0, 20.0, 0.2, 5.0),
     "claude-opus-5": (5.0, 25.0, 0.5, 6.25),
@@ -71,6 +73,8 @@ PRICES: dict[str, PriceTuple] = {
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
     "claude-haiku-4-5-20251001": (1.0, 5.0, 0.1, 1.25),
     # Gemini (approx; standard paid tier — cache rates when reported)
+    # 4 Hydrogen (GA 2026-11-12): $1.50/$7.50 ($0.075 cache read) flat across 1M.
+    "gemini-4-hydrogen": (1.5, 7.5, 0.075, 1.875),
     # 4 Argon / 4 Carbon intro $2.00/$10.00 ($0.10 cache read) through 2026-11-30.
     # The pricing page on 2026-11-11 lists $4.00/$20.00 ($0.20 cache read) from
     # 2026-12-01 for both — update these rows then.
@@ -243,7 +247,7 @@ def normalize_model_id(model_id: str) -> str:
             break
     if ":" in key:
         key = key.split(":", 1)[0]
-    if key.startswith(("claude-fable-", "claude-opus-", "claude-sonnet-", "claude-haiku-")) and "." in key:
+    if key.startswith(("claude-fable-", "claude-mythos-", "claude-opus-", "claude-sonnet-", "claude-haiku-")) and "." in key:
         key = key.replace(".", "-")
     return key
 
@@ -306,7 +310,8 @@ def price_for_full(
             "gpt-6.1-sol", "gpt-6.1-terra",
             "gpt-6-sol",
             "gpt-6-luna",
-            "claude-fable-5-1",
+            "claude-fable-5",
+            "claude-mythos-5",
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-haiku-5",

@@ -103,3 +103,32 @@ test("Models added 2026-11: Gemini 4 Carbon, GPT-6 Cyber, hosted Muse", () => {
  assert(Math.abs(pricing.estimateCostUsd("muse-ember-1.0",100000,10000)-.015)<1e-12);
  assert(Math.abs(pricing.estimateCostUsd("muse-ember-1.0",300000,10000)-.105)<1e-12);
 });
+test("Models added 2026-11-15: Gemini 4 Hydrogen and Claude Fable / Mythos 5.2", () => {
+ const models = id => catalog.FALLBACK_PROVIDERS.find(p=>p.id===id).models.map(m=>m.id);
+ assert(models("gemini").includes("gemini-4-hydrogen"));
+ assert.equal(models("gemini")[0], "gemini-3.8-flash");
+ assert(selection.modelSupportsEffort("gemini-4-hydrogen"));
+ assert.deepEqual(selection.effortOptionsForModel("gemini-4-hydrogen").map(o=>o.value),["low","medium","high","xhigh"]);
+ assert.equal(selection.compatibleEffortForModel("gemini-4-hydrogen","max"),"xhigh");
+ assert.equal(context.contextWindowFor("gemini-4-hydrogen"),1048576);
+ assert(Math.abs(pricing.estimateCostUsd("gemini-4-hydrogen",100000,10000)-.225)<1e-12);
+ assert(Math.abs(pricing.estimateCostUsd("gemini-4-hydrogen",100000,0,undefined,"gemini",50000)-.07875)<1e-12);
+
+ assert(models("anthropic").includes("claude-fable-5-2"));
+ assert(!models("anthropic").includes("claude-mythos-5-2"));
+ for (const id of ["claude-fable-5-2","claude-mythos-5-2"]) {
+  assert(selection.modelSupportsEffort(id));
+  assert.deepEqual(selection.effortOptionsForModel(id).map(o=>o.value),["low","medium","high","xhigh","max"]);
+  assert.equal(selection.compatibleEffortForModel(id,"minimal"),"low");
+  assert.equal(context.contextWindowFor(id),1000000);
+  assert(Math.abs(pricing.estimateCostUsd(id,100000,10000)-1.2)<1e-12);
+  assert(Math.abs(pricing.estimateCostUsd(id,100000,10000,undefined,"anthropic",50000,10000)-.83)<1e-12);
+ }
+ assert(models("bedrock").includes("us.anthropic.claude-fable-5-2"));
+ assert(models("bedrock").includes("global.anthropic.claude-fable-5-2"));
+ assert(catalog.MANTLE_FALLBACK_MODELS.some(m=>m.id==="anthropic.claude-fable-5-2"));
+ for (const id of ["us.anthropic.claude-fable-5-2","global.anthropic.claude-fable-5-2","anthropic.claude-fable-5-2"]) {
+  assert.equal(context.contextWindowFor(id),1000000);
+  assert.equal(pricing.estimateCostUsd(id,1000,1000),null);
+ }
+});

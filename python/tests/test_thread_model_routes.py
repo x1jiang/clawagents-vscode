@@ -151,6 +151,31 @@ def test_fast_mode_is_disabled_for_unsupported_model_or_endpoint():
     assert chats._resolve_model_kwargs(None, proxy)["fast_mode"] is False
 
 
+def test_anthropic_fast_mode_routes_and_billing(monkeypatch):
+    monkeypatch.setattr("spawn_secrets.resolve_api_key", lambda *a, **k: "sk-ant-test")
+    for model in ("claude-fable-5-2", "claude-opus-5-5"):
+        route = chats.normalize_model_route({
+            "provider": "anthropic", "model": model, "reasoning_effort": "max", "fast_mode": True,
+        })
+        assert route["fast_mode"] is True
+        assert "Max" in chats._model_route_notice_label(route)
+        eff = chats.settings_with_model_route({"provider": "anthropic", "model": model}, route)
+        assert chats._resolve_model_kwargs(None, eff)["fast_mode"] is True
+        std = estimate_usd(model, prompt_tokens=100_000, completion_tokens=10_000)
+        fast = estimate_usd(model, prompt_tokens=100_000, completion_tokens=10_000, fast_mode=True)
+        assert fast == std * 2
+
+    # Custom proxy under auto, Bedrock, Fable 5.1, or Sonnet must reject fast_mode.
+    proxy = chats.settings_with_model_route(
+        {"provider": "auto", "model": "claude-fable-5-2", "base_url": "https://proxy.example.test/v1"},
+        {"provider": "auto", "model": "claude-fable-5-2", "fast_mode": True},
+    )
+    assert chats._resolve_model_kwargs(None, proxy)["fast_mode"] is False
+    assert chats.normalize_model_route({"provider": "bedrock", "model": "claude-fable-5-2", "fast_mode": True})["fast_mode"] is False
+    assert chats.normalize_model_route({"provider": "anthropic", "model": "claude-fable-5-1", "fast_mode": True})["fast_mode"] is False
+    assert chats.normalize_model_route({"provider": "anthropic", "model": "claude-sonnet-5-5", "fast_mode": True})["fast_mode"] is False
+
+
 def test_route_overlay_preserves_global_proxy_configuration():
     defaults = {
         "provider": "openai",
