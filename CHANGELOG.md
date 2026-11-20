@@ -1,6 +1,6 @@
-# Unreleased
+# 1.0.217
 
-- Fix a blank Settings or Diagnostics view in remote VS Code sessions by bundling the panels with the webview entry.
+- Fix a blank Settings or Diagnostics view in remote VS Code sessions by bundling the panels with the webview entry (PR #43).
 
 # 1.0.216
 
