@@ -1,157 +1,94 @@
 # ClawAgents for VS Code
 
-Coding agent for VS Code and Cursor. Chat from the right **Secondary Side Bar** (same strip as Claude Code / Codex), edit your workspace with permission controls, and use OpenAI, Anthropic, Gemini, or local OpenAI-compatible models (including Ollama).
+Autonomous coding agent extension for **VS Code** and **Cursor**, powered by [`clawagents`](https://github.com/x1jiang/clawagents_py). Chat from the right **Secondary Side Bar**, edit files with explicit permission controls and checkpoints, optimize workspace harnesses, and run models from OpenAI, Anthropic, Google Gemini, AWS Bedrock / Mantle, xAI, Meta, or local servers (Ollama / vLLM / Gemma Q4).
+
+- **Python Runtime:** [x1jiang/clawagents_py](https://github.com/x1jiang/clawagents_py) · [PyPI](https://pypi.org/project/clawagents/)
+- **Releases & VSIX:** [GitHub Releases](https://github.com/x1jiang/clawagents-vscode/releases) · [Changelog](CHANGELOG.md)
+- **Desktop App:** [x1jiang/clawagents-desktop](https://github.com/x1jiang/clawagents-desktop)
 
 ## Requirements
 
-- VS Code **1.85+** (or Cursor)
-- Python **3.10+** on this host (managed mode discovers compatible PATH and standard installations, or set `clawagents.pythonPath`)
-- **clawagents ≥ 6.20.89** (Gemini 4 Argon & Claude 5.5 / Haiku 5.5 support, GPT-6 Responses bridge)
-- A provider credential for at least one model provider
+- **VS Code 1.85+** (or Cursor)
+- **Python 3.10+** on the extension host (managed mode auto-discovers compatible installations, or configure `clawagents.pythonPath`)
+- **`clawagents >= 6.20.102, < 7`** (auto-installed into the managed virtualenv on first start)
+- At least one model provider credential (or a local model server)
 
-## Quick start
+## Quick Start
 
-1. Install this extension from the Marketplace (or a `.vsix`).
-2. Open a folder / Remote SSH window. On first start the extension **auto-installs** Python packages into its isolated managed environment (or `clawagents.pythonPath` when using the `custom` runtime):
+1. **Install** from the Visual Studio Marketplace or from a `.vsix` download (`code --install-extension clawagents-*.vsix`).
+2. **Open a workspace** (local or Remote SSH). On first start, the extension installs its Python dependencies into an isolated managed virtualenv:
+   ```text
+   clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.102,<7  fastapi  uvicorn  pydantic  python-dotenv
+   ```
+   You can trigger this manually anytime via **Command Palette → ClawAgents: Install/Upgrade Python Dependencies**.
+3. **Add credentials** via **Command Palette → ClawAgents: Set API Key** (OpenAI, Anthropic, Gemini, Bedrock, xAI, Tavily) or a workspace `.env` file.
+4. **Open Chat** from the right **Secondary Side Bar** or press `⌘⇧'` (`Ctrl+Shift+'`).
+5. Start in **Plan** or **Ask** mode until you are comfortable enabling workspace **Auto-approve** toggles.
 
-```text
-clawagents[gemini,anthropic,bedrock,mcp,media,accurate-tokens,pty]>=6.20.89,<7  fastapi  uvicorn  pydantic  python-dotenv
-```
+## Key Features
 
-You can also run **ClawAgents: Install/Upgrade Python Dependencies** from the Command Palette.
+- **Multi-provider model support:** OpenAI (GPT-6 / GPT-6.1 Terra & Sol, Fast mode), Anthropic (Claude Fable 5.2, Claude 5.5, direct Fast mode), Google Gemini (Gemini 4 Hydrogen / Carbon / Argon, Gemini 3.8 Flash), AWS Bedrock & Mantle, xAI Grok, Meta / Muse, and local Ollama / Gemma Q4.
+- **Concurrent chats & side chat:** Independent conversation tabs, per-thread model/effort routing, and draggable side-chat overlays that keep running across tab switches.
+- **Permissions & checkpoints:** `ask` · `read-only` · `auto` · `full access` modes, opt-in per-category auto-approve, pre-write checkpoints with diff/restore, and serialized workspace writes across concurrent chats.
+- **Harness² Workspace Optimizer:** Built-in Propose–Probe–Compose optimizer in **Settings → Skills** with unified diff preview, backed-up apply, conflict detection, and one-click rollback.
+- **Telemetry & Info card:** Live token/cost/cache accounting, inference efficiency metrics (`Avg TTFT`, `Decode speed`), skill usage rankings, and deduplicated per-conversation human time estimates.
+- **Extensible tooling:** Workspace/user skills (`SKILL.md`), MCP servers (`.clawagents/mcp.json`), optional Context Mode, Graphify knowledge graphs, Playwright browser tools, and long-horizon **Goal** autopilot.
 
-3. Add credentials: Command Palette → **ClawAgents: Set API Key** (OpenAI / Anthropic / Gemini / Bedrock / Tavily), or put keys in a workspace `.env`. For browser tools: Settings → **Enable browser tools**, then `pip install 'clawagents[browser]' && playwright install chromium`.
-
-4. Open the right **Secondary Side Bar** and click **ClawAgents**, or run **ClawAgents: Open Chat** (`⌘⇧'` / `Ctrl+Shift+'`).
-
-5. Start in **Plan** / ask mode if you want confirmations. Turn on **Auto-approve → Edit / Execute** only when you trust the agent for that workspace.
-
-## Features
-
-- Multi-turn chats with history, regenerate, live token usage, and independent concurrent conversation tabs
-- Cache read/write accounting and an **efficiency** tooltip for fused follow-ups, artifact token estimates, diagnostic reduction, and compaction counts when reported by the Python core; completed-run usage survives chat reloads
-- Per-conversation side chat overlays that keep running across thread switches and support minimize, maximize, and drag resizing
-- Permission modes: ask · read-only · auto · full access
-- Opt-in auto-approve for edits, shell, and web
-- Clickable assistant file references and end-of-turn **Edited N files** summaries; click a file to open it
-- Checkpoints before writes (diff / restore); workspace-mutating turns stay serialised across concurrent chats
-- Skills folders, MCP servers (`.clawagents/mcp.json`), optional Context Mode
-- Local sidecar process (loopback only) with a per-session bearer token
-
-## Settings
+## Core Settings
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `clawagents.pythonRuntime` | `managed` | Isolated extension-owned virtualenv with compatible host-local Python discovery; choose `custom` for an exact environment |
-| `clawagents.pythonPath` | `python3` | Preferred managed base (host discovery if missing/incompatible), or the exact custom interpreter |
-| `clawagents.model` | *(empty)* | Model override |
+| `clawagents.pythonRuntime` | `managed` | Isolated extension-owned virtualenv (`managed`) or an exact interpreter (`custom`) |
+| `clawagents.pythonPath` | `python3` | Preferred base Python (`managed`) or exact interpreter path (`custom`) |
 | `clawagents.provider` | `auto` | Preferred provider for credential selection |
+| `clawagents.model` | *(empty)* | Default model override |
 | `clawagents.defaultMode` | `auto` | Default permission mode |
-| `clawagents.includeContextByDefault` | `false` | Start with Context checked (editor snippets; not shown in history; secrets omitted) |
-| `clawagents.contextMode` | `true` | Context Mode tools (`context-mode` ≥1.0.169) |
-| `clawagents.graphify` | `false` | Graphify knowledge-graph MCP (`graphifyy[mcp]` ≥0.9.20 + workspace graph) |
-| `clawagents.ensureCompanions` | `false` | Offer companion installs on sidecar start after confirmation (`context-mode`, `rtk`, `graphifyy`); default is probe-only |
-| `clawagents.syncPathPythons` | `false` | Offer (with confirmation) to upgrade other PATH Pythons below the floor; default manages only `pythonPath` |
-| `clawagents.advanced.enableContextObservatory` | `false` | Record context events during agent runs to `.clawagents/context-observatory/<chat_id>/`; import `session.json` into the standalone Observatory UI for analysis. |
+| `clawagents.includeContextByDefault` | `false` | Attach active editor context by default (secrets omitted) |
+| `clawagents.contextMode` | `true` | Enable Context Mode tools (`context-mode` ≥ 1.0.169) |
+| `clawagents.graphify` | `false` | Enable Graphify knowledge-graph MCP (`graphifyy[mcp]` ≥ 0.9.20) |
+| `clawagents.ensureCompanions` | `false` | Prompt to install/upgrade companion CLIs on startup (default: probe-only) |
+| `clawagents.syncPathPythons` | `false` | Offer to upgrade other `PATH` Pythons below the required floor |
+| `clawagents.advanced.enableContextObservatory` | `false` | Record run context events to `.clawagents/context-observatory/<chat_id>/` |
 
-Sidebar **Settings** cover provider, model, base URL, skills, MCP, Graphify, browser tools, and telemetry (stored under `.clawagents/` in the workspace). Use composer **Goal** for long-horizon autopilot (`start_goal` / verifier).
+Sidebar **Settings** also configure API keys, base URLs, skills folders, MCP servers, Graphify, browser tools, and workspace telemetry. In multi-root workspaces, run **ClawAgents: Select Workspace Root** to scope sidecar state to a single folder.
 
-For multi-root workspaces, run **ClawAgents: Select Workspace Root**. Switching roots restarts the sidecar and opens a fresh chat so paths, `.env`, history, and trust approvals stay scoped to one folder.
+## Optional Companions
 
-## Companions (lockstep with clawagents ≥6.20.32)
-
-| Companion | Floor | Auto-ensure | Manual |
+| Companion | Floor | Install / Upgrade | Notes |
 | --- | --- | --- | --- |
-| [Context Mode](https://github.com/mksglu/context-mode) | **1.0.169** | `npm install -g context-mode@latest` | Node ≥ 22.5 |
-| [RTK](https://www.rtk-ai.app/) | **0.43.0** | `brew install rtk` / `brew upgrade rtk` | PATH `rtk` |
-| [Graphify](https://github.com/Graphify-Labs/graphify) | **0.9.20** (`graphifyy`) | `pip install 'graphifyy[mcp]'` into sidecar Python | Extract via **ClawAgents: Graphify — Extract Workspace** |
-| Caveman | vendored skill | composer toggle | JuliusBrussee/caveman |
+| [Context Mode](https://github.com/mksglu/context-mode) | **1.0.169** | `npm install -g context-mode@latest` | Requires Node ≥ 22.5 |
+| [RTK](https://www.rtk-ai.app/) | **0.43.0** | `brew install rtk` / `brew upgrade rtk` | On `PATH` |
+| [Graphify](https://github.com/Graphify-Labs/graphify) | **0.9.20** | `pip install 'graphifyy[mcp]'` | Run **ClawAgents: Graphify — Extract Workspace** |
+| Browser Tools | — | `pip install 'clawagents[browser]' && playwright install chromium` | Enable in Settings → Browser tools |
 
-Command Palette → **ClawAgents: Ensure Companions** forces a re-probe/upgrade.
+Run **Command Palette → ClawAgents: Ensure Companions** to re-probe or upgrade companions.
 
-## Security
+## Security Model
 
-- Sidecar binds to loopback only; every HTTP endpoint requires a session bearer token
-- Provider credentials stay in VS Code SecretStorage or your workspace env file — not written to disk by the extension
-- Workspace `.env` only forwards API key / model vars (no `PYTHONPATH` / base-URL redirection)
-- File restore, snapshots, and chat IDs are confined under the workspace / `.clawagents/`
-- Mutating tools are gated by mode + Auto-approve toggles (defaults: **off**)
-- MCP is **off** by default; workspace `mcp.json` requires an explicit trust toggle; only allowlisted launchers (`npx`, `uvx`, …) and loopback URLs
-- `full_access` mode requires Settings → Allow Full Access; stale permission IDs cannot create wildcard grants
+- **Loopback-only sidecar:** Binds strictly to `127.0.0.1` with a per-session bearer token on every endpoint.
+- **Credential isolation:** API keys live in VS Code SecretStorage or workspace `.env` (forwarding only key/model vars—no `PYTHONPATH` or base-URL hijacking).
+- **Workspace confinement:** File restore, checkpoints, and chat state stay confined under the active workspace / `.clawagents/`.
+- **Explicit trust gates:** Auto-approve toggles, MCP (`mcp.json`), and `full_access` mode are off by default and require explicit opt-in.
 
-## Troubleshooting
+## Documentation
 
-- **Python interpreter not found** — managed mode discovers compatible Python on the extension host when the configured base is missing or incompatible. If none is available, run **ClawAgents: Select Python Interpreter**, or click **Select Python** in the error banner. Enter `python3` or a full path to Python 3.10+. This validates Python, saves User/Remote settings, and retries startup when idle. In an SSH window, use a remote interpreter; a local Mac path such as `/usr/local/bin/python3` may not exist there. Custom mode never substitutes another environment.
-- **Missing Python packages** — click **Install Python dependencies** in the error banner. This installs into the actual sidecar runtime, including its isolated environment in managed mode.
-- **Sidecar health check timed out** — open *ClawAgents Sidecar* output. Usually missing pip packages or a bad `clawagents.pythonPath`.
-- **provider_auth** — invalid credential. Precedence: SecretStorage → workspace `.env` → shell. Path-like values (`python.exe`) are ignored/purged so a real key elsewhere can win.
-- **Gemini** — set the Gemini/Google provider credential; `pip install 'clawagents[gemini]'`.
-- **MCP** — enable MCP in Settings, optionally trust workspace config, and check `~/.clawagents/mcp.json`.
-- **Restart** — Command Palette → **ClawAgents: Restart Sidecar**.
+| Guide | Topic |
+| --- | --- |
+| [docs/README.md](docs/README.md) | Documentation index |
+| [docs/python-setup.md](docs/python-setup.md) | Python interpreter selection, Remote SSH, no-folder storage, Meta/Glimmer preset, and troubleshooting |
+| [docs/local-gemma.md](docs/local-gemma.md) | Optional managed local Gemma Q4 setup, hardware matrix, and controls |
+| [docs/model-catalog-audit.md](docs/model-catalog-audit.md) | Verified model IDs, context windows, thinking/Fast-mode rules, and pricing sources |
+| [docs/human-time.md](docs/human-time.md) | Per-conversation human time estimation rules and limits |
+| [CHANGELOG.md](CHANGELOG.md) | Extension release history |
+| [PUBLISH.md](PUBLISH.md) | Packaging, GitHub releases, and Marketplace / Open VSX publishing |
 
-## Optional tools
-
-- Companions above (optional; enable `clawagents.ensureCompanions` or run **Ensure Companions**)
-- Browser tools: Playwright Chromium via clawagents browser extras
-
-## Source & development
-
-- Source: [github.com/x1jiang/clawagents-vscode](https://github.com/x1jiang/clawagents-vscode)
-- Runtime: [github.com/x1jiang/clawagents_py](https://github.com/x1jiang/clawagents_py)
+## Development
 
 ```bash
 npm run install:all
-npm run build
-# F5 → Run ClawAgents Extension
-npm run package
+npm run build      # typecheck + webview bundle + extension bundle
+npm test           # Node unit tests
+npm run package    # builds clawagents-<version>.vsix
 ```
 
-### Selecting your Python interpreter
-
-In VS Code **User settings** (or **Remote settings** in an SSH window), set:
-
-```json
-{
-  "clawagents.pythonRuntime": "custom",
-  "clawagents.pythonPath": "/absolute/path/to/venv/bin/python"
-}
-```
-
-On Windows, use the full `venv\\Scripts\\python.exe` path in JSON. The interpreter must exist on the host running the extension. Workspace absolute paths are ignored for security; VS Code's separate Python extension selection does not configure ClawAgents.
-
-Custom mode runs the sidecar with this exact interpreter and prepends its directory to PATH for local agent commands. A missing or incompatible custom interpreter is an error. Managed mode creates a separate extension-owned venv using the preferred base Python; if unavailable, it discovers Python 3.10+ on the current host, excluding workspace executables and relative PATH entries. Discovery does not modify your settings or other Python installations. The chosen base, version, and host appear in **ClawAgents Sidecar** output. Settings changes restart the sidecar when active tasks finish; **ClawAgents: Restart Sidecar** applies them immediately.
-
-In **Output → ClawAgents Sidecar**, `Starting sidecar:` shows the interpreter and `PATH pin:` shows its command directory. To verify a local agent command, run `python -c "import sys; print(sys.executable); print(sys.prefix)"`. Explicit absolute commands and separately configured containers/remote execution environments retain their own interpreter selection.
-
-### Meta / Muse-Glimmer-30B
-
-Choose **Meta (Glimmer)** in ClawAgents Settings. The preset selects
-`Muse-Glimmer-30B` at `http://129.106.31.72:7790/v1`; approve the displayed
-endpoint with **Trust and save**. Meta also appears in the per-chat provider
-selector. Chat Completions is selected automatically, with no inherited OpenAI
-reasoning settings or API key. The default backend does not require a key.
-
-Optional workspace `.env` or shell overrides (restart the sidecar after changes):
-
-```dotenv
-glimmer_30B_backend=http://129.106.31.72:7790/v1
-glimmer_30B_model=Muse-Glimmer-30B
-# META_API_KEY=your-dedicated-key  # only for authenticated deployments
-```
-
-Select Meta again to apply changed environment defaults to Settings. Custom
-remote URLs still require approval. This integration requires a Python core
-containing the `meta` provider profile; during monorepo development, select the
-interpreter where the sibling `clawagents_py` is installed in editable mode.
-
-## Optional local Gemma
-
-Choose **Gemma Agentic Q4 (coordinator)** in Settings, then **Set up / start locally**. Installation happens only after you request local setup and confirm the download; remote Gemma endpoints remain supported. The helper selects available GPU acceleration or CPU, downloads the Q4 model when missing, starts its server and configures the endpoint. See [local setup, hardware support and controls](LOCAL_GEMMA.md).
-
-Model catalog refresh: [verified models, provider constraints and source audit](MODEL_CATALOG_AUDIT.md) (Python 6.20.83 / extension 1.0.194).
-
-### Chat storage without an open folder
-
-No-folder windows keep chat history and settings in `no-folder-workspace` under the extension's host-local global storage. This location survives VSIX upgrades. On the first start, retained `.clawagents` state from older ClawAgents installation folders is copied without overwriting current files; the original files remain intact. Open workspace folders continue to use their own `.clawagents` state.
-
-GPT-6.1 Sol agent tools require the Responses API. Selecting that model corrects an inherited Chat Completions setting to Responses. OpenAI also supports tool-free Chat Completions for this model.
+Press **F5** in VS Code to launch an Extension Development Host.

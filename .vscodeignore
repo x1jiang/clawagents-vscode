@@ -24,6 +24,7 @@ test/**
 .gitignore
 *.vsix
 PUBLISH.md
+docs/**
 **/.git/**
 **/__pycache__/**
 

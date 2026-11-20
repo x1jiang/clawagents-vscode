@@ -1,132 +1,58 @@
-Publisher **`clawagents`** · version **1.0.217**
+# Publishing ClawAgents for VS Code
 
-- Release target: extension **1.0.217**. Fix a blank Settings or Diagnostics view in remote VS Code sessions by bundling `SkillUsageRanking`, `HarnessOptimizerPanel`, and `DiagnosticsPanel` directly into the webview entry instead of lazy-loading them as separate dynamic chunks (PR #43); Python floor remains **6.20.102**. Release 1.0.216: Add Gemini 4 Hydrogen (`gemini-4-hydrogen`, `xhigh` effort, `1,048,576` context, `$1.50/$7.50/$0.075` rates; alongside Gemini 4 Carbon & Argon), Claude Fable 5.2 (`claude-fable-5-2` across direct Anthropic, Bedrock `us.`/`global.`, and Mantle `anthropic.`) plus gated `claude-mythos-5-2` context/pricing catalogs (`$8/$40/$0.20/$10`), direct Anthropic Fast mode (`speed="fast"` for `claude-fable-5-2`, `claude-mythos-5-2`, `claude-opus-5-5`, `claude-opus-5`), `Max` effort labels in thread route notices, and updated `google-genai` Python `>=3.11` markers in `SIDECAR_PIP_PACKAGES_GITHUB_FALLBACK`; require Python clawagents **6.20.102**. Release 1.0.215: Harden Harness² workspace optimization (multi-task suites, `k=3`, Experience Library reflection, automatic staging cleanup/run pruning, 409 live-disk conflict detection with Force apply, and exclusive write-gate serialization), offload blocking sidecar endpoints/compaction off the event loop, add O(1) `snapshots_meta` indexing, harden sidecar `/health` retries and `status` event mapping, remove `react-dom/server` and lazy-load settings/diagnostics webview panels, and require Python clawagents **6.20.101**. Release 1.0.214: Add one-click Harness² backup rollback (`POST /skills/harness/rollback` + **Revert to backup** UI action), live stage progress chips, content-hashed `markdown-vendor` webview chunk splitting with deterministic `index.js` resolution, and optional CI `publish-marketplace` workflow on `v*` tags; require Python clawagents **6.20.100** (`rollback_workspace_harness`, multi-task benchmark suites, CLI `--adapt` / `--rollback-harness`, and concurrent control-plane schema isolation). Release 1.0.213: Add the Harness² Workspace Optimizer panel in Settings → Skills (Propose–Probe–Compose with blind selection, adaptive probe deduplication, unified diff preview, and backed-up workspace apply) and surface inference efficiency metrics (`Avg TTFT`, warmup-aware `Decode speed`, `Slowest call`) in Info; require Python clawagents **6.20.99** (Harness² `ClawAgentSubstrate`, `.adapt_complete` runmarks, `HarnessLedger`, `EvidenceWorkspace`, schema-constrained control-plane decoding, step-quantized compaction watermarks, and `DeferredStepFlush`). Release 1.0.212: Add Gemini 4 Carbon (`gemini-4-carbon`) picker/pricing support plus hosted Muse and gated GPT-6 Cyber pricing/context catalogs, non-blocking sidecar dependency/interpreter probes, ~30 Hz token batching, `assistant_reset` stream retry handling, per-chat attachment scoping, sidecar HTTP/parent-watchdog lifecycle hardening, and pinned `vsce --no-dependencies` packaging; require Python clawagents **6.20.98** (security hardening across channels/gateway/CodeAct/Seatbelt/bash, Gemini 4 Carbon + hosted Muse + GPT-6 Cyber, Harness² Propose–Probe–Compose loop, provider module split, non-blocking `exec` pipes, cancellable lane commands, and HTTPS `web_fetch` fix). Release 1.0.211: Include deliberate thread reading in human time estimates (PR #42) and require Python clawagents **6.20.97** (Harness² recursive harness tree validation, `.clawagents/skill-triggers.md` autotrigger enforcement, causal `<edits>` attribution, per-domain `ExperienceLibrary`, `[INV]` / `[DOM]` / `[WORKSPACE_FACT]` reflection separation, and blind anonymized deliverable selection). Release 1.0.210: Per-conversation human time tracking in Info (message preparation and file viewing with 60-second resumable gaps, deduplicated overlap, and a workspace toggle in Settings → Advanced) from PR #41; Python floor **6.20.96**. Release 1.0.209: Per-conversation execution timing and redesigned floating Info session card, opt-in workspace-local skill usage rankings, startup model-setting restoration (defaulting OpenAI to GPT-6.1 Terra with Medium effort), and Markdown/Windows file-link fixes from PR #40; Python floor **6.20.96**. Release 1.0.208: GPT-6.1 Terra support and transcript/clipboard copy bridge; Python floor **6.20.96**. Release 1.0.201: Python floor **6.20.89** adds Gemini 4 Argon (`gemini-4-argon`) and Claude 5.5 (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`) across direct APIs, native AWS Bedrock (`us.`, `eu.`, `apac.`, `au.`, `jp.`, `global.`), and Bedrock Mantle, and keeps `MIN_CLAWAGENTS_VERSION` in lockstep with `python/requirements.txt`. Release 1.0.200: Python floor **6.20.88** bridges GPT-6 Astra / GPT-6.1 Sol tool calls to Responses. Release 1.0.199: GPT-6 Astra joins GPT-6.1 Sol as Responses-only for tool use; Python floor **6.20.87**. Release 1.0.198: Per-conversation OpenAI Fast mode, path-drop fixes and composer refinements; Python floor **6.20.86** adds `fast_mode` and the SQL-only grounding fix. Release 1.0.197: Stable no-folder chat storage, legacy history recovery, stale-chat handling, and GPT-6.1 Sol Responses tool compatibility. Release 1.0.196 added compatible host-local Python discovery for managed runtimes, validated interpreter recovery actions, and GPT-6.1 Sol settings/thread listings. Python floor **6.20.85** provides the matching reasoning and Responses tool-routing support.
-- Marketplace/OpenVSX publication requires separately configured publishing credentials. GitHub release assets provide the installable VSIX.
+- **Publisher:** `clawagents`
+- **Current version:** `1.0.217`
+- **Required Python core:** `clawagents>=6.20.102,<7`
+- **Release history:** See [CHANGELOG.md](CHANGELOG.md) and [GitHub Releases](https://github.com/x1jiang/clawagents-vscode/releases).
 
-- [x] clawagents **6.20.80** on PyPI + GitHub: edit follow-ups, paged artifact recall, run-scoped todos, diagnostic receipts, efficiency counters. Published download hashes verified.
-- [x] GitHub release `v1.0.191` + VSIX: efficiency telemetry, corrected prompt/cache usage, changed-file tracking after failed verification; Python floor **6.20.80**. Published VSIX hash verified.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+## Release Checklist
 
-- [x] GitHub release `v1.0.190` + VSIX: rich composer, Plan-only plan tools, per-conversation side chat and add-on context, background job controls, hidden side-chat prompt badges, composer restore fixes; Python floor **6.20.79**.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+1. Ensure `clawagents_py` is published on PyPI if `MIN_CLAWAGENTS_VERSION` in `src/pythonDeps.ts` / `python/requirements.txt` is bumped.
+2. Bump the version consistently across:
+   - `package.json` (`"version"`)
+   - `package-lock.json` (root + `packages[""]`)
+   - `CHANGELOG.md` (promote `# Unreleased` to `# X.Y.Z`)
+   - `PUBLISH.md` (header above)
+3. Build, test, and package:
+   ```bash
+   npm run install:all
+   npm run build
+   npm test
+   cd python && PYTHONPATH=. python3 -m pytest -q && cd ..
+   npm run package   # produces clawagents-X.Y.Z.vsix
+   ```
+4. Commit, tag, and push:
+   ```bash
+   git add package.json package-lock.json CHANGELOG.md PUBLISH.md
+   git commit -m "Release vX.Y.Z: <summary>"
+   git tag -a vX.Y.Z -m "vX.Y.Z: <summary>"
+   git push origin main
+   git push origin vX.Y.Z
+   ```
+5. Publish the GitHub Release with the `.vsix` attached:
+   ```bash
+   gh release create vX.Y.Z --repo x1jiang/clawagents-vscode \
+     --title "vX.Y.Z" \
+     --notes "<release highlights>" \
+     ./clawagents-X.Y.Z.vsix
+   ```
 
-- [x] GitHub release `v1.0.189` + VSIX: conversation workflows, diagnostics, Threads hover, Settings Bedrock/duplicate-control fixes; Python floor **6.20.79**.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+## Marketplace & Open VSX Publishing
 
+Visual Studio Marketplace and Open VSX publishing require separate PAT credentials (`VSCE_PAT` / `OVSX_PAT`), which are never committed to the repository.
 
-- [x] clawagents **6.20.77** on PyPI + GitHub: reasoning-channel capture, output-limit recovery, non-fatal read repeats, workspace profile trust gate.
-- [x] GitHub release `v1.0.186` + VSIX: local Gemma readiness-probe hang fix, served Muse/Gemma aliases kept; Python floor **6.20.77**.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+### Automated (GitHub Actions)
 
-- [x] GitHub release `v1.0.185` + VSIX: explicit local Gemma setup, verified downloads, GPU/CPU selection and managed server lifecycle; Python floor **6.20.76**.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+Configure `VSCE_PAT` (and optionally `OVSX_PAT`) under **Repository Settings → Secrets and variables → Actions**. Pushing any `v*` tag triggers the `publish-marketplace` job in [.github/workflows/ci.yml](.github/workflows/ci.yml) after the `release-gate` job passes.
 
-- [x] clawagents **6.20.76** on PyPI + GitHub: require a configured Meta endpoint.
-- [x] GitHub release `v1.0.184` + VSIX; Python floor **6.20.76**.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+### Manual CLI
 
-- [x] clawagents **6.20.75** on PyPI + GitHub: Gemma Q4 bounded coordination, retry recovery and verified completion.
-- [x] GitHub release `v1.0.183` + VSIX; Python floor **6.20.75**.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+```bash
+# Visual Studio Marketplace
+VSCE_PAT='...' npx --yes @vscode/vsce@4.1.0 publish --packagePath ./clawagents-X.Y.Z.vsix
 
-- [x] clawagents **6.20.74** on PyPI + GitHub: Meta Glimmer integration and harder coding benchmarks.
-- [x] GitHub release `v1.0.182` + VSIX; Python floor **6.20.74**.
-      · Marketplace/OpenVSX unavailable: no publishing credentials configured.
+# Open VSX Registry (Cursor / VSCodium)
+OVSX_PAT='...' npx --yes ovsx@0.10.1 publish ./clawagents-X.Y.Z.vsix -p "$OVSX_PAT"
+```
 
-- [x] clawagents **6.20.73** on GitHub + PyPI (honor configured Python in local commands; preserve symlinked virtualenvs)
-- [x] GitHub release `v1.0.181` + VSIX (explicit Python selection, no silent fallback, deferred settings restart; floor **6.20.73**)
-      · Marketplace/OpenVSX pending: no publishing credentials configured.
-- [x] clawagents **6.20.71** on GitHub + PyPI (correct Claude/Gemini context windows, Mantle profiles, Bedrock id normalization, Python 3.14)
-- [x] GitHub release `v1.0.180` + VSIX (context meter uses real per-model windows + Bedrock/Mantle id normalization; floor clawagents **6.20.71**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.70** on GitHub + PyPI (configurable base prompt, append mechanisms, pinned context at the prompt tail)
-- [x] GitHub release `v1.0.179` + VSIX (always-on context rides at the prompt tail; floor clawagents **6.20.70**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.69** on GitHub + PyPI (browser accessibility tools & hermetic test hardening)
-- [x] GitHub release `v1.0.178` + VSIX (browser accessibility tools; floor clawagents **6.20.69**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] GitHub release `v1.0.177` + VSIX (Gemini 3.8 Flash in the Google model picker)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] GitHub release `v1.0.176` + VSIX (UI polish + edited-files summary after plain Done)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] GitHub release `v1.0.175` + VSIX (per-thread model routing, conversation-control polish)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] GitHub release `v1.0.174` + VSIX (concurrent threads, side chat, path lookup, edited-file summary; close-slot race)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] GitHub release `v1.0.173` + VSIX (skill-impact ledger; floor clawagents **6.20.68**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.68** on GitHub + PyPI (skill-workshop reject diffs persist)
-- [x] GitHub release `v1.0.172` + VSIX (execute-grounded counts; floor clawagents **6.20.67**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.67** on GitHub + PyPI (counts must appear in this-turn execute output)
-- [x] GitHub release `v1.0.171` + VSIX (reject invented SQL tables; floor clawagents **6.20.66**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.66** on GitHub + PyPI (no-tool count tables are not a final answer)
-- [x] GitHub release `v1.0.170` + VSIX (Gemini CJK skill catalog; floor clawagents **6.20.65**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.65** on GitHub + PyPI (keep skill catalog on Chinese follow-ups)
-- [x] GitHub release `v1.0.169` + VSIX (fork restore + composer draft persist after failed nav / last-tab close)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.64** on GitHub + PyPI (scrub Gemini contents to SDK allow-list)
-- [x] GitHub release `v1.0.168` + VSIX (Gemini request-shape hardening; floor clawagents **6.20.64**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.63** on GitHub + PyPI (drop illegal FunctionResponse.call_id; stop mislabeling extra_forbidden as auth)
-- [x] GitHub release `v1.0.167` + VSIX (Gemini tool-turn validation fix; floor clawagents **6.20.63**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] clawagents **6.20.62** on GitHub + PyPI (Gemini 3.7: flatten no longer dumps commands as the answer; empty/command-only turns continue)
-- [x] GitHub release `v1.0.166` + VSIX (Gemini 3.7 tool-loop answers; floor clawagents **6.20.62**)
-      · Marketplace/OpenVSX publish still pending — you upload the VSIX.
-- [x] GitHub release `v1.0.165` + VSIX (sidecar floor probe uses dist-info, not stale `__version__`)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] clawagents **6.20.61** on GitHub + PyPI (`__version__` follows installed metadata)
-- [x] GitHub release `v1.0.164` + VSIX (Gemini 3.7 Flash catalog + preferred Gemini default; floor clawagents **6.20.60**)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] clawagents **6.20.60** on GitHub + PyPI (Gemini 3.7 Flash profile + default)
-- [x] GitHub release `v1.0.163` + VSIX (fix conversation routing races: interactive prompts, New-chat hijack, late restore, ghost tabs)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] GitHub release `v1.0.162` + VSIX (conversation tabs, thread-routed streaming, history bulk actions)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] GitHub release `v1.0.161` + VSIX (fix MCP discovery deadlock that hung every chat on "Running…"; split `ctx_execute` out of the Run-commands auto-approve; floor clawagents **6.20.59**)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] clawagents **6.20.59** on GitHub + PyPI (MCP tool discovery no longer deadlocks `create_claw_agent`)
-- [x] GitHub release `v1.0.159` + VSIX (prevent Settings refresh `/providers?probe=1` timeout from aborting active chats)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] GitHub release `v1.0.158` + VSIX (Context Mode MCP 2.x ClientSession timeout compatibility; floor clawagents **6.20.58**)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally; PyPI upload of 6.20.58 is also pending its API token.
-- [x] GitHub release `v1.0.157` + VSIX (default model: keyed providers, prefer OpenAI Terra)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] GitHub release `v1.0.156` + VSIX (MCP SSE timedelta timeout TypeError; floor clawagents **6.20.57**)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] clawagents **6.20.57** on GitHub + PyPI (coerce MCP SSE/HTTP timeouts to float seconds)
-- [x] GitHub release `v1.0.155` + VSIX (OpenAI key → default GPT-5.6 Terra)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] clawagents **6.20.56** on GitHub + PyPI (OpenAI default model → gpt-5.6-terra)
-- [x] GitHub release `v1.0.154` + VSIX (Debian ensurepip fallback; clinical samples → runtime-only approval, default off)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] GitHub release `v1.0.153` + VSIX (Mantle missing-key error instead of opaque 401)
-- [x] clawagents **6.20.55** on GitHub + PyPI (Mantle bearer auth hardening, anthropic>=0.95.0)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` / `OVSX_PAT` available locally.
-- [x] GitHub release `v1.0.152` + VSIX (clinical sample rows setting, default on)
-- [x] GitHub release `v1.0.151` + VSIX (require clawagents **6.20.54**)
-- [x] clawagents **6.20.54** on GitHub + PyPI (resumable sessions, skill discovery, O(1) session writes)
-- [x] GitHub release `v1.0.150` + VSIX (GPT-5.6 Terra is the default OpenAI model)
-- [x] GitHub release `v1.0.149` + VSIX (inline plan feedback, pinned context, background job visibility)
-- [x] clawagents **6.20.53** on GitHub + PyPI (human-gated tool timeouts, job labels/ownership, pinned context)
-      · Marketplace/OpenVSX publish still pending — no `VSCE_PAT` available locally.
-- [x] GitHub release `v1.0.148` + VSIX (reject chat/error paste as API key)
-- [x] GitHub release `v1.0.147` + VSIX (reject path-as-API-key / auto-purge python.exe paste)
-- [x] GitHub release `v1.0.146` + VSIX (deferred tools + changelog fix + rewind branch summary)
-- [x] clawagents **6.20.52** on GitHub + PyPI (deferred tools, background notices, guardrails)
-- [x] GitHub release `v1.0.145` + VSIX (xAI Grok catalog + docs.x.ai pricing)
-- [x] clawagents **6.20.51** on GitHub + PyPI (Grok API provider + profiles)
-- [x] GitHub release `v1.0.144` + VSIX (Graphify choose/merge + external-path trust)
-- [x] GitHub release `v1.0.143` + VSIX (Graphify Settings Build graph → sidecar Python)
-- [x] clawagents **6.20.50** on GitHub + PyPI (Gemini 3.6 Flash / 3.5 Flash-Lite profiles)
-- [x] GitHub release `v1.0.142` + VSIX
-- [x] clawagents **6.20.49** on GitHub (OpenAI cache_write metering)
-- [x] GitHub release `v1.0.141` + VSIX
-- [x] clawagents **6.20.48** on GitHub + PyPI
-- [x] GitHub release `v1.0.140` + VSIX
-- [x] clawagents **6.20.47** on GitHub + PyPI
-- [x] GitHub release `v1.0.139` + VSIX (Context Observatory sidecar)
-- [x] GitHub release `v1.0.138` + VSIX
+Alternatively, upload `clawagents-X.Y.Z.vsix` directly in the Visual Studio Marketplace Publisher Management portal.
