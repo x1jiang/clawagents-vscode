@@ -26,6 +26,8 @@ function withCache(input: number, output: number, cached?: number, write?: numbe
 }
 
 const PRICES: Record<string, Rates> = {
+  "gpt-6.2-sol": withCache(2, 10, 0.10, 2.50),
+  "gpt-6.2-astra": withCache(8, 40, 0.40, 10),
   "gpt-6-astra": withCache(10, 50, 1, 12.5),
   // https://developers.openai.com/api/docs/models/gpt-6.1-sol
   "gpt-6.1-sol": withCache(2, 10, 0.1, 2.5),
@@ -261,7 +263,7 @@ function lookup(
   if ((key.startsWith("gpt-6-astra") || key.startsWith("grok-4.6")) && raw.toLowerCase().replace(/^bedrock\//, "").startsWith("global.")) {
     return lookupTable(PRICES, key);
   }
-  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6\.1-(sol|terra)|gpt-6-(sol|luna)|claude-fable-5|claude-mythos-5|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(key)) return null;
+  if ((forceBedrock || looksBedrock(raw)) && /^(gpt-6\.2-(astra|sol)|gpt-6\.1-(sol|terra)|gpt-6-(sol|luna)|claude-fable-5|claude-mythos-5|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(key)) return null;
   const primary = forceBedrock || looksBedrock(raw) ? BEDROCK_PRICES : PRICES;
   const hit = lookupTable(primary, key);
   if (hit) return hit;
@@ -283,7 +285,8 @@ const LONG_CONTEXT_MULT_MUSE_EMBER = 3;
 
 function isGpt56Family(modelId: string): boolean {
   const key = normalizeModelId(modelId);
-  return key.startsWith("gpt-5.6") || key.startsWith("gpt-6.1-sol") || key.startsWith("gpt-6.1-terra") || /^gpt-6-(astra|sol|luna|cyber)/.test(key) || key.startsWith("gpt-5.5")
+  return /^gpt-6(?:\.2-(astra|sol)|\.1-(sol|terra)|-(astra|sol|luna|cyber))/.test(key)
+    || key.startsWith("gpt-5.6") || key.startsWith("gpt-5.5")
     || (key.startsWith("gpt-5.4") && !/^gpt-5\.4-(mini|nano)/.test(key));
 }
 

@@ -71,6 +71,8 @@ export const FALLBACK_PROVIDERS: Provider[] = [
     name: "OpenAI",
     models: [
       { id: PREFERRED_OPENAI_MODEL, label: "GPT-6.1 Terra" },
+      { id: "gpt-6.2-sol", label: "GPT-6.2 Sol" },
+      { id: "gpt-6.2-astra", label: "GPT-6.2 Astra" },
       { id: "gpt-6-astra", label: "GPT-6 Astra" },
       { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
       { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
@@ -493,7 +495,7 @@ export function modelsForKeys(
 }
 
 export function pickPreferredModel(providers: Provider[]) {
-  // Prefer a provider that actually has a key. OpenAI / Terra wins when present.
+  // Prefer OpenAI when a key is available.
   const openai = providers.find((p) => p.id === "openai" && providerIsAvailable(p));
   if (openai) {
     return {

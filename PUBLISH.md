@@ -7,6 +7,8 @@
 
 ## Release Checklist
 
+The release that adds GPT-6.2 Sol and Astra requires the matching Python core changes. Publish that core first, then raise the Python minimum before packaging the extension. For local development, use a custom interpreter with the updated `clawagents_py` checkout installed in editable mode.
+
 1. Ensure `clawagents_py` is published on PyPI if `MIN_CLAWAGENTS_VERSION` in `src/pythonDeps.ts` / `python/requirements.txt` is bumped.
 2. Bump the version consistently across:
    - `package.json` (`"version"`)

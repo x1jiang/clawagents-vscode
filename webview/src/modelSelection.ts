@@ -8,7 +8,7 @@ export function modelSupportsFastMode(model: string, provider: string, baseUrl: 
   if (
     ["auto", "openai", "profile:openai"].includes(prov)
     && (!endpoint || endpoint === "https://api.openai.com/v1")
-    && /^(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-(?:sol|terra)|gpt-5\.6(?:-(?:sol|terra|luna))?)(?:-\d{4}-\d{2}-\d{2})?$/.test(m)
+    && /^(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-(?:sol|terra)|gpt-6\.2-(?:astra|sol)|gpt-5\.6(?:-(?:sol|terra|luna))?)(?:-\d{4}-\d{2}-\d{2})?$/.test(m)
   ) {
     return true;
   }
@@ -22,10 +22,10 @@ export function modelSupportsFastMode(model: string, provider: string, baseUrl: 
   return false;
 }
 
-/** ClawAgents chats call tools, which GPT-6.1 Sol, Terra, and GPT-6 Astra support only in Responses. */
+/** ClawAgents chats need Responses for these models' tool calls. */
 export function modelRequiresResponsesForTools(model: string, provider: string): boolean {
   return ["auto", "openai", "profile:openai"].includes(provider.trim().toLowerCase())
-    && /^gpt-6(?:\.1-(?:sol|terra)|-astra)(?:$|[-_])/.test(model.trim().toLowerCase());
+    && /^gpt-6(?:\.2-(?:astra|sol)|\.1-(?:sol|terra)|-astra)(?:$|[-_])/.test(model.trim().toLowerCase());
 }
 
 export function compatibleWireApiForModel(model: string, provider: string, wireApi: string): string {
@@ -36,7 +36,7 @@ export function compatibleWireApiForModel(model: string, provider: string, wireA
 /** Model-specific reasoning controls shared by Settings and the thread picker. */
 export function modelSupportsEffort(model: string): boolean {
   const m = normalizeModelId(model);
-  return /^(grok|gemini-3\.8|gemini-4|claude-(?:fable|mythos)-5|claude-opus-5|claude-sonnet-5|claude-haiku-5|o1|o3|o4|gpt-5\.5|gpt-5\.6|gpt-6\.1-(?:sol|terra)|gpt-6-(astra|sol|luna))/.test(m)
+  return /^(grok|gemini-3\.8|gemini-4|claude-(?:fable|mythos)-5|claude-opus-5|claude-sonnet-5|claude-haiku-5|o1|o3|o4|gpt-5\.5|gpt-5\.6|gpt-6\.2-(?:astra|sol)|gpt-6\.1-(?:sol|terra)|gpt-6-(astra|sol|luna))/.test(m)
     || m === "gpt-5" || m.startsWith("gpt-5-");
 }
 
@@ -54,7 +54,7 @@ export function effortOptionsForModel(model: string) {
   if (m.startsWith("gemini-3.8") || m.startsWith("gemini-4")) return EFFORT_OPTIONS.filter(o => ["low", "medium", "high"].includes(o.value));
   if (m.startsWith("grok")) return EFFORT_OPTIONS.filter(o => o.value !== "none");
   if (/^(gpt-6-(sol|luna)|gpt-6\.1-terra)/.test(m)) return [...EFFORT_OPTIONS, { value: "max", label: "Max" }];
-  if (/^(gpt-6\.1-(?:sol|terra)|gpt-6-astra|claude-(?:fable|mythos)-5|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(m)) {
+  if (/^(gpt-6\.2-(?:astra|sol)|gpt-6\.1-sol|gpt-6-astra|claude-(?:fable|mythos)-5|claude-opus-5|claude-sonnet-5|claude-haiku-5)/.test(m)) {
     return [...EFFORT_OPTIONS.filter((option) => option.value !== "none"),
       { value: "max", label: "Max" }];
   }

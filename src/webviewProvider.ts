@@ -1107,6 +1107,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
         }
       }
 
+      // The sidecar initializes the new chat route from saved workspace settings.
+      await timed("saveSettings", () => this.saveSettingsChain).catch(() => undefined);
+      if (this.chatId !== startedOn) return;
       const chat = await timed("createChat", () => this.gateway.createChat(this.mode));
       if (this.chatId !== startedOn) {
         // User selected another conversation while createChat was in flight.
@@ -2733,18 +2736,11 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
             "aws_region",
             "wire_api",
           ] as const;
-          const routeKeys = [
-            "provider",
-            "model",
-            "bedrock_mode",
-            "wire_api",
-            "reasoning_effort",
-          ] as const;
           const changed = (keys: readonly string[]) =>
             keys.some((k) => JSON.stringify(previous[k] ?? null) !== JSON.stringify(settings[k] ?? null));
           const skillsChanged = changed(skillKeys);
           const catalogChanged = changed(catalogKeys);
-          const routeChanged = changed(routeKeys);
+          const providerChanged = changed(["provider", "bedrock_mode"]);
           // Provider/endpoint changes refresh the local catalog only. A live
           // probe belongs to an explicit check; it cannot be allowed to time
           // out and disrupt an in-flight chat.
@@ -2756,7 +2752,9 @@ export class ClawAgentsWebviewProvider implements vscode.WebviewViewProvider {
               /* catalog refresh is best-effort */
             }
           }
-          if (routeChanged && this.chatId) {
+          // A model, effort, or API default belongs to future chats. Keep
+          // active-route sync for explicit workspace provider switches.
+          if (providerChanged && this.chatId) {
             const activeChatId = this.chatId;
             const rawBedrockMode = String(settings.bedrock_mode || "iam");
             const bedrockMode: "iam" | "mantle" | "bag" =

@@ -1,3 +1,8 @@
+# Unreleased
+
+- Add GPT-6.2 Sol and GPT-6.2 Astra for the direct OpenAI API, with Responses tool routing, reasoning controls, Fast mode, 1.05M context, and cost estimates.
+- Keep GPT-6.1 Terra as the initial OpenAI default. Changing the workspace's default model applies to new chats and preserves the current chat's model.
+
 # 1.0.217
 
 - Fix a blank Settings or Diagnostics view in remote VS Code sessions by bundling the panels with the webview entry (PR #43).

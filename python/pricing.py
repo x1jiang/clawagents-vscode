@@ -28,6 +28,8 @@ PriceTuple = tuple[float, float, float, float]
 
 # Direct API list prices (Anthropic / OpenAI / Gemini / xAI)
 PRICES: dict[str, PriceTuple] = {
+    "gpt-6.2-sol": (2.0, 10.0, 0.10, 2.50),
+    "gpt-6.2-astra": (8.0, 40.0, 0.40, 10.0),
     "gpt-6-astra": (10.0, 50.0, 1.0, 12.5),
     # https://developers.openai.com/api/docs/models/gpt-6.1-sol
     "gpt-6.1-sol": (2.0, 10.0, 0.1, 2.5),
@@ -307,6 +309,7 @@ def price_for_full(
     use_bedrock = force_bedrock or _looks_bedrock(raw)
     if use_bedrock and key.startswith(
         (
+            "gpt-6.2-sol", "gpt-6.2-astra",
             "gpt-6.1-sol", "gpt-6.1-terra",
             "gpt-6-sol",
             "gpt-6-luna",
@@ -347,7 +350,8 @@ _LONG_CONTEXT_MULT_MUSE_EMBER = 3.0
 
 def _is_gpt56_family(model_id: str) -> bool:
     key = normalize_model_id(model_id)
-    return (key.startswith(("gpt-5.6", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6-cyber", "gpt-5.5"))
+    return (key.startswith(("gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra",
+                            "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6-cyber", "gpt-5.6", "gpt-5.5"))
             or (key.startswith("gpt-5.4") and not key.startswith(("gpt-5.4-mini", "gpt-5.4-nano"))))
 
 

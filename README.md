@@ -27,7 +27,7 @@ Autonomous coding agent extension for **VS Code** and **Cursor**, powered by [`c
 
 ## Key Features
 
-- **Multi-provider model support:** OpenAI (GPT-6 / GPT-6.1 Terra & Sol, Fast mode), Anthropic (Claude Fable 5.2, Claude 5.5, direct Fast mode), Google Gemini (Gemini 4 Hydrogen / Carbon / Argon, Gemini 3.8 Flash), AWS Bedrock & Mantle, xAI Grok, Meta / Muse, and local Ollama / Gemma Q4.
+- **Multi-provider model support:** OpenAI (GPT-6.2 Sol and Astra, GPT-6.1 Terra, Fast mode), Anthropic (Claude Fable 5.2, Claude 5.5, direct Fast mode), Google Gemini (Gemini 4 Hydrogen / Carbon / Argon, Gemini 3.8 Flash), AWS Bedrock & Mantle, xAI Grok, Meta / Muse, and local Ollama / Gemma Q4.
 - **Concurrent chats & side chat:** Independent conversation tabs, per-thread model/effort routing, and draggable side-chat overlays that keep running across tab switches.
 - **Permissions & checkpoints:** `ask` · `read-only` · `auto` · `full access` modes, opt-in per-category auto-approve, pre-write checkpoints with diff/restore, and serialized workspace writes across concurrent chats.
 - **Harness² Workspace Optimizer:** Built-in Propose–Probe–Compose optimizer in **Settings → Skills** with unified diff preview, backed-up apply, conflict detection, and one-click rollback.

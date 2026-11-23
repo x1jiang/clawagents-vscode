@@ -103,9 +103,9 @@ _CATALOG: list[dict[str, Any]] = [
         "name": "OpenAI",
         "env_key": "OPENAI_API_KEY",
         "models": [
-            # Keep Terra first: it is the
-            # default for OpenAI, and the picker reads top-down.
             {"id": "gpt-6.1-terra", "label": "GPT-6.1 Terra"},
+            {"id": "gpt-6.2-sol", "label": "GPT-6.2 Sol"},
+            {"id": "gpt-6.2-astra", "label": "GPT-6.2 Astra"},
             {"id": "gpt-6-astra", "label": "GPT-6 Astra"},
             {"id": "gpt-6.1-sol", "label": "GPT-6.1 Sol"},
             {"id": "gpt-5.6-terra", "label": "GPT-5.6 Terra"},

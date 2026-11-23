@@ -309,9 +309,12 @@ def _title_from_text(text: str) -> str:
 
 
 def _requires_responses_for_tools(model: str, provider: str) -> bool:
-    """Direct OpenAI GPT-6.1 Sol / GPT-6 Astra coding chats use tools via Responses."""
+    """Route OpenAI coding chats for models that require Responses for tools."""
     return provider.strip().lower() in {"auto", "openai", "profile:openai"} and bool(
-        re.fullmatch(r"gpt-6(?:\.1-(?:sol|terra)|-astra)(?:[-_].*)?", model.strip().lower())
+        re.fullmatch(
+            r"gpt-6(?:\.2-(?:astra|sol)|\.1-(?:sol|terra)|-astra)(?:[-_].*)?",
+            model.strip().lower(),
+        )
     )
 
 
@@ -322,7 +325,7 @@ def _supports_direct_openai_fast(model: str, provider: str, base_url: str = "") 
     if endpoint and endpoint != "https://api.openai.com/v1":
         return False
     return bool(re.fullmatch(
-        r"(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-(?:sol|terra)|gpt-5\.6(?:-(?:sol|terra|luna))?)"
+        r"(?:gpt-6-(?:astra|sol|luna)|gpt-6\.1-(?:sol|terra)|gpt-6\.2-(?:astra|sol)|gpt-5\.6(?:-(?:sol|terra|luna))?)"
         r"(?:-\d{4}-\d{2}-\d{2})?", model.strip().lower(),
     ))
 

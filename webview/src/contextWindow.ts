@@ -25,6 +25,8 @@ const WINDOWS: Array<[string, number]> = [
   ["muse-wonder-", 1_048_576],
   ["muse-ember-", 1_000_000],
   // OpenAI
+  ["gpt-6.2-sol", 1_050_000],
+  ["gpt-6.2-astra", 1_050_000],
   ["gpt-6-astra", 1_050_000],
   ["gpt-6-cyber", 1_050_000],
   ["gpt-6.1-sol", 1_050_000],

@@ -5091,8 +5091,9 @@ export function App() {
     }
     nextSettings.wire_api = compatibleWireApiForModel(next,
       String(nextSettings.provider || "auto"), String(nextSettings.wire_api || "auto"));
-    // Immediate save for the next turn; skip the debounced effect to avoid a double write.
+    // Save the workspace default immediately so the next chat can pick it up.
     skipSettingsAutosave.current = true;
+    settingsRef.current = nextSettings;
     setSettings(nextSettings);
     const patch = normalizeSettingsForSave(nextSettings);
     inflightSettingsKey.current = settingsSaveKey(nextSettings);
@@ -7508,7 +7509,7 @@ export function App() {
                     </select>
                     <span className="settings-hint">
                       {modelRequiresResponsesForTools(String(settings.model || ""), settingsProvider)
-                        ? `${/astra/i.test(String(settings.model || "")) ? "GPT-6 Astra" : /terra/i.test(String(settings.model || "")) ? "GPT-6.1 Terra" : "GPT-6.1 Sol"} requires Responses for ClawAgents tool use. Chat Completions is supported without tools.`
+                        ? "This model requires Responses for ClawAgents tool use. Chat Completions is supported without tools."
                         : String(settings.bedrock_mode || "") === "mantle"
                         ? "Mantle chooses the route by model; Claude Haiku/Sonnet use Mantle Messages."
                         : "Use Responses for Codex or gateways that do not expose chat/completions."}
